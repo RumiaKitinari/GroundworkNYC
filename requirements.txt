@@ -1,0 +1,5 @@
+# 1.) DOWNLOAD: pip install -r requirements.txt
+# 2.) Run .venv: .venv\Scripts\activate
+
+django
+django_mongodb_backend
