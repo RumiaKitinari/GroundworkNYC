@@ -7,3 +7,6 @@ django_mongodb_backend
 # TROUBLESHOOTING
 djangotoolbox
 django_mongodb_engine
+
+# TEMPORARY
+osmium
