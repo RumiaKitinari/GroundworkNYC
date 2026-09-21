@@ -1,4 +1,14 @@
-/new-york-260920.osm.pbf
-/__pycache__/
-/.venv/
+# Python
+.venv/
+__pycache__/
+*.py[cod]
 /cache/
+
+# Local Django/MongoDB state
+.env
+*.log
+
+# Raw and generated geospatial data (keep small examples under data/samples/)
+*.osm.pbf
+data/raw/
+data/output/
