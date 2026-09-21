@@ -10,3 +10,7 @@ django_mongodb_engine
 
 # TEMPORARY
 osmium
+osmnx
+folium
+matplotlib
+mapclassify
