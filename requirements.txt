@@ -3,6 +3,7 @@
 
 django
 django_mongodb_backend
+osmium==4.3.1
 
 # TROUBLESHOOTING
 djangotoolbox
