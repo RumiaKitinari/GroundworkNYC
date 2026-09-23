@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Groundwork NYC Command Center</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260922-reactive-overview" />
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="rail">
+        <div class="brand">
+          <div class="brand__mark">GW</div>
+          <div>
+            <div class="brand__name">Groundwork</div>
+            <div class="brand__meta">NYC Location Intelligence</div>
+          </div>
+        </div>
+
+        <div class="rail-brief">
+          <div class="rail-brief__label">Active Concept</div>
+          <strong id="activeConceptName">Modern Bistro</strong>
+          <p id="activeConceptMeta">Lease · Sit-Down Restaurant · Open To NYC</p>
+        </div>
+
+        <div class="control-group">
+          <div class="control-title">Search Brief</div>
+          <label class="control-field">
+            <span>Restaurant Idea</span>
+            <input id="conceptInput" type="text" value="Modern Bistro" maxlength="48" />
+          </label>
+          <label class="control-field">
+            <span>Search Type</span>
+            <select id="dealSelect">
+              <option value="lease">Lease A Space</option>
+              <option value="purchase">Purchase Property</option>
+              <option value="either">Lease Or Purchase</option>
+            </select>
+          </label>
+          <label class="control-field">
+            <span>Format</span>
+            <select id="profileSelect">
+              <option value="restaurant">Sit-Down Restaurant</option>
+              <option value="bar">Bar Or Gastropub</option>
+              <option value="coffee">Coffee And Breakfast</option>
+            </select>
+          </label>
+          <div class="range-control">
+            <div>
+              <span>Rent Ceiling</span>
+              <strong id="rentLabel">$18k</strong>
+            </div>
+            <input id="rentRange" type="range" min="8" max="35" value="18" />
+          </div>
+          <button class="brief-edit" id="briefEditButton" type="button">Edit Search Brief</button>
+        </div>
+
+        <div class="control-group">
+          <div class="control-title">Signal Layers</div>
+          <div class="layer-stack">
+            <button class="layer is-active" data-layer="opportunity" type="button">
+              <i class="tone opportunity"></i> Opportunity
+            </button>
+            <button class="layer" data-layer="activity" type="button">
+              <i class="tone activity"></i> Pedestrian Activity
+            </button>
+            <button class="layer" data-layer="whitespace" type="button">
+              <i class="tone whitespace"></i> Market Gap
+            </button>
+            <button class="layer" data-layer="cost" type="button">
+              <i class="tone cost"></i> Commercial Fit
+            </button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-title">Decision Flow</div>
+          <div class="contract-list">
+            <div><span>Explore</span><strong>Market Map</strong></div>
+            <div><span>Prioritize</span><strong>Shortlist</strong></div>
+            <div><span>Underwrite</span><strong>Financials</strong></div>
+            <div><span>Share</span><strong>Reports</strong></div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace is-discover">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">Command Center</div>
+            <h1 id="workspaceTitle">Modern Bistro Location Search</h1>
+          </div>
+          <div class="top-actions">
+            <label class="search">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"></circle>
+                <path d="m16 16 4 4"></path>
+              </svg>
+              <input id="searchInput" type="search" placeholder="Search Manhattan, Queens, Brooklyn..." />
+            </label>
+            <button class="icon-button" id="refreshButton" title="Refresh Dashboard Data" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                <path d="M3 4v5h5"></path>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <nav class="feature-tabs" aria-label="Groundwork Feature Modules">
+          <button class="feature-tab is-active" data-view="discover" type="button">
+            <strong>Market Map</strong>
+            <span>Rankings</span>
+          </button>
+          <button class="feature-tab" data-view="scorecard" type="button">
+            <strong>Scorecard</strong>
+            <span>Drivers</span>
+          </button>
+          <button class="feature-tab" data-view="shortlist" type="button">
+            <strong>Shortlist</strong>
+            <span>Top Markets</span>
+          </button>
+          <button class="feature-tab" data-view="compare" type="button">
+            <strong>Compare</strong>
+            <span>Tradeoffs</span>
+          </button>
+          <button class="feature-tab" data-view="lease" type="button">
+            <strong>Properties</strong>
+            <span>Leads</span>
+          </button>
+          <button class="feature-tab" data-view="whitespace" type="button">
+            <strong>Market Gaps</strong>
+            <span>White Space</span>
+          </button>
+          <button class="feature-tab" data-view="finance" type="button">
+            <strong>Financials</strong>
+            <span>Model</span>
+          </button>
+          <button class="feature-tab" data-view="now" type="button">
+            <strong>Timing</strong>
+            <span>Dayparts</span>
+          </button>
+          <button class="feature-tab" data-view="reports" type="button">
+            <strong>Reports</strong>
+            <span>Exports</span>
+          </button>
+          <button class="feature-tab" data-view="layers" type="button">
+            <strong>Sources</strong>
+            <span>Coverage</span>
+          </button>
+        </nav>
+
+        <section class="metric-ribbon" id="metricRibbon" aria-label="Dashboard Metrics"></section>
+
+        <section class="command-grid">
+          <div class="map-module">
+            <div class="module-head">
+              <div>
+                <h2 id="mapModeTitle">NYC Score Surface</h2>
+              </div>
+              <div class="module-tabs">
+                <button class="mini-tab is-active" data-layer="opportunity" type="button">Score</button>
+                <button class="mini-tab" data-layer="activity" type="button">Demand</button>
+                <button class="mini-tab" data-layer="cost" type="button">Property</button>
+              </div>
+            </div>
+            <div class="map-stage" id="mapStage">
+              <img class="tile tile-a" src="https://tile.openstreetmap.org/11/603/769.png" alt="" />
+              <img class="tile tile-b" src="https://tile.openstreetmap.org/11/604/769.png" alt="" />
+              <img class="tile tile-c" src="https://tile.openstreetmap.org/11/603/770.png" alt="" />
+              <img class="tile tile-d" src="https://tile.openstreetmap.org/11/604/770.png" alt="" />
+              <div class="scanline"></div>
+              <div class="map-label label-manhattan">Manhattan</div>
+              <div class="map-label label-brooklyn">Brooklyn</div>
+              <div class="map-label label-queens">Queens</div>
+              <div class="map-label label-bronx">Bronx</div>
+              <div class="map-label label-staten">Staten Island</div>
+              <div class="hex-layer" id="hexLayer"></div>
+            </div>
+          </div>
+
+          <aside class="intel-module">
+            <div class="selected-header">
+              <div>
+                <div class="eyebrow">Selected Location</div>
+                <h2 id="selectedName">Loading</h2>
+                <p id="selectedMeta"></p>
+              </div>
+              <div class="score-orb" id="scoreOrb"><span id="selectedScore">--</span></div>
+            </div>
+            <div class="bar-stack" id="barStack"></div>
+            <div class="driver-list">
+              <div class="module-title-row">
+                <h3>Score Drivers</h3>
+                <span id="confidencePill">--</span>
+              </div>
+              <ul id="driverList"></ul>
+            </div>
+          </aside>
+        </section>
+
+        <section class="lower-grid">
+          <div class="table-module" data-panel="discover">
+            <div class="module-head compact">
+              <div>
+                <h2>Opportunity Ranking</h2>
+              </div>
+            </div>
+            <div class="data-table" id="rankingTable"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="scorecard">
+            <div class="module-head compact">
+              <div>
+                <h2>Location Scorecard</h2>
+              </div>
+            </div>
+            <div class="scorecard-board" id="scorecardBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="shortlist">
+            <div class="module-head compact">
+              <div>
+                <h2>Shortlist</h2>
+              </div>
+            </div>
+            <div class="shortlist-board" id="shortlistBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="compare">
+            <div class="module-head compact">
+              <div>
+                <h2>Compare Locations</h2>
+              </div>
+            </div>
+            <div class="compare-board" id="compareBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="lease">
+            <div class="module-head compact">
+              <div>
+                <h2>Property Matches</h2>
+              </div>
+            </div>
+            <div class="lease-board" id="leaseBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="whitespace">
+            <div class="module-head compact">
+              <div>
+                <h2>Market Gaps</h2>
+              </div>
+            </div>
+            <div class="gap-board" id="gapBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="finance">
+            <div class="module-head compact">
+              <div>
+                <h2>Financials</h2>
+              </div>
+            </div>
+            <div class="finance-board" id="financeBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="now">
+            <div class="module-head compact">
+              <div>
+                <h2>Timing</h2>
+              </div>
+            </div>
+            <div class="now-board" id="nowBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="reports">
+            <div class="module-head compact">
+              <div>
+                <h2>Reports</h2>
+              </div>
+            </div>
+            <div class="report-board" id="reportBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="layers">
+            <div class="module-head compact">
+              <div>
+                <h2>Sources</h2>
+              </div>
+            </div>
+            <div class="layer-board" id="layerBoard"></div>
+          </div>
+
+          <aside class="feed-module">
+            <div class="module-head compact">
+              <div>
+                <h2>Market Signals</h2>
+              </div>
+            </div>
+            <div class="feed-list" id="feedList"></div>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <section class="brief-overlay is-open" id="briefOverlay" aria-labelledby="briefTitle" aria-modal="true" role="dialog">
+      <div class="brief-dialog">
+        <div class="brief-photo" aria-hidden="true"></div>
+        <form class="brief-form" id="briefForm">
+          <div>
+            <div class="eyebrow">Concept Studio</div>
+            <h2 id="briefTitle">Define The Restaurant</h2>
+          </div>
+          <div class="brief-fields">
+            <label class="control-field wide">
+              <span>Restaurant Idea</span>
+              <input id="briefConceptName" type="text" value="Modern Bistro" maxlength="48" />
+            </label>
+            <label class="control-field">
+              <span>Transaction</span>
+              <select id="briefDeal">
+                <option value="lease">Lease A Space</option>
+                <option value="purchase">Purchase A Property</option>
+                <option value="either">Show Lease And Purchase</option>
+              </select>
+            </label>
+            <label class="control-field">
+              <span>Format</span>
+              <select id="briefProfile">
+                <option value="restaurant">Sit-Down Restaurant</option>
+                <option value="bar">Bar Or Gastropub</option>
+                <option value="coffee">Coffee And Breakfast</option>
+              </select>
+            </label>
+            <label class="control-field">
+              <span>Monthly Budget Target</span>
+              <input id="briefBudget" type="number" min="8000" max="35000" step="1000" value="18000" />
+            </label>
+            <label class="control-field">
+              <span>Preferred Area</span>
+              <select id="briefArea">
+                <option value="">Open To NYC</option>
+                <option value="Brooklyn">Brooklyn</option>
+                <option value="Queens">Queens</option>
+                <option value="Manhattan">Manhattan</option>
+                <option value="Bronx">Bronx</option>
+              </select>
+            </label>
+          </div>
+          <div class="brief-actions">
+            <button class="quiet-action" id="briefSkip" type="button">Open Dashboard</button>
+            <button class="primary-action" type="submit">Run Location Search</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260922-reactive-overview"></script>
+  </body>
+</html>
