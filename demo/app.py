@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import csv
+import sqlite3
 from copy import deepcopy
+from contextlib import closing
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
-from flask import Flask, jsonify, render_template, request
+from urllib.parse import urlparse
+from flask import Flask, Response, jsonify, render_template, request
+from scoring import CUISINES, Concept, ScreeningModel, MODEL_VERSION, resolve_concept
+from evaluation import evaluation_status, run_evaluation
+from osm_network import WalkingNetwork
+from financials import operating_scenario
 
 
 app = Flask(__name__)
@@ -15,6 +23,9 @@ MASTER_TRACT_PATH = INTEGRATED_DATA_DIR / "master_tract_features.csv"
 STOREFRONTS_PATH = INTEGRATED_DATA_DIR / "entities" / "current_storefronts.csv"
 SOURCE_CATALOG_PATH = INTEGRATED_DATA_DIR / "source_catalog.csv"
 FEATURE_READINESS_PATH = INTEGRATED_DATA_DIR / "feature_readiness.csv"
+OSM_TILES_PATH = PROJECT_ROOT / "data" / "osm" / "NewYork-mbtiles-shortbread" / "NewYork.mbtiles"
+OSM_WALK_NETWORK_PATH = PROJECT_ROOT / "data" / "osm" / "nyc_walk_network.sqlite"
+LISTINGS_PATH = PROJECT_ROOT / "data" / "listings" / "verified_properties.csv"
 
 
 PROFILE_WEIGHTS = {
@@ -43,13 +54,20 @@ PROFILE_WEIGHTS = {
         "economics": 0.16,
     },
 }
+PROFILE_WEIGHTS.update({
+    "fast_casual": {"demand": .28, "customer_fit": .16, "access": .22, "market_gap": .13, "competition_balance": .13, "economics": .08},
+    "counter_service": {"demand": .29, "customer_fit": .14, "access": .24, "market_gap": .11, "competition_balance": .14, "economics": .08},
+    "bakery": {"demand": .25, "customer_fit": .17, "access": .23, "market_gap": .12, "competition_balance": .11, "economics": .12},
+    "fine_dining": {"demand": .17, "customer_fit": .29, "access": .12, "market_gap": .20, "competition_balance": .09, "economics": .13},
+    "takeout_delivery": {"demand": .25, "customer_fit": .21, "access": .08, "market_gap": .15, "competition_balance": .18, "economics": .13},
+})
 
 
 SCORING_SIGNALS = {
     "demand": {"label": "Demand Strength", "coverage": 82, "description": "Resident, Worker, Foot Traffic, And Time-Of-Day Demand Indicators."},
     "customer_fit": {"label": "Customer Fit", "coverage": 88, "description": "Alignment Between The Selected Concept And The Local Customer Base."},
     "access": {"label": "Access And Visibility", "coverage": 79, "description": "Walkability, Transit Access, And Street-Level Movement Indicators."},
-    "market_gap": {"label": "Market Gap", "coverage": 69, "description": "Underserved Food And Beverage Categories Near The Selected Trade Area."},
+    "market_gap": {"label": "Cuisine Opportunity", "coverage": 69, "description": "Demand-Supported Cuisine Gaps Or Established Dining Ecosystems."},
     "competition_balance": {"label": "Competition Balance", "coverage": 66, "description": "Direct Competitive Pressure Compared With Local Demand."},
     "economics": {"label": "Commercial Suitability", "coverage": 58, "description": "Retail Area, Mixed-Use Parcels, Storefront Records, And Walkability."},
 }
@@ -177,6 +195,11 @@ def read_csv(path: Path) -> list[dict]:
         return list(csv.DictReader(handle))
 
 
+def public_url(value: str | None) -> str | None:
+    parsed = urlparse(value or "")
+    return value if parsed.scheme == "https" and parsed.netloc else None
+
+
 def percentile_maps(rows: list[dict], columns: list[str]) -> dict[str, dict[str, int]]:
     maps: dict[str, dict[str, int]] = {}
     for column in columns:
@@ -204,6 +227,7 @@ def weighted(parts: list[tuple[float, float]]) -> int:
 @lru_cache(maxsize=1)
 def integrated_package() -> dict:
     master_rows = read_csv(MASTER_TRACT_PATH)
+    restaurants = read_csv(INTEGRATED_DATA_DIR / "entities" / "current_restaurants.csv")
     eligible_rows = [
         row
         for row in master_rows
@@ -253,8 +277,12 @@ def integrated_package() -> dict:
         "tracts": eligible_rows,
         "percentiles": percentile_maps(eligible_rows, numeric_columns),
         "storefronts": read_csv(STOREFRONTS_PATH),
+        "restaurants": restaurants,
+        "subway_stations": read_csv(INTEGRATED_DATA_DIR / "entities" / "subway_stations_weekly_activity.csv"),
+        "walking_network": WalkingNetwork(OSM_WALK_NETWORK_PATH),
         "sources": read_csv(SOURCE_CATALOG_PATH),
         "readiness": read_csv(FEATURE_READINESS_PATH),
+        "screening_model": ScreeningModel(eligible_rows, restaurants),
         "bounds": {
             "lat_min": min(latitudes),
             "lat_max": max(latitudes),
@@ -267,7 +295,7 @@ def integrated_package() -> dict:
 def concept_competition_column(profile: str) -> str:
     if profile == "bar":
         return "bar_nightlife_competitor_count"
-    if profile == "coffee":
+    if profile in {"coffee", "bakery"}:
         return "cafe_competitor_count"
     return "restaurant_competitor_count"
 
@@ -285,93 +313,19 @@ def map_position(row: dict, bounds: dict) -> tuple[int, int]:
     return clamp(x, 4, 92), clamp(y, 4, 92)
 
 
-def real_location_from_tract(row: dict, profile: str, rent_cap: int, package: dict) -> dict:
+def real_location_from_tract(row: dict, profile: str, rent_cap: int, package: dict, concept: Concept) -> dict:
     maps = package["percentiles"]
     competitor_column = concept_competition_column(profile)
-    taxi_activity = as_float(row.get("pickups_may_2026")) + as_float(row.get("dropoffs_may_2026"))
-    row_with_taxi = dict(row, taxi_total_activity=taxi_activity)
-    if "taxi_total_activity" not in maps:
-        taxi_values = sorted({as_float(r.get("pickups_may_2026")) + as_float(r.get("dropoffs_may_2026")) for r in package["tracts"]})
-        maps["taxi_total_activity"] = {str(value): round(i / max(1, len(taxi_values) - 1) * 100) for i, value in enumerate(taxi_values)}
-
-    demand = weighted(
-        [
-            (pct(row, maps, "population_density_per_sq_mile"), 0.18),
-            (pct(row, maps, "job_density_per_sq_mile"), 0.18),
-            (pct(row, maps, "nearest_subway_weekly_ridership"), 0.13),
-            (pct(row_with_taxi, maps, "taxi_total_activity"), 0.13),
-            (pct(row, maps, "nearest_pedestrian_count_site_latest_pedestrian_count_total"), 0.13),
-            (pct(row, maps, "permitted_event_hours_2026"), 0.10),
-            (pct(row, maps, "citibike_departures_august_2026"), 0.08),
-            (pct(row, maps, "jobs_accommodation_food_services"), 0.07),
-        ]
-    )
-    customer_fit = weighted(
-        [
-            (pct(row, maps, "median_household_income_2024"), 0.28),
-            (pct(row, maps, "population_density_per_sq_mile"), 0.24),
-            (pct(row, maps, "jobs_per_1000_residents"), 0.18),
-            (pct(row, maps, "jobs_accommodation_food_services"), 0.16),
-            (pct(row, maps, "permitted_event_count_2026"), 0.14),
-        ]
-    )
-    access = weighted(
-        [
-            (pct(row, maps, "national_walkability_index"), 0.26),
-            (pct(row, maps, "smart_location_score"), 0.22),
-            (pct(row, maps, "nearest_subway_distance_miles", inverse=True), 0.18),
-            (pct(row, maps, "nearest_citibike_distance_miles", inverse=True), 0.12),
-            (pct(row, maps, "nearest_pedestrian_count_site_distance_miles", inverse=True), 0.10),
-            (pct(row, maps, "subway_weekly_ridership"), 0.12),
-        ]
-    )
-    competition_pressure = pct(row, maps, competitor_column)
-    competition_balance = clamp(100 - competition_pressure * 0.68 + demand * 0.24 + pct(row, maps, "grade_a_share") * 0.08)
-    market_gap = clamp(demand * 0.55 + (100 - competition_pressure) * 0.30 + pct(row, maps, "reported_vacant_storefront_count") * 0.15)
-    commercial = weighted(
-        [
-            (pct(row, maps, "retail_area_sqft"), 0.24),
-            (pct(row, maps, "mixed_use_parcel_count"), 0.18),
-            (pct(row, maps, "reported_storefront_property_count"), 0.18),
-            (pct(row, maps, "reported_vacant_storefront_count"), 0.18),
-            (pct(row, maps, "national_walkability_index"), 0.12),
-            (pct(row, maps, "vacant_land_parcel_count"), 0.10),
-        ]
-    )
-    components = {
-        "demand": demand,
-        "customer_fit": customer_fit,
-        "access": access,
-        "market_gap": market_gap,
-        "competition_balance": competition_balance,
-        "economics": commercial,
-    }
     weights = PROFILE_WEIGHTS.get(profile, PROFILE_WEIGHTS["restaurant"])
-    raw_score = sum(components[key] * weight for key, weight in weights.items())
-    confidence_score = weighted(
-        [
-            (100 if row.get("population_2024") else 0, 0.15),
-            (100 if row.get("median_household_income_2024") else 0, 0.12),
-            (100 if row.get("food_nightlife_poi_count") not in ("", None) else 0, 0.14),
-            (100 if row.get("nearest_subway_distance_miles") else 0, 0.12),
-            (100 if row.get("nearest_pedestrian_count_site_latest_pedestrian_count_total") else 0, 0.10),
-            (100 if row.get("pickups_may_2026") else 0, 0.12),
-            (100 if row.get("retail_area_sqft") else 0, 0.12),
-            (100 if row.get("reported_storefront_property_count") not in ("", None) else 0, 0.13),
-        ]
-    )
-    risk_flags = []
-    if competition_pressure >= 84:
-        risk_flags.append("High Direct Competition")
-    if as_float(row.get("nearest_pedestrian_count_site_distance_miles"), 99) > 1.5:
-        risk_flags.append("Pedestrian Count Site Is Distant")
-    if not row.get("reported_vacant_storefront_count") or as_float(row.get("reported_vacant_storefront_count")) == 0:
-        risk_flags.append("No Reported Vacant Storefronts In Source")
-    if as_float(row.get("median_household_income_2024")) == 0:
-        risk_flags.append("Income Estimate Missing")
-    if not risk_flags:
-        risk_flags.append("No Major Data-Supported Risk Flag")
-
+    assessment = package["screening_model"].evaluate(row, concept, weights, profile)
+    components = {key: item["score"] for key, item in assessment["components"].items()}
+    demand = components["demand"]
+    customer_fit = components["customer_fit"]
+    market_gap = components["market_gap"]
+    commercial = components["economics"]
+    competition_pressure = pct(row, maps, competitor_column)
+    confidence_score = assessment["confidence_score"]
+    risk_flags = assessment["risk_flags"]
     x, y = map_position(row, package["bounds"])
     component_rows = [
         {
@@ -379,21 +333,27 @@ def real_location_from_tract(row: dict, profile: str, rent_cap: int, package: di
             "label": SCORING_SIGNALS[key]["label"],
             "score": components[key],
             "weight": round(weights[key] * 100),
-            "coverage": SCORING_SIGNALS[key]["coverage"],
+            "coverage": assessment["components"][key]["coverage"],
             "description": SCORING_SIGNALS[key]["description"],
         }
         for key in weights
     ]
-    opportunity = clamp(raw_score, 1, 99)
+    opportunity = assessment["opportunity"]
     return {
         "id": row["geoid"],
         "geoid": row["geoid"],
         "name": tract_display_name(row),
         "borough": row.get("borough") or "NYC",
+        "latitude": as_float(row.get("centroid_latitude")),
+        "longitude": as_float(row.get("centroid_longitude")),
         "x": x,
         "y": y,
         "opportunity": opportunity,
-        "walkability": pct(row, maps, "national_walkability_index"),
+        "walkability": assessment["walkability"],
+        "business_draw": assessment["business_draw"],
+        "business_draw_coverage": assessment["business_draw_coverage"],
+        "concept_evidence": assessment["concept_evidence"],
+        "model_version": MODEL_VERSION,
         "activity": demand,
         "whitespace": market_gap,
         "transit": pct(row, maps, "nearest_subway_weekly_ridership"),
@@ -402,7 +362,7 @@ def real_location_from_tract(row: dict, profile: str, rent_cap: int, package: di
         "cost": commercial,
         "confidence": "high" if confidence_score >= 84 else "medium high" if confidence_score >= 70 else "medium" if confidence_score >= 55 else "limited",
         "confidence_score": confidence_score,
-        "archetype": "bar/nightlife" if profile == "bar" else "coffee/breakfast" if profile == "coffee" else "restaurant",
+        "archetype": profile.replace("_", " "),
         "rent": rent_cap,
         "rent_label": "Pending",
         "sqft": round(as_float(row.get("retail_area_sqft")) or as_float(row.get("commercial_area_sqft")) or 0),
@@ -410,9 +370,9 @@ def real_location_from_tract(row: dict, profile: str, rent_cap: int, package: di
         "risk_flags": risk_flags,
         "recommendation": recommendation_for(opportunity, confidence_score, risk_flags),
         "why": [
-            f"Demand score is {demand}, supported by population density, jobs, transit, taxi activity, pedestrian counts, and event indicators.",
+            f"Demand score is {demand}, using resident and worker density, transit access, pedestrian evidence, and cycling activity proxies.",
             f"Competition pressure is {competition_pressure}, based on tract-level {profile} competitor counts from the integrated POI layer.",
-            f"Commercial suitability is {commercial}, using retail area, mixed-use parcels, storefront records, and walkability.",
+            f"Commercial suitability is {commercial}, using retail area, mixed-use parcels, and storefront records.",
         ],
         "source_notes": [
             "Master tract features are the primary source.",
@@ -693,21 +653,61 @@ REPORTS = [
 ]
 
 
-def tuned_locations(profile: str, rent_cap: int, borough: str = "") -> list[dict]:
+def tuned_locations(profile: str, rent_cap: int, borough: str = "", concept: Concept | None = None, limit: int | None = 24) -> list[dict]:
     package = integrated_package()
     rows = package["tracts"]
     if borough:
         rows = [row for row in rows if row.get("borough") == borough]
-    locations = [real_location_from_tract(row, profile, rent_cap, package) for row in rows]
-    return sorted(locations, key=lambda row: row["opportunity"], reverse=True)[:24]
+    locations = [real_location_from_tract(row, profile, rent_cap, package, concept or Concept()) for row in rows]
+    ranked = sorted(locations, key=lambda row: row["opportunity"], reverse=True)
+    return ranked[:limit] if limit is not None else ranked
 
 
-def matching_properties(locations: list[dict], deal_type: str, rent_cap: int) -> list[dict]:
+def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, purchase_budget: int, concept: Concept | None = None) -> list[dict]:
     package = integrated_package()
     location_lookup = {location["geoid"]: location for location in locations}
-    transaction = "purchase" if deal_type == "purchase" else "lease"
-    transaction_label = "Registry Lead"
     properties = []
+    if LISTINGS_PATH.is_file():
+        for listing in read_csv(LISTINGS_PATH):
+            location = location_lookup.get(listing.get("geoid"))
+            transaction = listing.get("transaction", "").lower()
+            if not location or transaction not in {"lease", "purchase"} or deal_type not in {transaction, "either"}:
+                continue
+            source_url = public_url(listing.get("source_url"))
+            if not source_url or not listing.get("checked_at"):
+                continue
+            try:
+                checked_at = date.fromisoformat(listing["checked_at"])
+            except ValueError:
+                continue
+            if not date.today() - timedelta(days=90) <= checked_at <= date.today():
+                continue
+            price = as_float(listing.get("asking_price")) or None
+            rent = as_float(listing.get("asking_rent_monthly")) or None
+            if transaction == "lease" and rent is None or transaction == "purchase" and price is None:
+                continue
+            if (transaction == "lease" and rent > rent_cap) or (transaction == "purchase" and price > purchase_budget):
+                continue
+            properties.append({
+                "id": listing.get("listing_id") or f"listing-{len(properties)}",
+                "location_id": location["id"], "geoid": location["geoid"],
+                "title": listing.get("title") or "Restaurant Property", "address": listing.get("address") or "Address Pending",
+                "borough": location["borough"], "transaction": transaction, "transaction_label": "Lease Listing" if transaction == "lease" else "Purchase Listing",
+                "lead_type": "listing", "asking_rent": rent, "asking_price": price,
+                "price_label": f"${round(rent):,}/Month" if rent else f"${round(price):,}",
+                "sqft": as_float(listing.get("sqft")) or 0, "sqft_label": listing.get("sqft") or "Size Pending",
+                "frontage": listing.get("frontage") or "Frontage Pending", "condition": listing.get("condition") or "Condition Pending",
+                "availability": listing.get("availability") or "Status Unverified", "image": public_url(listing.get("image_url")) or "",
+                "image_label": "Property Listing", "location_name": location["name"], "location_score": location["opportunity"],
+                "confidence_score": location["confidence_score"], "monthly_basis": rent_cap, "monthly_basis_label": f"{round(rent_cap / 1000)}k Target",
+                "fit_score": location["opportunity"], "ranking_basis": "Area Score; Listing Within Budget", "notes": listing.get("notes") or "Confirm Listing Details With Source.",
+                "latitude": listing.get("latitude") or None, "longitude": listing.get("longitude") or None,
+                "broker_name": listing.get("broker_name") or None, "broker_contact": listing.get("broker_contact") or None,
+                "source_url": source_url, "checked_at": listing.get("checked_at"),
+            })
+    if deal_type == "purchase":
+        candidates = sorted(properties, key=lambda row: row["fit_score"], reverse=True)[:12]
+        return add_site_evidence(candidates, package, concept)
     seen_bbls = set()
     storefronts = sorted(
         package["storefronts"],
@@ -721,32 +721,33 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int) ->
         location = location_lookup.get(listing.get("geoid"))
         if not location:
             continue
+        if not as_bool(listing.get("vacant_current")):
+            continue
         bbl = listing.get("borough_block_lot") or f"{listing.get('geoid')}-{listing.get('property_street_address_or')}"
         if bbl in seen_bbls:
             continue
         seen_bbls.add(bbl)
-        vacant_bonus = 10 if as_bool(listing.get("vacant_current")) else 0
-        budget_fit = 74 if rent_cap >= 18000 else 68
         address = title_case(listing.get("property_street_address_or") or "Storefront Address Not In Source")
-        property_type = title_case(listing.get("primary_business_activity") or "Storefront Record")
+        reported_activity = title_case(listing.get("primary_business_activity") or "Not In Source")
         properties.append(
             {
                 "id": bbl,
                 "location_id": location["id"],
                 "geoid": listing.get("geoid"),
-                "title": f"{property_type} Storefront",
+                "title": "Reported Vacant Storefront",
                 "address": address,
                 "borough": location["borough"],
-                "transaction": transaction,
-                "transaction_label": transaction_label,
+                "transaction": "unknown",
+                "transaction_label": "Storefront Research",
+                "lead_type": "registry_record",
                 "asking_rent": None,
                 "asking_price": None,
-                "price_label": "Pending",
+                "price_label": "Not In Source",
                 "sqft": 0,
-                "sqft_label": "Size Pending",
+                "sqft_label": "Size Not In Source",
                 "frontage": "Frontage Pending",
-                "condition": property_type,
-                "availability": "Reported Vacant" if as_bool(listing.get("vacant_current")) else "Storefront Filing",
+                "condition": reported_activity,
+                "availability": "Reported Vacant; Lease Status Unverified",
                 "image": "",
                 "image_label": "Storefront Registry",
                 "location_name": location["name"],
@@ -754,16 +755,35 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int) ->
                 "confidence_score": location["confidence_score"],
                 "monthly_basis": rent_cap,
                 "monthly_basis_label": f"{round(rent_cap / 1000)}k Target",
-                "fit_score": clamp(location["opportunity"] * 0.62 + location["confidence_score"] * 0.18 + budget_fit * 0.10 + vacant_bonus),
+                "fit_score": location["opportunity"], "ranking_basis": "Area Score; Registry Vacancy Filing",
                 "notes": "Matched From The NYC Storefront Registry. Asking Rent, Sale Price, Listing Photo, And Confirmed Deal Status Are Not Included In The Uploaded Source.",
+                "broker_name": None, "broker_contact": None, "source_url": None, "checked_at": None,
                 "latitude": listing.get("latitude"),
                 "longitude": listing.get("longitude"),
                 "zip_code": listing.get("zip_code") or listing.get("postcode"),
             }
         )
-        if len(properties) >= 12:
-            break
-    return sorted(properties, key=lambda row: row["fit_score"], reverse=True)
+    candidates = sorted(properties, key=lambda row: (row["lead_type"] == "listing", row["fit_score"]), reverse=True)[:12]
+    return add_site_evidence(candidates, package, concept)
+
+
+def add_site_evidence(properties: list[dict], package: dict, concept: Concept | None = None) -> list[dict]:
+    network = package.get("walking_network")
+    if network is None:
+        return properties
+    for property_row in properties:
+        latitude, longitude = as_float(property_row.get("latitude")), as_float(property_row.get("longitude"))
+        if latitude and longitude:
+            property_row["site_evidence"] = network.site_evidence(
+                latitude, longitude, package.get("restaurants", []), package.get("subway_stations", []))
+            evidence = property_row["site_evidence"]
+            if evidence["status"] == "available" and concept is not None:
+                labels = CUISINES.get(concept.cuisine, ())
+                evidence["same_cuisine_restaurants"] = sum(
+                    evidence["restaurant_cuisine_counts"].get(label, 0) for label in labels) if labels else None
+        else:
+            property_row["site_evidence"] = {"status": "unavailable", "reason": "Property coordinates are not in the source."}
+    return properties
 
 
 def data_feeds() -> list[dict]:
@@ -799,8 +819,9 @@ def market_gap_rows(locations: list[dict]) -> list[dict]:
     if not top:
         return []
 
-    def avg(key: str) -> int:
-        return round(sum(row.get(key, 0) for row in top) / len(top))
+    def avg(key: str) -> int | None:
+        values = [value for row in top if (value := row.get(key)) is not None]
+        return round(sum(values) / len(values)) if values else None
 
     return [
         {
@@ -821,7 +842,7 @@ def market_gap_rows(locations: list[dict]) -> list[dict]:
             "category": "Access And Mobility",
             "current_label": f"Transit Index {avg('transit')}",
             "expected_label": "Walkability And Mobility",
-            "gap_label": f"{avg('walkability')} Walkability",
+            "gap_label": f"{avg('walkability')} Walkability" if avg("walkability") is not None else "Walkability Unavailable",
             "score": avg("walkability"),
         },
         {
@@ -860,31 +881,88 @@ def index():
     return render_template("index.html")
 
 
+@app.post("/api/concepts/resolve")
+def resolve_concept_api():
+    values = request.get_json(silent=True)
+    if not isinstance(values, dict):
+        return jsonify({"error": "Submit a concept brief as a JSON object."}), 400
+    try:
+        return jsonify(resolve_concept(values))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.post("/api/sites/analyze")
+def analyze_site_api():
+    values = request.get_json(silent=True)
+    if not isinstance(values, dict):
+        return jsonify({"error": "Submit a site coordinate as a JSON object."}), 400
+    latitude, longitude = as_float(values.get("latitude")), as_float(values.get("longitude"))
+    if not 40.47 <= latitude <= 40.95 or not -74.28 <= longitude <= -73.65:
+        return jsonify({"error": "Choose a coordinate within the supported NYC area."}), 400
+    try:
+        resolved = resolve_concept(values)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    package = integrated_package()
+    evidence = package["walking_network"].site_evidence(
+        latitude, longitude, package["restaurants"], package["subway_stations"])
+    if evidence["status"] == "available":
+        labels = CUISINES[resolved["concept"]["cuisine"]]
+        evidence["same_cuisine_restaurants"] = sum(
+            evidence["restaurant_cuisine_counts"].get(label, 0) for label in labels) if labels else None
+    return jsonify({"latitude": latitude, "longitude": longitude,
+                    "concept_resolution": resolved, "site_evidence": evidence})
+
+
+@app.route("/api/osm/tiles/<int:z>/<int:x>/<int:y>.pbf")
+def osm_tile(z: int, x: int, y: int):
+    if not OSM_TILES_PATH.is_file() or not 0 <= z <= 14 or not 0 <= x < 2 ** z or not 0 <= y < 2 ** z:
+        return "", 404
+    with closing(sqlite3.connect(f"file:{OSM_TILES_PATH}?mode=ro", uri=True)) as connection:
+        row = connection.execute(
+            "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+            (z, x, 2 ** z - 1 - y),
+        ).fetchone()
+    if row is None:
+        return "", 404
+    response = Response(row[0], mimetype="application/x-protobuf")
+    if row[0][:2] == b"\x1f\x8b":
+        response.headers["Content-Encoding"] = "gzip"
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
 @app.route("/api/dashboard")
 def dashboard():
+    try:
+        resolution = resolve_concept(request.args)
+        concept = Concept(**resolution["concept"])
+        rent_cap = int(request.args.get("rent_cap", "18000"))
+        purchase_budget = int(request.args.get("purchase_budget", "3000000"))
+        if not 8000 <= rent_cap <= 35000:
+            raise ValueError("Monthly budget must be between $8,000 and $35,000.")
+        if not 100000 <= purchase_budget <= 50000000:
+            raise ValueError("Purchase budget must be between $100,000 and $50 million.")
+        deal_type = request.args.get("deal_type", "lease")
+        if deal_type not in {"lease", "purchase", "either"}:
+            raise ValueError("Choose lease, purchase, or both.")
+        finance = operating_scenario(request.args, rent_cap, concept.average_check, deal_type)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
     concept_name = (request.args.get("concept_name", "Restaurant Concept") or "Restaurant Concept").strip()[:80]
-    profile = request.args.get("profile", "restaurant")
-    if profile not in PROFILE_WEIGHTS:
-        profile = "restaurant"
-    rent_cap = int(request.args.get("rent_cap", "18000"))
-    deal_type = request.args.get("deal_type", "lease")
+    profile = resolution["profile"]
     borough = request.args.get("borough", "")
-    if deal_type not in {"lease", "purchase", "either"}:
-        deal_type = "lease"
     if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx"}:
         borough = ""
-    locations = tuned_locations(profile, rent_cap, borough)
-    if not locations:
-        locations = tuned_locations(profile, rent_cap)
+    ranked_locations = tuned_locations(profile, rent_cap, borough, concept, limit=None)
+    if not ranked_locations:
+        return jsonify({"locations": [], "error": "No eligible tracts match this borough."})
+    locations = ranked_locations[:24]
     best = locations[0]
     avg_confidence = round(sum(row["confidence_score"] for row in locations) / len(locations))
-    finance = {
-        "rent_cap": rent_cap,
-        "break_even_revenue": round(rent_cap * 3.15),
-        "orders_per_day": round((rent_cap * 3.15) / 30 / 28),
-        "runway_months": max(7, round(18 - rent_cap / 3200)),
-        "capture_rate": "2.1-3.8%",
-    }
+    finance["purchase_budget"] = purchase_budget
+    finance["average_check"] = concept.average_check
     return jsonify(
         {
             "locations": locations,
@@ -892,12 +970,12 @@ def dashboard():
             "feeds": data_feeds(),
             "whitespace": market_gap_rows(locations),
             "vendor_windows": VENDOR_WINDOWS,
-            "properties": matching_properties(locations, deal_type, rent_cap),
+            "properties": matching_properties(ranked_locations, deal_type, rent_cap, purchase_budget, concept),
             "data_layers": DATA_LAYERS,
             "reports": REPORTS,
             "scoring": {
                 "weights": PROFILE_WEIGHTS.get(profile, PROFILE_WEIGHTS["restaurant"]),
-                "signals": SCORING_SIGNALS,
+                "signals": {component["key"]: {"label": component["label"], "coverage": component["coverage"], "description": component["description"]} for component in best["score_components"]},
                 "avg_confidence": avg_confidence,
                 "method": "Weighted Location-Fit Score Across Demand, Customer Fit, Access, Market Gap, Competition Balance, And Commercial Suitability",
             },
@@ -905,16 +983,43 @@ def dashboard():
             "meta": {
                 "project": "Groundwork NYC",
                 "concept_name": concept_name,
+                "concept": concept.public(),
+                "concept_resolution": resolution,
+                "model_version": MODEL_VERSION,
+                "assessment_type": "Uncalibrated Screening Index",
                 "scope": "NYC Restaurant And Bar Site Selection",
                 "architecture": "Flask API Using Integrated NYC Tract, Storefront, Mobility, Competition, Demographic, And Land-Use Features",
                 "api_contract": "Locations, Properties, Feeds, Data Quality, Reports, Finance",
                 "deal_type": deal_type,
                 "borough": borough or "All NYC",
-                "primary_dataset": str(MASTER_TRACT_PATH),
+                "primary_dataset": "data/integrated/restaurant_bar_location_data_ready/master_tract_features.csv",
                 "unsupported_values": unsupported_values(),
             },
         }
     )
+
+
+@app.get("/api/evaluation")
+def get_evaluation_status():
+    return jsonify(evaluation_status(PROJECT_ROOT / "data"))
+
+
+@app.post("/api/evaluation/run")
+def evaluate_model():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "A JSON object is required."}), 400
+    if any(not isinstance(value, str) for value in payload.values()):
+        return jsonify({"error": "Evaluation parameters must be strings."}), 400
+    try:
+        result = run_evaluation(integrated_package(), PROJECT_ROOT / "data",
+                                cuisine=payload.get("cuisine", "korean"),
+                                target=payload.get("target", "market_presence"), cutoff=payload.get("cutoff"))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except ImportError:
+        return jsonify({"error": "Install demo/requirements-evaluation.txt to run evaluation."}), 503
+    return jsonify(result)
 
 
 if __name__ == "__main__":

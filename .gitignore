@@ -10,5 +10,15 @@ __pycache__/
 
 # Raw and generated geospatial data (keep small examples under data/samples/)
 *.osm.pbf
+*.mbtiles
+*.sqlite
+*.sqlite3
+*.db
 data/raw/
 data/output/
+data/integrated/
+data/cleaned_sources/
+data/osm/
+data/listings/
+data/evaluation/
+.DS_Store

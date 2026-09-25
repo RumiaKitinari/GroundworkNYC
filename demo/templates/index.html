@@ -3,8 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Groundwork NYC Command Center</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260922-reactive-overview" />
+    <title>Groundwork | Location Intelligence</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260925-backend-final" />
   </head>
   <body>
     <div class="app-frame">
@@ -25,10 +26,11 @@
 
         <div class="control-group">
           <div class="control-title">Search Brief</div>
-          <label class="control-field">
+          <div class="control-field concept-search">
             <span>Restaurant Idea</span>
-            <input id="conceptInput" type="text" value="Modern Bistro" maxlength="48" />
-          </label>
+            <input id="conceptInput" type="text" value="Modern Bistro" maxlength="48" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sidebarConceptSuggestions" />
+            <div id="sidebarConceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
+          </div>
           <label class="control-field">
             <span>Search Type</span>
             <select id="dealSelect">
@@ -43,6 +45,11 @@
               <option value="restaurant">Sit-Down Restaurant</option>
               <option value="bar">Bar Or Gastropub</option>
               <option value="coffee">Coffee And Breakfast</option>
+              <option value="fast_casual">Fast Casual</option>
+              <option value="counter_service">Counter Service</option>
+              <option value="bakery">Bakery Or Pastry Shop</option>
+              <option value="fine_dining">Fine Dining</option>
+              <option value="takeout_delivery">Takeout And Delivery</option>
             </select>
           </label>
           <div class="range-control">
@@ -52,6 +59,7 @@
             </div>
             <input id="rentRange" type="range" min="8" max="35" value="18" />
           </div>
+          <div class="purchase-target" id="purchaseTarget" hidden>Purchase Target <strong id="purchaseTargetValue">$3M</strong></div>
           <button class="brief-edit" id="briefEditButton" type="button">Edit Search Brief</button>
         </div>
 
@@ -73,31 +81,24 @@
           </div>
         </div>
 
-        <div class="control-group">
-          <div class="control-title">Decision Flow</div>
-          <div class="contract-list">
-            <div><span>Explore</span><strong>Market Map</strong></div>
-            <div><span>Prioritize</span><strong>Shortlist</strong></div>
-            <div><span>Underwrite</span><strong>Financials</strong></div>
-            <div><span>Share</span><strong>Reports</strong></div>
-          </div>
-        </div>
       </aside>
 
       <main class="workspace is-discover">
         <header class="topbar">
           <div>
-            <div class="eyebrow">Command Center</div>
+            <div class="eyebrow">Location Intelligence</div>
             <h1 id="workspaceTitle">Modern Bistro Location Search</h1>
           </div>
           <div class="top-actions">
-            <label class="search">
+            <button class="primary-action edit-brief-top" type="button" onclick="openBrief()">Edit Brief</button>
+            <div class="search concept-search">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="11" cy="11" r="7"></circle>
                 <path d="m16 16 4 4"></path>
               </svg>
-              <input id="searchInput" type="search" placeholder="Search Manhattan, Queens, Brooklyn..." />
-            </label>
+              <input id="searchInput" type="search" placeholder="Search Places Or Restaurant Ideas" autocomplete="off" role="combobox" aria-label="Search Locations Or Restaurant Ideas" aria-autocomplete="list" aria-expanded="false" aria-controls="headerConceptSuggestions" />
+              <div id="headerConceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
+            </div>
             <button class="icon-button" id="refreshButton" title="Refresh Dashboard Data" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M3 12a9 9 0 1 0 3-6.7"></path>
@@ -109,15 +110,15 @@
 
         <nav class="feature-tabs" aria-label="Groundwork Feature Modules">
           <button class="feature-tab is-active" data-view="discover" type="button">
-            <strong>Market Map</strong>
+            <strong>Overview</strong>
             <span>Rankings</span>
           </button>
           <button class="feature-tab" data-view="scorecard" type="button">
-            <strong>Scorecard</strong>
+            <strong>Location Analysis</strong>
             <span>Drivers</span>
           </button>
           <button class="feature-tab" data-view="shortlist" type="button">
-            <strong>Shortlist</strong>
+            <strong>Top Locations</strong>
             <span>Top Markets</span>
           </button>
           <button class="feature-tab" data-view="compare" type="button">
@@ -129,15 +130,15 @@
             <span>Leads</span>
           </button>
           <button class="feature-tab" data-view="whitespace" type="button">
-            <strong>Market Gaps</strong>
+            <strong>Cuisine Markets</strong>
             <span>White Space</span>
           </button>
           <button class="feature-tab" data-view="finance" type="button">
-            <strong>Financials</strong>
+            <strong>Budget</strong>
             <span>Model</span>
           </button>
           <button class="feature-tab" data-view="now" type="button">
-            <strong>Timing</strong>
+            <strong>Trading Hours</strong>
             <span>Dayparts</span>
           </button>
           <button class="feature-tab" data-view="reports" type="button">
@@ -148,8 +149,13 @@
             <strong>Sources</strong>
             <span>Coverage</span>
           </button>
+          <button class="feature-tab" data-view="settings" type="button">
+            <strong>Settings</strong>
+            <span>Preferences</span>
+          </button>
         </nav>
 
+        <div class="dashboard-status" id="dashboardStatus" role="status" hidden></div>
         <section class="metric-ribbon" id="metricRibbon" aria-label="Dashboard Metrics"></section>
 
         <section class="command-grid">
@@ -159,23 +165,21 @@
                 <h2 id="mapModeTitle">NYC Score Surface</h2>
               </div>
               <div class="module-tabs">
-                <button class="mini-tab is-active" data-layer="opportunity" type="button">Score</button>
-                <button class="mini-tab" data-layer="activity" type="button">Demand</button>
-                <button class="mini-tab" data-layer="cost" type="button">Property</button>
+                <select id="mapBasemapSelect" aria-label="Map View">
+                  <option value="streets">Streets</option>
+                  <option value="aerial">Aerial</option>
+                </select>
+                <select id="mapLayerSelect" aria-label="Map Layer">
+                  <option value="opportunity">Location Score</option>
+                  <option value="walkability">Walkability</option>
+                  <option value="business_draw">Business Draw</option>
+                  <option value="activity">Local Demand</option>
+                  <option value="whitespace">Cuisine Opportunity</option>
+                  <option value="cost">Commercial Fit</option>
+                </select>
               </div>
             </div>
             <div class="map-stage" id="mapStage">
-              <img class="tile tile-a" src="https://tile.openstreetmap.org/11/603/769.png" alt="" />
-              <img class="tile tile-b" src="https://tile.openstreetmap.org/11/604/769.png" alt="" />
-              <img class="tile tile-c" src="https://tile.openstreetmap.org/11/603/770.png" alt="" />
-              <img class="tile tile-d" src="https://tile.openstreetmap.org/11/604/770.png" alt="" />
-              <div class="scanline"></div>
-              <div class="map-label label-manhattan">Manhattan</div>
-              <div class="map-label label-brooklyn">Brooklyn</div>
-              <div class="map-label label-queens">Queens</div>
-              <div class="map-label label-bronx">Bronx</div>
-              <div class="map-label label-staten">Staten Island</div>
-              <div class="hex-layer" id="hexLayer"></div>
             </div>
           </div>
 
@@ -188,13 +192,15 @@
               </div>
               <div class="score-orb" id="scoreOrb"><span id="selectedScore">--</span></div>
             </div>
+            <div class="walkability-pair" id="walkabilityPair"></div>
             <div class="bar-stack" id="barStack"></div>
             <div class="driver-list">
               <div class="module-title-row">
-                <h3>Score Drivers</h3>
+                <h3>Decision Summary</h3>
                 <span id="confidencePill">--</span>
               </div>
               <ul id="driverList"></ul>
+              <button class="quiet-action" id="viewAnalysis" type="button">View Location Analysis</button>
             </div>
           </aside>
         </section>
@@ -221,7 +227,7 @@
           <div class="table-module is-hidden" data-panel="shortlist">
             <div class="module-head compact">
               <div>
-                <h2>Shortlist</h2>
+                <h2>Top Locations</h2>
               </div>
             </div>
             <div class="shortlist-board" id="shortlistBoard"></div>
@@ -239,7 +245,7 @@
           <div class="table-module is-hidden" data-panel="lease">
             <div class="module-head compact">
               <div>
-                <h2>Property Matches</h2>
+                <h2 id="propertyHeading">Property Leads</h2>
               </div>
             </div>
             <div class="lease-board" id="leaseBoard"></div>
@@ -248,7 +254,7 @@
           <div class="table-module is-hidden" data-panel="whitespace">
             <div class="module-head compact">
               <div>
-                <h2>Market Gaps</h2>
+                <h2>Cuisine Markets</h2>
               </div>
             </div>
             <div class="gap-board" id="gapBoard"></div>
@@ -257,16 +263,22 @@
           <div class="table-module is-hidden" data-panel="finance">
             <div class="module-head compact">
               <div>
-                <h2>Financials</h2>
+                <h2>Budget Scenario</h2>
               </div>
             </div>
+            <form class="finance-scenario-controls" id="financeScenarioForm">
+              <label class="control-field"><span>Other Monthly Fixed Costs ($)</span><input id="financeFixedCosts" type="number" min="0" max="2000000" step="100" placeholder="Enter costs" /></label>
+              <label class="control-field"><span>Variable Costs (%)</span><input id="financeVariableCosts" type="number" min="0" max="94" step="0.5" placeholder="Enter percent" /></label>
+              <label class="control-field"><span>Operating Days / Month</span><input id="financeOperatingDays" type="number" min="1" max="31" step="1" value="26" /></label>
+              <button class="primary-action" type="submit">Update Scenario</button>
+            </form>
             <div class="finance-board" id="financeBoard"></div>
           </div>
 
           <div class="table-module is-hidden" data-panel="now">
             <div class="module-head compact">
               <div>
-                <h2>Timing</h2>
+                <h2>Trading Hours</h2>
               </div>
             </div>
             <div class="now-board" id="nowBoard"></div>
@@ -290,6 +302,19 @@
             <div class="layer-board" id="layerBoard"></div>
           </div>
 
+          <div class="table-module is-hidden" data-panel="settings">
+            <div class="module-head compact"><h2>Settings</h2></div>
+            <div class="settings-board">
+              <div class="settings-row">
+                <div><h3>Appearance</h3></div>
+                <div class="segmented-control" role="group" aria-label="Appearance">
+                  <button type="button" data-theme-choice="dark" aria-pressed="true">Dark</button>
+                  <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <aside class="feed-module">
             <div class="module-head compact">
               <div>
@@ -311,9 +336,103 @@
             <h2 id="briefTitle">Define The Restaurant</h2>
           </div>
           <div class="brief-fields">
-            <label class="control-field wide">
+            <div class="control-field wide concept-search">
               <span>Restaurant Idea</span>
-              <input id="briefConceptName" type="text" value="Modern Bistro" maxlength="48" />
+              <input id="briefConceptName" type="text" value="Modern Bistro" maxlength="48" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="conceptSuggestions" />
+              <div id="conceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
+            </div>
+            <label class="control-field wide">
+              <span>Describe Your Concept</span>
+              <input id="briefDescription" type="text" maxlength="500" placeholder="e.g., Vegan Mexican dining with a cocktail bar" />
+            </label>
+            <label class="control-field">
+              <span>Cuisine</span>
+              <select id="briefCuisine">
+                <option value="any">Not Specified</option>
+                <option value="american">American</option>
+                <option value="southern_soul">Southern / Soul Food</option>
+                <option value="cajun_creole">Cajun / Creole</option>
+                <option value="italian">Italian</option>
+                <option value="french">French</option>
+                <option value="spanish">Spanish</option>
+                <option value="portuguese">Portuguese</option>
+                <option value="greek">Greek</option>
+                <option value="german_central">German / Central European</option>
+                <option value="eastern_european">Eastern European</option>
+                <option value="mexican">Mexican</option>
+                <option value="peruvian">Peruvian</option>
+                <option value="brazilian">Brazilian</option>
+                <option value="colombian">Colombian</option>
+                <option value="venezuelan">Venezuelan</option>
+                <option value="cuban">Cuban</option>
+                <option value="dominican">Dominican</option>
+                <option value="puerto_rican">Puerto Rican</option>
+                <option value="jamaican">Jamaican</option>
+                <option value="haitian">Haitian</option>
+                <option value="ethiopian">Ethiopian / Eritrean</option>
+                <option value="west_african">West African</option>
+                <option value="indian">Indian</option>
+                <option value="pakistani_bangladeshi">Pakistani / Bangladeshi</option>
+                <option value="chinese">Chinese</option>
+                <option value="japanese">Japanese</option>
+                <option value="korean">Korean</option>
+                <option value="taiwanese">Taiwanese</option>
+                <option value="thai">Thai</option>
+                <option value="filipino">Filipino</option>
+                <option value="vietnamese">Vietnamese</option>
+                <option value="indonesian_malaysian">Indonesian / Malaysian</option>
+                <option value="middle_eastern">Middle Eastern</option>
+                <option value="mediterranean">Mediterranean</option>
+                <option value="turkish">Turkish</option>
+                <option value="persian_iranian">Persian / Iranian</option>
+                <option value="steakhouse">Steakhouse</option>
+                <option value="seafood">Seafood</option>
+                <option value="barbecue">Barbecue</option>
+                <option value="pizza">Pizza</option>
+                <option value="burgers">Burgers</option>
+                <option value="sandwiches_deli">Sandwiches / Deli</option>
+                <option value="bakery_pastries">Bakery / Pastries</option>
+                <option value="coffee_tea">Coffee / Tea</option>
+                <option value="desserts_ice_cream">Desserts / Ice Cream</option>
+                <option value="salads_bowls">Salads / Bowls</option>
+                <option value="breakfast_brunch">Breakfast / Brunch</option>
+                <option value="noodles">Noodles</option>
+                <option value="vegetarian_vegan">Vegetarian / Vegan</option>
+                <option value="health_focused">Health-Focused</option>
+                <option value="fusion">Fusion / Multiple Cuisines</option>
+                <option value="custom">Other / Custom Concept</option>
+              </select>
+            </label>
+            <div class="control-field wide">
+              <span>Intended Price</span>
+              <div class="segmented-control price-mode" role="group" aria-label="Intended Price Input">
+                <button type="button" data-price-mode="tier" aria-pressed="true">Price Range</button>
+                <button type="button" data-price-mode="exact" aria-pressed="false">Per Guest</button>
+              </div>
+            </div>
+            <label class="control-field" id="briefTierField">
+              <span>Price Range</span>
+              <select id="briefPriceTier">
+                <option value="$">$ · Everyday</option>
+                <option value="$$" selected>$$ · Midrange</option>
+                <option value="$$$">$$$ · Premium</option>
+                <option value="$$$$">$$$$ · Fine Dining</option>
+              </select>
+            </label>
+            <label class="control-field" id="briefExactPriceField" hidden>
+              <span>Average Spend Per Guest ($)</span>
+              <input id="briefAverageCheck" type="number" min="5" max="250" step="1" value="35" />
+            </label>
+            <label class="control-field">
+              <span>Dietary Identity</span>
+              <select id="briefDietary">
+                <option value="none">None</option>
+                <option value="vegan">Vegan</option>
+                <option value="vegetarian">Vegetarian</option>
+                <option value="halal">Halal</option>
+                <option value="kosher">Kosher</option>
+                <option value="gluten_free">Gluten-Free</option>
+              </select>
             </label>
             <label class="control-field">
               <span>Transaction</span>
@@ -329,11 +448,20 @@
                 <option value="restaurant">Sit-Down Restaurant</option>
                 <option value="bar">Bar Or Gastropub</option>
                 <option value="coffee">Coffee And Breakfast</option>
+                <option value="fast_casual">Fast Casual</option>
+                <option value="counter_service">Counter Service</option>
+                <option value="bakery">Bakery Or Pastry Shop</option>
+                <option value="fine_dining">Fine Dining</option>
+                <option value="takeout_delivery">Takeout And Delivery</option>
               </select>
             </label>
-            <label class="control-field">
+            <label class="control-field" id="monthlyBudgetField">
               <span>Monthly Budget Target</span>
               <input id="briefBudget" type="number" min="8000" max="35000" step="1000" value="18000" />
+            </label>
+            <label class="control-field" id="purchaseBudgetField" hidden>
+              <span>Purchase Budget ($)</span>
+              <input id="briefPurchaseBudget" type="number" min="100000" max="50000000" step="50000" value="3000000" />
             </label>
             <label class="control-field">
               <span>Preferred Area</span>
@@ -346,6 +474,14 @@
               </select>
             </label>
           </div>
+          <details class="dining-profile">
+            <summary>Dining Profile</summary>
+            <div class="brief-fields">
+              <label class="control-field"><span>Service Style</span><select id="briefServiceStyle"><option value="quick_service">Quick Service</option><option value="casual" selected>Casual Dining</option><option value="fine_dining">Fine Dining</option></select></label>
+              <label class="control-field"><span>Customer Focus</span><select id="briefAudience"><option value="residents">Local Residents</option><option value="workers">Nearby Workers</option><option value="destination">Destination Diners</option></select></label>
+              <label class="control-field"><span>Primary Trading Period</span><select id="briefDaypart"><option value="all_day">All Day</option><option value="morning">Morning</option><option value="lunch">Lunch</option><option value="evening">Evening</option></select></label>
+            </div>
+          </details>
           <div class="brief-actions">
             <button class="quiet-action" id="briefSkip" type="button">Open Dashboard</button>
             <button class="primary-action" type="submit">Run Location Search</button>
@@ -354,6 +490,7 @@
       </div>
     </section>
 
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260922-reactive-overview"></script>
+    <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260925-backend-final"></script>
   </body>
 </html>
