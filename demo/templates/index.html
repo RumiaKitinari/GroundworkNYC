@@ -331,7 +331,7 @@
       <div class="welcome-card">
         <div class="welcome-photo" aria-hidden="true"></div>
         <div class="welcome-content">
-          <div class="welcome-brand-row"><div class="welcome-brand">GW <span>Groundwork</span></div><button class="theme-toggle" type="button" id="welcomeThemeToggle" aria-label="Toggle color theme">◐ <span>Theme</span></button></div>
+          <div class="welcome-brand-row"><div class="welcome-brand">GW <span>Groundwork</span></div></div>
           <div class="eyebrow">NYC RESTAURANT LOCATION RESEARCH</div>
           <h1 id="welcomeTitle">Find your place in New York.</h1>
           <p>Shape your restaurant idea and explore locations with the Groundwork research dashboard.</p>
@@ -362,7 +362,6 @@
         <form class="brief-form" id="briefForm" novalidate>
           <div class="brief-heading">
             <div><div class="eyebrow">CONCEPT STUDIO</div><h2 id="briefTitle">Define your restaurant</h2><p>A few details help shape your location search.</p></div>
-            <button class="theme-toggle" type="button" id="briefThemeToggle" aria-label="Toggle color theme">◐ <span>Theme</span></button>
           </div>
           <div class="brief-scroll">
             <p class="required-note">* Required</p>
@@ -442,7 +441,7 @@
               <label class="control-field" id="monthlyBudgetField"><span>Monthly Rent Budget <em>Optional</em></span><div class="money-input"><span>$</span><input id="briefBudget" type="number" min="8000" max="35000" step="1000" placeholder="Amount" /><span>per month</span></div></label>
               <label class="control-field" id="purchaseBudgetField" hidden><span>Purchase Budget <em>Optional</em></span><div class="money-input"><span>$</span><input id="briefPurchaseBudget" type="number" min="100000" max="50000000" step="50000" placeholder="Amount" /></div></label>
               <label class="control-field"><span>Preferred Area <em>Optional</em></span><select id="briefArea"><option value="">Anywhere in NYC</option><option value="Brooklyn">Brooklyn</option><option value="Queens">Queens</option><option value="Manhattan">Manhattan</option><option value="Bronx">Bronx</option></select></label>
-              <div class="control-field wide description-field"><label for="briefDescription">Describe Your Concept <em>Optional</em></label><textarea id="briefDescription" maxlength="500" rows="2" placeholder="e.g. A neighborhood café with seasonal pastries"></textarea><small>What makes your restaurant different?</small><div class="starter-row"><button type="button" data-starter="Quick weekday lunches">Quick weekday lunches</button><button type="button" data-starter="Family dining">Family dining</button><button type="button" data-starter="Late-night dining">Late-night dining</button></div></div>
+              <div class="control-field wide description-field"><label for="briefDescription">Describe Your Concept <em>Optional</em></label><textarea id="briefDescription" maxlength="500" rows="2" placeholder="e.g. A neighborhood café with seasonal pastries" aria-controls="descriptionSuggestions" aria-expanded="false"></textarea><small>What makes your restaurant different?</small><div class="description-suggestions" id="descriptionSuggestions" aria-label="Description suggestions" hidden></div></div>
             </div>
             <details class="dining-profile" id="diningProfile"><summary>Dining Profile <em>Optional</em></summary><div class="brief-fields">
               <label class="control-field"><span>Service Style</span><select id="briefServiceStyle"><option value="">No preference</option><option value="quick_service">Quick Service</option><option value="casual">Casual Dining</option><option value="fine_dining">Fine Dining</option></select></label>

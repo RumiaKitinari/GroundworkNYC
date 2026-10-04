@@ -1739,7 +1739,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--cyan); outline-
 :root[data-theme="light"] .rail {background:#eef4fb}
 :root[data-theme="light"] .table-row.header {background:#eaf1fa}
 :root[data-theme="light"] .bar-track {background:#dce8f7}
-:root[data-theme="light"] .brief-overlay {background:#15243b78}
 :root[data-theme="light"] .brief-dialog, :root[data-theme="light"] .welcome-card {background:#fff}
 :root[data-theme="light"] input, :root[data-theme="light"] select, :root[data-theme="light"] textarea {color:var(--bright)}
 .welcome-overlay {position:fixed;inset:0;z-index:50;display:none;place-items:center;padding:20px;background:var(--bg)}
@@ -1761,7 +1760,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--cyan); outline-
 .brief-fields input,.brief-fields select,.brief-fields textarea {width:100%;height:36px;min-height:36px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);color:var(--bright);padding:6px 10px;font-size:12px}.brief-fields textarea {height:44px;resize:vertical;line-height:1.4}.brief-fields input:focus,.brief-fields select:focus,.brief-fields textarea:focus,.theme-toggle:focus-visible,.brief-actions button:focus-visible,.welcome-content button:focus-visible {outline:2px solid var(--blue);outline-offset:2px}.brief-fields input::placeholder,.brief-fields textarea::placeholder {color:var(--muted)}
 .brief-fields .concept-search,.brief-fields .cuisine-search {position:relative}.brief-fields .concept-suggestions {top:calc(100% - 1px);z-index:45;max-height:180px;border-radius:8px;background:var(--panel);box-shadow:0 12px 25px #0005}.brief-fields .concept-suggestions button {min-height:31px;padding:5px 10px;color:var(--bright);font-size:12px}
 .brief-fields select[hidden] {display:none}.money-input {display:flex;align-items:center;height:36px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);overflow:hidden}.money-input span {white-space:nowrap;padding:0 8px;color:var(--muted)!important;font-weight:400!important}.money-input input {border:0;background:transparent;min-width:0;padding:5px 0}.money-input span:last-child {font-size:10px}
-.description-field small {color:var(--muted);font-size:10px}.starter-row {display:flex;gap:5px;flex-wrap:wrap}.starter-row button {border:1px solid var(--line);border-radius:100px;background:var(--panel-2);color:var(--blue);padding:4px 8px;font-size:10px}
+.description-field small {color:var(--muted);font-size:10px}.description-suggestions {display:flex;align-items:center;gap:5px;flex-wrap:wrap}.description-suggestions[hidden] {display:none}.description-suggestions::before {content:"Try";color:var(--muted);font-size:10px}.description-suggestions button {border:1px solid var(--line);border-radius:100px;background:var(--panel-2);color:var(--blue);padding:4px 8px;font-size:10px}.description-suggestions button[aria-selected="true"],.description-suggestions button:hover {background:var(--blue);color:#fff}.description-suggestions button:focus-visible {outline:2px solid var(--blue);outline-offset:2px}
 .dining-profile {border-top:1px solid var(--line);margin-top:12px;padding-top:9px}.dining-profile summary {color:var(--bright);font-size:12px;font-weight:650}.dining-profile .brief-fields {margin-top:11px}
 .brief-actions {display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:12px 25px 17px;border-top:1px solid var(--line);background:var(--panel);border-radius:0 0 15px 0}.brief-actions button {min-height:40px;border-radius:8px;font-size:12px;font-weight:700}.brief-actions .quiet-action {border:1px solid var(--line);color:var(--bright);background:var(--panel-2)}.brief-actions .primary-action,.auth-submit {background:#1b68d1;color:#fff;border-color:#1b68d1}
 @media (min-width:761px) and (min-height:720px) {.brief-overlay.is-open {overflow:hidden} body:has(.brief-overlay.is-open),body:has(.welcome-overlay.is-open) {overflow:hidden}}
@@ -1772,6 +1771,21 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--cyan); outline-
 #authForm input:focus {border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 20%,transparent)}
 #authForm .control-field span {color:var(--text);font-size:12px;font-weight:650}
 .welcome-brand-row {display:flex;align-items:center;justify-content:space-between;gap:10px}
+/* Entry and brief always follow the operating system, independent of the dashboard preference. */
+.welcome-overlay,.brief-overlay {--void:#edf3fa;--bg:#f5f8fc;--panel:#fff;--panel-2:#f1f5fb;--line:#d6e1ee;--line-bright:#a9bfd8;--text:#30445f;--bright:#12243d;--muted:#59708e;--faint:#6882a2;--cyan:#1662c2;--blue:#1662c2;color-scheme:light}
+.welcome-card,.brief-dialog {background:var(--panel)!important}
+.brief-overlay {background:#15243b78}
+@media (prefers-color-scheme:dark) {
+  .welcome-overlay,.brief-overlay {--void:#090f1e;--bg:#0d1424;--panel:#121d30;--panel-2:#19263b;--line:#314158;--line-bright:#526783;--text:#dce6f5;--bright:#f8fbff;--muted:#aebed3;--faint:#93a7c0;--cyan:#5faaff;--blue:#5faaff;color-scheme:dark}
+  .brief-overlay {background:#07152ac4}
+}
+@media (max-height:700px) and (min-width:761px) {
+  .brief-overlay.is-open {overflow-y:auto;place-items:start center}
+  .brief-dialog {height:auto;min-height:0;max-height:none}
+  .brief-form {display:block}
+  .brief-scroll {overflow:visible}
+  .brief-actions {position:sticky;bottom:0}
+}
 @media (max-width:760px) {
   .brief-fields .control-field span,.brief-fields .control-field label {font-size:13px}
   .brief-fields input,.brief-fields select,.brief-fields textarea {font-size:16px;min-height:42px;height:42px}

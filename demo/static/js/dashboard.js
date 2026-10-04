@@ -863,11 +863,13 @@ function syncBriefControls() {
 
 function closeBrief() {
   document.querySelector("#briefOverlay").classList.remove("is-open");
+  sessionStorage.setItem("groundwork-brief-open", "false");
 }
 
 function openBrief() {
   syncBriefControls();
   document.querySelector("#briefOverlay").classList.add("is-open");
+  sessionStorage.setItem("groundwork-brief-open", "true");
 }
 
 function applyBrief() {
@@ -920,6 +922,7 @@ function applyBrief() {
   state.purchaseBudget = purchase ? Number(purchase) : 3000000;
   if (rent && (state.rentCap < 8000 || state.rentCap > 35000)) {document.querySelector("#briefBudget").reportValidity(); return;}
   hasSubmittedBrief = true;
+  sessionStorage.setItem("groundwork-submitted-brief", JSON.stringify({state, selectedIdea: selectedIdea.value, rentWasEntered, fields: Object.fromEntries(draftIds.map(id => [id, document.getElementById(id).value]))}));
   selectedId = null;
   syncBriefControls();
   closeBrief();
@@ -1118,14 +1121,82 @@ document.querySelector("#briefPriceTier").addEventListener("change", () => docum
 for (const id of ["briefCustomIdea", "briefCustomCuisine", "briefDescription"]) {
   document.getElementById(id).addEventListener("input", event => event.target.setCustomValidity(""));
 }
-document.querySelectorAll("[data-starter]").forEach(button => button.addEventListener("click", () => {
-  const field = document.querySelector("#briefDescription");
-  field.value = field.value.trim() ? `${field.value.trim()} · ${button.dataset.starter}` : button.dataset.starter;
-  field.focus();
-}));
-document.querySelector("#briefThemeToggle").addEventListener("click", () => setTheme(currentTheme === "dark" ? "light" : "dark"));
-document.querySelector("#welcomeThemeToggle").addEventListener("click", () => setTheme(currentTheme === "dark" ? "light" : "dark"));
-document.querySelector("#logoutButton").addEventListener("click", () => document.querySelector("#logoutForm").submit());
+const descriptionIdeas = [
+  {text: "Seasonal pastries", terms: "cafe café coffee bakery pastry breakfast brunch seasonal"},
+  {text: "Specialty coffee", terms: "cafe café coffee espresso breakfast"},
+  {text: "Weekday breakfast", terms: "cafe café breakfast brunch bakery morning weekday"},
+  {text: "Quick weekday lunches", terms: "lunch sandwich deli fast casual counter weekday"},
+  {text: "Family dining", terms: "family dinner restaurant bistro neighborhood"},
+  {text: "Late-night dining", terms: "late night bar dinner gastropub"},
+  {text: "Vegetarian options", terms: "vegetarian vegan plant salad healthy"},
+  {text: "Takeout and delivery", terms: "takeout delivery quick pizza"},
+];
+const descriptionField = document.querySelector("#briefDescription");
+const descriptionList = document.querySelector("#descriptionSuggestions");
+let activeDescriptionSuggestion = -1;
+let visibleDescriptionSuggestions = [];
+function closeDescriptionSuggestions() {
+  descriptionList.hidden = true;
+  descriptionField.setAttribute("aria-expanded", "false");
+  activeDescriptionSuggestion = -1;
+}
+function renderDescriptionSuggestions() {
+  const writing = descriptionField.value.toLowerCase();
+  const context = `${ideaInput.value} ${writing}`.toLowerCase();
+  const words = context.match(/[\p{L}]+/gu) || [];
+  visibleDescriptionSuggestions = descriptionIdeas
+    .filter(item => !writing.includes(item.text.toLowerCase()))
+    .map(item => ({...item, score: words.reduce((score, word) => score + (word.length > 2 && item.terms.includes(word) ? 1 : 0), 0)}))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+  descriptionList.replaceChildren();
+  visibleDescriptionSuggestions.forEach((item, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = item.text;
+    button.setAttribute("aria-label", `Add ${item.text} to description`);
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => insertDescriptionSuggestion(index));
+    descriptionList.append(button);
+  });
+  activeDescriptionSuggestion = -1;
+  descriptionList.hidden = !visibleDescriptionSuggestions.length;
+  descriptionField.setAttribute("aria-expanded", String(!descriptionList.hidden));
+}
+function insertDescriptionSuggestion(index) {
+  const suggestion = visibleDescriptionSuggestions[index]?.text;
+  if (!suggestion || descriptionField.value.toLowerCase().includes(suggestion.toLowerCase())) return;
+  const existing = descriptionField.value.trimEnd();
+  const separator = existing ? (/[.!?]$/.test(existing) ? " " : ". ") : "";
+  if (existing.length + separator.length + suggestion.length > descriptionField.maxLength) return;
+  descriptionField.value = existing + separator + suggestion;
+  descriptionField.dispatchEvent(new Event("input", {bubbles: true}));
+  closeDescriptionSuggestions();
+  descriptionField.focus();
+}
+descriptionField.addEventListener("input", renderDescriptionSuggestions);
+ideaInput.addEventListener("input", renderDescriptionSuggestions);
+descriptionField.addEventListener("focus", renderDescriptionSuggestions);
+descriptionField.addEventListener("keydown", event => {
+  if (event.key === "Escape") {closeDescriptionSuggestions(); return;}
+  if (descriptionList.hidden) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    activeDescriptionSuggestion = (activeDescriptionSuggestion + (event.key === "ArrowDown" ? 1 : -1) + visibleDescriptionSuggestions.length) % visibleDescriptionSuggestions.length;
+    descriptionList.querySelectorAll("button").forEach((button, index) => button.setAttribute("aria-selected", String(index === activeDescriptionSuggestion)));
+  } else if (event.key === "Enter" && activeDescriptionSuggestion >= 0) {
+    event.preventDefault();
+    insertDescriptionSuggestion(activeDescriptionSuggestion);
+  }
+});
+descriptionField.addEventListener("blur", () => setTimeout(closeDescriptionSuggestions, 120));
+function clearBriefSession() {
+  ["groundwork-submitted-brief", "groundwork-concept-draft", "groundwork-brief-open"].forEach(key => sessionStorage.removeItem(key));
+}
+document.querySelector("#logoutButton").addEventListener("click", () => {clearBriefSession(); document.querySelector("#logoutForm").submit();});
+document.querySelector("#authForm").addEventListener("submit", clearBriefSession);
+document.querySelector(".guest-form").addEventListener("submit", clearBriefSession);
 document.querySelectorAll("[data-auth-mode]").forEach(button => button.addEventListener("click", () => {
   const signup = button.dataset.authMode === "signup";
   document.querySelector("#authForm").action = `/auth/${signup ? "signup" : "login"}`;
@@ -1137,11 +1208,25 @@ document.querySelectorAll("[data-auth-mode]").forEach(button => button.addEventL
 }));
 document.querySelector(`[data-auth-mode="${document.querySelector("#authForm").action.endsWith("signup") ? "signup" : "login"}"]`).click();
 const draftIds = ["briefConceptName", "briefCustomIdea", "cuisineSearch", "briefCuisine", "briefCustomCuisine", "briefPriceTier", "briefDietary", "briefDeal", "briefBudget", "briefPurchaseBudget", "briefArea", "briefDescription", "briefServiceStyle", "briefAudience", "briefDaypart"];
+let savedFields = null;
+try {
+  const saved = JSON.parse(sessionStorage.getItem("groundwork-submitted-brief") || "null");
+  if (saved?.state && ideaOptions.some(item => item.value === saved.selectedIdea)) {
+    Object.assign(state, saved.state);
+    hasSubmittedBrief = true;
+    selectedIdea = ideaOptions.find(item => item.value === saved.selectedIdea);
+    rentWasEntered = Boolean(saved.rentWasEntered);
+    savedFields = saved.fields;
+    if (sessionStorage.getItem("groundwork-brief-open") !== "true") closeBrief();
+  }
+} catch (_) {}
+syncBriefControls();
 try {
   const draft = JSON.parse(sessionStorage.getItem("groundwork-concept-draft") || "null");
-  if (draft) {
-    draftIds.forEach(id => {if (draft[id] !== undefined) document.getElementById(id).value = draft[id];});
-    selectedIdea = ideaOptions.find(item => item.value === draft.selectedIdea) || null;
+  const fields = draft || savedFields;
+  if (fields) {
+    draftIds.forEach(id => {if (fields[id] !== undefined) document.getElementById(id).value = fields[id];});
+    selectedIdea = ideaOptions.find(item => item.value === draft?.selectedIdea) || selectedIdea;
     document.querySelector("#customIdeaField").hidden = selectedIdea?.value !== "other";
     document.querySelector("#customCuisineField").hidden = cuisineSelect.value !== "custom";
   }
@@ -1151,5 +1236,4 @@ document.querySelector("#briefForm").addEventListener("change", () => sessionSto
 
 setTheme(currentTheme, false);
 loadDashboard();
-syncBriefControls();
 setActiveLayer(activeLayer);

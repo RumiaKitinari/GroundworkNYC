@@ -57,7 +57,8 @@ in the form unless chosen. For backend compatibility, searches use a $18,000
 monthly rent cap, $3,000,000 purchase budget, lease preference, and derived
 Dining Profile defaults when omitted; these are analysis assumptions, not user
 answers. The price tier maps to the backend's existing spending assumptions.
-Appearance follows the system initially, then persists a chosen light/dark mode.
+The entry and brief screens follow the system appearance. The dashboard keeps
+its existing light/dark preference control.
 Lease, purchase, and combined searches have separate budgets and listing filters. See
 [PROPERTY_DATA.md](PROPERTY_DATA.md) for the optional listing CSV contract.
 `POST /api/concepts/resolve` accepts a JSON concept brief and returns the
