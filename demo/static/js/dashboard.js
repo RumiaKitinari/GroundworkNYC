@@ -7,10 +7,32 @@ let locationMap = null;
 let mapMarkers = [];
 let mapPopup = null;
 let mapDataset = "";
+let mapViewRequestId = 0;
 let activeBasemap = window.GROUNDWORK_HAS_STREET_TILES ? "streets" : "aerial";
-let currentTheme = localStorage.getItem("groundwork-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+// The inner box includes all five boroughs; the outer box leaves room at the edges.
+const NYC_VIEW_BOUNDS = [[-74.27, 40.48], [-73.70, 40.92]];
+const NYC_LIMIT_BOUNDS = [[-74.32, 40.43], [-73.65, 40.97]];
+const systemTheme = matchMedia("(prefers-color-scheme: dark)");
+let dashboardThemeChoice = ["light", "dark"].includes(localStorage.getItem("groundwork-theme")) ? localStorage.getItem("groundwork-theme") : "system";
+let currentTheme = dashboardThemeChoice === "system" ? (systemTheme.matches ? "dark" : "light") : dashboardThemeChoice;
 
 function mapStyle(view) {
+  if (view === "buildings3d") {
+    const style = mapStyle("aerial");
+    // The existing Esri imagery stays underneath OpenMapTiles building geometry.
+    style.sources.buildingGeometry = {type: "vector", url: "https://tiles.openfreemap.org/planet"};
+    style.layers.push({
+      id: "nyc-buildings-3d", type: "fill-extrusion", source: "buildingGeometry", "source-layer": "building", minzoom: 14.5,
+      filter: ["all", [">", ["to-number", ["get", "render_height"], 0], 0], ["!=", ["get", "hide_3d"], true]],
+      paint: {
+        "fill-extrusion-color": "#7fa8d3",
+        "fill-extrusion-height": ["to-number", ["get", "render_height"], 0],
+        "fill-extrusion-base": ["to-number", ["get", "render_min_height"], 0],
+        "fill-extrusion-opacity": 0.76,
+      },
+    });
+    return style;
+  }
   if (view === "aerial") return {
     version: 8,
     sources: {imagery: {type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: 'Imagery &copy; <a href="https://www.esri.com/">Esri</a> and its data providers'}},
@@ -77,14 +99,19 @@ const state = {
 const PRICE_DEFAULTS = {"$": 18, "$$": 35, "$$$": 65, "$$$$": 110};
 
 function setTheme(theme, persist = true) {
-  currentTheme = theme === "light" ? "light" : "dark";
+  dashboardThemeChoice = ["light", "dark"].includes(theme) ? theme : "system";
+  currentTheme = dashboardThemeChoice === "system" ? (systemTheme.matches ? "dark" : "light") : dashboardThemeChoice;
   document.documentElement.dataset.theme = currentTheme;
-  if (persist) localStorage.setItem("groundwork-theme", currentTheme);
+  if (persist) {
+    if (dashboardThemeChoice === "system") localStorage.removeItem("groundwork-theme");
+    else localStorage.setItem("groundwork-theme", dashboardThemeChoice);
+  }
   document.querySelectorAll("[data-theme-choice]").forEach(button => {
-    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === currentTheme));
+    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === dashboardThemeChoice));
   });
   if (locationMap && activeBasemap === "streets") locationMap.setStyle(mapStyle("streets"));
 }
+systemTheme.addEventListener("change", () => {if (dashboardThemeChoice === "system") setTheme("system", false);});
 
 const toneFor = {
   opportunity: ["#b6404a", "#df7653", "#e9b967", "#a8ca78", "#39ae88", "#087c78"],
@@ -265,6 +292,15 @@ function closeConceptSuggestions() {
 }
 
 function chooseConceptSuggestion(item, input) {
+  if (item.kind === "location") {
+    selectedId = item.id;
+    selectView("discover");
+    renderAll();
+    revealSelectedRanking();
+    input.value = "";
+    closeConceptSuggestions();
+    return;
+  }
   if (input.id === "briefConceptName") {
     input.value = item.title;
     document.querySelector("#briefCuisine").value = item.cuisine;
@@ -288,7 +324,11 @@ function renderConceptSuggestions(input) {
   if (activeConceptInput && activeConceptInput !== input) closeConceptSuggestions();
   activeConceptInput = input;
   const list = document.querySelector(`#${input.getAttribute("aria-controls")}`);
-  visibleSuggestions = conceptSuggestionsFor(input.value);
+  const query = normalizeConceptText(input.value);
+  const locations = input.id === "searchInput" && dashboard && query.length >= 2
+    ? dashboard.locations.filter(row => normalizeConceptText(`${row.name} ${row.borough}`).includes(query)).slice(0, 5).map(row => ({kind: "location", id: row.id, title: `${row.name} · ${row.borough}`}))
+    : [];
+  visibleSuggestions = locations.length ? locations : conceptSuggestionsFor(input.value);
   selectedSuggestionIndex = -1;
   list.replaceChildren();
   visibleSuggestions.forEach((item, index) => {
@@ -300,8 +340,14 @@ function renderConceptSuggestions(input) {
     button.addEventListener("click", () => chooseConceptSuggestion(item, input));
     list.append(button);
   });
-  list.hidden = !visibleSuggestions.length;
-  input.setAttribute("aria-expanded", String(Boolean(visibleSuggestions.length)));
+  if (!visibleSuggestions.length && input.id === "searchInput" && query.length >= 2) {
+    const empty = document.createElement("div");
+    empty.className = "search-empty";
+    empty.textContent = "No matching locations or restaurant ideas";
+    list.append(empty);
+  }
+  list.hidden = !list.childElementCount;
+  input.setAttribute("aria-expanded", String(!list.hidden));
 }
 
 async function loadDashboard() {
@@ -387,13 +433,94 @@ function toggleExpandedMap(force) {
   button.setAttribute("aria-label", expanded ? "Close Expanded Map" : "Expand Map");
   button.title = expanded ? "Close Expanded Map" : "Expand Map";
   button.textContent = expanded ? "×" : "⛶";
-  requestAnimationFrame(() => locationMap?.resize());
+  requestAnimationFrame(() => {locationMap?.resize(); updateNycConstraints();});
+}
+
+function updateNycConstraints() {
+  if (!locationMap) return;
+  const fit = locationMap.cameraForBounds(NYC_VIEW_BOUNDS, {padding: 0});
+  const minimumZoom = Math.max(8.5, Math.min(11.4, (fit?.zoom ?? 9.6) - 0.15));
+  locationMap.setMaxBounds(NYC_LIMIT_BOUNDS);
+  locationMap.setMinZoom(minimumZoom);
+}
+
+function resetToNYC() {
+  if (!locationMap) return;
+  locationMap.resize();
+  updateNycConstraints();
+  const stage = document.querySelector("#mapStage");
+  const padding = Math.max(12, Math.min(30, Math.round(Math.min(stage.clientWidth, stage.clientHeight) * .04)));
+  locationMap.fitBounds(NYC_VIEW_BOUNDS, {padding, maxZoom: 11.5, duration: 300, bearing: 0, pitch: 0});
+}
+
+function setMapViewStatus(message, isError = false) {
+  const status = document.querySelector("#mapViewStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.hidden = !message;
+  status.classList.toggle("is-error", isError);
+}
+
+function fallbackToAerial(message) {
+  if (!locationMap || activeBasemap !== "buildings3d") return;
+  activeBasemap = "aerial";
+  document.querySelector("#mapBasemapSelect").value = "aerial";
+  locationMap.setStyle(mapStyle("aerial"));
+  locationMap.easeTo({pitch: 0, bearing: 0, duration: 250});
+  updateNycConstraints();
+  setMapViewStatus(message, true);
+}
+
+async function changeMapView(next) {
+  const request = ++mapViewRequestId;
+  if (!locationMap || !["streets", "aerial", "buildings3d"].includes(next)) return;
+  if (next === activeBasemap) {setMapViewStatus(""); return;}
+  if (next === "buildings3d") {
+    setMapViewStatus("Checking 3D building tiles…");
+    try {
+      const response = await fetch("https://tiles.openfreemap.org/planet", {mode: "cors"});
+      if (!response.ok) throw new Error("Building tile source unavailable");
+      const tilejson = await response.json();
+      if (!tilejson.vector_layers?.some(layer => layer.id === "building")) throw new Error("Building geometry unavailable");
+    } catch (_) {
+      if (request !== mapViewRequestId) return;
+      document.querySelector("#mapBasemapSelect").value = activeBasemap;
+      setMapViewStatus("3D building tiles are unavailable. Aerial remains active.", true);
+      return;
+    }
+  }
+  if (request !== mapViewRequestId) return;
+  try {
+    activeBasemap = next;
+    locationMap.setStyle(mapStyle(next));
+    updateNycConstraints();
+    if (next === "buildings3d") {
+      setMapViewStatus("Loading 3D buildings…");
+      const location = selectedLocation();
+      locationMap.easeTo({center: [location.longitude, location.latitude], zoom: Math.max(locationMap.getZoom(), 15.4), pitch: 52, bearing: -18, duration: 450});
+    } else {
+      locationMap.easeTo({pitch: 0, bearing: 0, duration: 300});
+      setMapViewStatus("");
+    }
+  } catch (_) {
+    fallbackToAerial("3D building view could not load. Aerial remains active.");
+  }
 }
 
 function renderMap() {
   if (!locationMap) {
-    locationMap = new maplibregl.Map({container: "mapStage", style: mapStyle(activeBasemap), center: [-73.96, 40.73], zoom: 11, maxZoom: 19, attributionControl: true});
+    locationMap = new maplibregl.Map({container: "mapStage", style: mapStyle(activeBasemap), center: [-73.96, 40.73], zoom: 11, maxZoom: 19, maxBounds: NYC_LIMIT_BOUNDS, renderWorldCopies: false, attributionControl: true});
     locationMap.addControl(new maplibregl.NavigationControl({showCompass: false}), "top-left");
+    updateNycConstraints();
+    locationMap.on("resize", updateNycConstraints);
+    locationMap.on("error", event => {
+      if (activeBasemap === "buildings3d" && (event.sourceId === "buildingGeometry" || /openfreemap/i.test(event.error?.message || ""))) {
+        fallbackToAerial("3D building tiles failed to load. Aerial remains active.");
+      }
+    });
+    locationMap.on("idle", () => {
+      if (activeBasemap === "buildings3d" && locationMap.getLayer("nyc-buildings-3d")) setMapViewStatus("");
+    });
     const expand = document.createElement("button");
     expand.id = "expandMapButton";
     expand.className = "map-expand-button";
@@ -403,6 +530,19 @@ function renderMap() {
     expand.setAttribute("aria-label", "Expand Map");
     expand.addEventListener("click", () => toggleExpandedMap());
     document.querySelector("#mapStage").append(expand);
+    const reset = document.createElement("button");
+    reset.id = "resetNycButton";
+    reset.className = "map-reset-button";
+    reset.type = "button";
+    reset.textContent = "Reset to NYC";
+    reset.addEventListener("click", resetToNYC);
+    document.querySelector("#mapStage").append(reset);
+    const viewStatus = document.createElement("div");
+    viewStatus.id = "mapViewStatus";
+    viewStatus.className = "map-view-status";
+    viewStatus.setAttribute("role", "status");
+    viewStatus.hidden = true;
+    document.querySelector("#mapStage").append(viewStatus);
     const legend = document.createElement("div");
     legend.className = "map-legend";
     legend.innerHTML = '<span>0</span><i></i><span>100</span>';
@@ -445,6 +585,7 @@ function renderMap() {
     element.addEventListener("click", () => {
       selectedId = location.id;
       renderAll();
+      revealSelectedRanking();
     });
     mapMarkers.push(new maplibregl.Marker({element, anchor: "center"}).setLngLat([location.longitude, location.latitude]).addTo(locationMap));
   });
@@ -483,34 +624,55 @@ function renderIntel() {
     <li><span>Key Tradeoff</span><strong>${escapeHtml(signals[signals.length - 1].label)}</strong></li>
     <li><span>Cuisine Position</span><strong>${escapeHtml(location.concept_evidence.positioning)}</strong></li>
   `;
+  document.querySelector("#selectedRecommendation").textContent = location.recommendation || "No decision summary available for this location.";
 }
 
 function renderRanking() {
   const rows = dashboard.locations;
-  document.querySelector("#rankingTable").innerHTML = `
+  const table = document.querySelector("#rankingTable");
+  const previousTop = table.scrollTop;
+  const previousLeft = table.scrollLeft;
+  table.innerHTML = `
     <div class="table-row header">
       <span>#</span><span>Location</span><span>Score</span><span>Business Draw</span><span>Walkability</span><span>Cuisine Fit</span><span>Commercial Fit</span><span>Asking Rent</span>
     </div>
     ${rows.map((row, index) => `
-      <div class="table-row${row.id === selectedId ? " is-selected" : ""}" data-id="${row.id}">
+      <div class="table-row${row.id === selectedId ? " is-selected" : ""}" data-id="${row.id}" tabindex="0" role="row" aria-current="${row.id === selectedId ? "true" : "false"}">
         <button type="button">${index + 1}</button>
-        <button class="place-name" type="button">${row.name}</button>
+        <button class="place-name" type="button">${escapeHtml(row.name)}</button>
         <span class="${scoreClass(row.opportunity)}">${row.opportunity}</span>
         <span>${row.business_draw}</span>
         <span>${row.walkability ?? "--"}</span>
         <span>${row.score_components.find((item) => item.key === "market_gap").score}</span>
         <span>${row.score_components.find((item) => item.key === "economics").score}</span>
-        <span>${rentDisplay(row)}</span>
+        <span>${escapeHtml(rentDisplay(row))}</span>
       </div>
     `).join("")}
   `;
 
   document.querySelectorAll(".table-row[data-id]").forEach((row) => {
-    row.addEventListener("click", () => {
+    const choose = () => {
       selectedId = row.dataset.id;
       renderAll();
+    };
+    row.addEventListener("click", choose);
+    row.addEventListener("keydown", event => {
+      if (event.target === row && (event.key === "Enter" || event.key === " ")) {event.preventDefault(); choose();}
     });
   });
+  table.scrollTop = previousTop;
+  table.scrollLeft = previousLeft;
+}
+
+function revealSelectedRanking() {
+  const table = document.querySelector("#rankingTable");
+  const row = [...table.querySelectorAll(".table-row[data-id]")].find(item => item.dataset.id === selectedId);
+  if (!row) return;
+  const rowBounds = row.getBoundingClientRect();
+  const tableBounds = table.getBoundingClientRect();
+  const headerHeight = table.querySelector(".table-row.header")?.getBoundingClientRect().height || 0;
+  if (rowBounds.top < tableBounds.top + headerHeight) table.scrollTop += rowBounds.top - tableBounds.top - headerHeight;
+  else if (rowBounds.bottom > tableBounds.bottom) table.scrollTop += rowBounds.bottom - tableBounds.bottom;
 }
 
 function renderScorecard() {
@@ -793,7 +955,7 @@ function renderPanels() {
   document.querySelectorAll("[data-panel]").forEach((panel) => {
     panel.classList.toggle("is-hidden", panel.dataset.panel !== activeView);
   });
-  if (activeView === "discover" && locationMap) requestAnimationFrame(() => locationMap.resize());
+  if (activeView === "discover" && locationMap) requestAnimationFrame(() => {locationMap.resize(); updateNycConstraints();});
 }
 
 function renderAll() {
@@ -819,9 +981,9 @@ function renderConceptChrome() {
   const name = conceptName();
   document.querySelector("#workspaceTitle").textContent = `${name} Location Search`;
   document.querySelector("#activeConceptName").textContent = name;
-  document.querySelector("#activeConceptMeta").textContent = `${dealLabel(state.dealType)} · ${profileLabel(state.profile)} · ${state.preferredArea || "Open To NYC"}`;
-  const dietary = dashboard?.meta?.concept?.dietary;
-  document.querySelector("#activeConceptMeta").textContent += ` · ${state.priceMode === "tier" ? `${state.priceTier} Price Range` : `$${state.averageCheck} Per Guest`}${dietary && dietary !== "none" ? ` · ${titleCase(dietary.replace("_", "-"))}` : ""}`;
+  document.querySelector("#activeCuisine").textContent = state.cuisine === "custom" ? (document.querySelector("#briefCustomCuisine").value.trim() || "Other cuisine") : cuisineLabel();
+  document.querySelector("#activePrice").textContent = state.priceMode === "tier" ? `${state.priceTier} Price Range` : `$${state.averageCheck} Per Guest`;
+  document.querySelector("#activeArea").textContent = state.preferredArea || "Anywhere in NYC";
 }
 
 document.querySelectorAll(".feature-tab").forEach((button) => {
@@ -851,7 +1013,6 @@ function syncBriefControls() {
   if (hasSubmittedBrief) document.querySelector("#briefDietary").value = state.dietary;
   document.querySelector("#conceptInput").value = conceptName();
   if (hasSubmittedBrief && selectedIdea?.value !== "other") document.querySelector("#briefConceptName").value = conceptName();
-  document.querySelector("#profileSelect").value = state.profile;
   document.querySelector("#dealSelect").value = state.dealType;
   if (hasSubmittedBrief && rentWasEntered) document.querySelector("#briefBudget").value = String(state.rentCap);
   if (hasSubmittedBrief) document.querySelector("#briefArea").value = state.preferredArea;
@@ -985,14 +1146,6 @@ document.addEventListener("keydown", event => {
   if (event.key === "Escape" && document.querySelector(".map-module.is-expanded")) toggleExpandedMap(false);
 });
 
-document.querySelector("#profileSelect").addEventListener("change", (event) => {
-  state.profile = event.target.value;
-  state.serviceStyle = defaultServiceStyle(state.profile);
-  selectedId = null;
-  syncBriefControls();
-  loadDashboard();
-});
-
 document.querySelector("#rentRange").addEventListener("input", (event) => {
   const value = Number(event.target.value);
   state.rentCap = value * 1000;
@@ -1017,9 +1170,11 @@ document.querySelector("#briefSkip").addEventListener("click", () => {
   closeBrief();
 });
 
-document.querySelector("#briefEditButton").addEventListener("click", () => {
+document.querySelector("#headerEditBrief").addEventListener("click", () => {
   openBrief();
 });
+document.querySelector("#accountAccessButton")?.addEventListener("click", () => document.querySelector("#welcomeOverlay").classList.add("is-open"));
+document.querySelector("#closeAccessButton")?.addEventListener("click", () => document.querySelector("#welcomeOverlay").classList.remove("is-open"));
 
 document.querySelector("#refreshButton").addEventListener("click", () => {
   loadDashboard();
@@ -1027,23 +1182,7 @@ document.querySelector("#refreshButton").addEventListener("click", () => {
 
 document.querySelector("#viewAnalysis").addEventListener("click", () => selectView("scorecard"));
 document.querySelector("#mapLayerSelect").addEventListener("change", event => setActiveLayer(event.target.value));
-document.querySelector("#mapBasemapSelect").addEventListener("change", event => {
-  const next = event.target.value;
-  if (!locationMap || !["streets", "aerial"].includes(next) || next === activeBasemap) return;
-  activeBasemap = next;
-  locationMap.setStyle(mapStyle(activeBasemap));
-});
-
-document.querySelector("#searchInput").addEventListener("input", (event) => {
-  if (!dashboard) return;
-  const query = event.target.value.trim().toLowerCase();
-  if (conceptSuggestionsFor(query).length) return;
-  const match = dashboard.locations.find((row) => row.name.toLowerCase().includes(query) || row.borough.toLowerCase().includes(query));
-  if (query && match) {
-    selectedId = match.id;
-    renderAll();
-  }
-});
+document.querySelector("#mapBasemapSelect").addEventListener("change", event => changeMapView(event.target.value));
 
 const ideaOptions = [
   ["restaurant", "Sit-Down Restaurant", "restaurant"], ["bar", "Bar or Gastropub", "bar"],

@@ -75,6 +75,15 @@ the rendered map's vector source. Both files are private local data and
 should remain outside GitHub. The Aerial view uses Esri imagery online; OSM
 does not include aerial photography.
 
+The optional 3D Buildings view keeps that Aerial imagery and overlays
+[OpenFreeMap](https://openfreemap.org/) building geometry. Its OpenMapTiles
+`render_height` and `render_min_height` values are approximate heights derived
+from available OSM height or level tags; buildings without a positive rendered
+height are omitted. The view requires the public building tiles to load and
+returns to Aerial if they are unavailable. The map's NYC bounds are an
+approximate rectangle covering all five boroughs and include some neighboring
+areas; Reset to NYC restores the five-borough overview.
+
 For address-level 10-minute walking catchments, build the local graph once from
 the PBF. The generated SQLite file is roughly 400 MB and must also stay outside
 GitHub:

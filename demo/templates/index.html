@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261001-concept-polish" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004-workspace" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261004-workspace" />
   </head>
   <body>
     <div class="app-frame">
@@ -19,9 +20,13 @@
         </div>
 
         <div class="rail-brief">
-          <div class="rail-brief__label">Active Concept</div>
+          <div class="rail-brief__label">Active Restaurant Idea</div>
           <strong id="activeConceptName">Modern Bistro</strong>
-          <p id="activeConceptMeta">Lease · Sit-Down Restaurant · Open To NYC</p>
+          <div class="concept-facts" aria-label="Current restaurant brief">
+            <span id="activeCuisine">Cuisine</span>
+            <span id="activePrice">$$ Price Range</span>
+            <span id="activeArea">Open to NYC</span>
+          </div>
         </div>
 
         <div class="control-group">
@@ -39,19 +44,6 @@
               <option value="either">Lease Or Purchase</option>
             </select>
           </label>
-          <label class="control-field">
-            <span>Format</span>
-            <select id="profileSelect">
-              <option value="restaurant">Sit-Down Restaurant</option>
-              <option value="bar">Bar Or Gastropub</option>
-              <option value="coffee">Coffee And Breakfast</option>
-              <option value="fast_casual">Fast Casual</option>
-              <option value="counter_service">Counter Service</option>
-              <option value="bakery">Bakery Or Pastry Shop</option>
-              <option value="fine_dining">Fine Dining</option>
-              <option value="takeout_delivery">Takeout And Delivery</option>
-            </select>
-          </label>
           <div class="range-control">
             <div>
               <span>Rent Ceiling</span>
@@ -60,7 +52,6 @@
             <input id="rentRange" type="range" min="8" max="35" value="18" />
           </div>
           <div class="purchase-target" id="purchaseTarget" hidden>Purchase Target <strong id="purchaseTargetValue">$3M</strong></div>
-          <button class="brief-edit" id="briefEditButton" type="button">Edit Search Brief</button>
         </div>
 
         <div class="control-group">
@@ -85,12 +76,11 @@
 
       <main class="workspace is-discover">
         <header class="topbar">
-          <div>
+          <div class="topbar-title">
             <div class="eyebrow">Location Intelligence</div>
             <h1 id="workspaceTitle">Modern Bistro Location Search</h1>
           </div>
           <div class="top-actions">
-            <button class="primary-action edit-brief-top" type="button" onclick="openBrief()">Edit Brief</button>
             <div class="search concept-search">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="11" cy="11" r="7"></circle>
@@ -99,16 +89,24 @@
               <input id="searchInput" type="search" placeholder="Search Places Or Restaurant Ideas" autocomplete="off" role="combobox" aria-label="Search Locations Or Restaurant Ideas" aria-autocomplete="list" aria-expanded="false" aria-controls="headerConceptSuggestions" />
               <div id="headerConceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
             </div>
+            <button class="primary-action edit-brief-top" id="headerEditBrief" type="button">Edit Brief</button>
             <button class="icon-button" id="refreshButton" title="Refresh Dashboard Data" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M3 12a9 9 0 1 0 3-6.7"></path>
                 <path d="M3 4v5h5"></path>
               </svg>
             </button>
+            <div class="header-theme segmented-control" role="group" aria-label="Dashboard appearance">
+              <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
+              <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+              <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+            </div>
+            <div class="account-bar" {{ '' if access else 'hidden' }}><span>{{ email if email else 'Guest' }}</span>{% if access == 'guest' %}<button type="button" id="accountAccessButton">Log in / Sign up</button>{% endif %}<button type="button" id="logoutButton">Log out</button></div>
           </div>
         </header>
 
         <nav class="feature-tabs" aria-label="Groundwork Feature Modules">
+          <div class="nav-group" aria-label="Explore"><span class="nav-group-label">Explore</span>
           <button class="feature-tab is-active" data-view="discover" type="button">
             <strong>Overview</strong>
             <span>Rankings</span>
@@ -125,6 +123,8 @@
             <strong>Compare</strong>
             <span>Tradeoffs</span>
           </button>
+          </div>
+          <div class="nav-group" aria-label="Research"><span class="nav-group-label">Research</span>
           <button class="feature-tab" data-view="lease" type="button">
             <strong>Properties</strong>
             <span>Leads</span>
@@ -141,6 +141,8 @@
             <strong>Trading Hours</strong>
             <span>Dayparts</span>
           </button>
+          </div>
+          <div class="nav-group" aria-label="Workspace"><span class="nav-group-label">Workspace</span>
           <button class="feature-tab" data-view="reports" type="button">
             <strong>Reports</strong>
             <span>Exports</span>
@@ -153,6 +155,7 @@
             <strong>Settings</strong>
             <span>Preferences</span>
           </button>
+          </div>
         </nav>
 
         <div class="dashboard-status" id="dashboardStatus" role="status" hidden></div>
@@ -168,6 +171,7 @@
                 <select id="mapBasemapSelect" aria-label="Map View">
                   <option value="streets" {{ 'disabled' if not street_tiles_available else '' }}>Streets{{ ' (local tiles unavailable)' if not street_tiles_available else '' }}</option>
                   <option value="aerial" {{ 'selected' if not street_tiles_available else '' }}>Aerial</option>
+                  <option value="buildings3d">3D Buildings</option>
                 </select>
                 <select id="mapLayerSelect" aria-label="Map Layer">
                   <option value="opportunity">Location Score</option>
@@ -200,6 +204,7 @@
                 <span id="confidencePill">--</span>
               </div>
               <ul id="driverList"></ul>
+              <p class="decision-note" id="selectedRecommendation"></p>
               <button class="quiet-action" id="viewAnalysis" type="button">View Location Analysis</button>
             </div>
           </aside>
@@ -308,8 +313,9 @@
               <div class="settings-row">
                 <div><h3>Appearance</h3></div>
                 <div class="segmented-control" role="group" aria-label="Appearance">
-                  <button type="button" data-theme-choice="dark" aria-pressed="true">Dark</button>
+                  <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
                   <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+                  <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
                 </div>
               </div>
             </div>
@@ -331,7 +337,7 @@
       <div class="welcome-card">
         <div class="welcome-photo" aria-hidden="true"></div>
         <div class="welcome-content">
-          <div class="welcome-brand-row"><div class="welcome-brand">GW <span>Groundwork</span></div></div>
+          <div class="welcome-brand-row"><div class="welcome-brand">GW <span>Groundwork</span></div>{% if access == 'guest' %}<button type="button" id="closeAccessButton" class="access-close">Close</button>{% endif %}</div>
           <div class="eyebrow">NYC RESTAURANT LOCATION RESEARCH</div>
           <h1 id="welcomeTitle">Find your place in New York.</h1>
           <p>Shape your restaurant idea and explore locations with the Groundwork research dashboard.</p>
@@ -455,10 +461,9 @@
     </section>
 
     <form id="logoutForm" method="post" action="{{ url_for('auth_action', action='logout') }}" hidden><input type="hidden" name="csrf_token" value="{{ csrf }}" /></form>
-    <div class="account-bar" {{ '' if access else 'hidden' }}><span>{{ email if email else 'Browsing as guest' }}</span><button type="button" id="logoutButton">Log out</button></div>
 
     <script>window.GROUNDWORK_HAS_STREET_TILES = {{ street_tiles_available|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261001-concept-polish"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261004-workspace"></script>
   </body>
 </html>
