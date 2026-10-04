@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260925-backend-final" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261001-concept-polish" />
   </head>
   <body>
     <div class="app-frame">
@@ -166,8 +166,8 @@
               </div>
               <div class="module-tabs">
                 <select id="mapBasemapSelect" aria-label="Map View">
-                  <option value="streets">Streets</option>
-                  <option value="aerial">Aerial</option>
+                  <option value="streets" {{ 'disabled' if not street_tiles_available else '' }}>Streets{{ ' (local tiles unavailable)' if not street_tiles_available else '' }}</option>
+                  <option value="aerial" {{ 'selected' if not street_tiles_available else '' }}>Aerial</option>
                 </select>
                 <select id="mapLayerSelect" aria-label="Map Layer">
                   <option value="opportunity">Location Score</option>
@@ -327,28 +327,59 @@
       </main>
     </div>
 
-    <section class="brief-overlay is-open" id="briefOverlay" aria-labelledby="briefTitle" aria-modal="true" role="dialog">
-      <div class="brief-dialog">
-        <div class="brief-photo" aria-hidden="true"></div>
-        <form class="brief-form" id="briefForm">
-          <div>
-            <div class="eyebrow">Concept Studio</div>
-            <h2 id="briefTitle">Define The Restaurant</h2>
+    <section class="welcome-overlay {{ '' if access else 'is-open' }}" id="welcomeOverlay" aria-labelledby="welcomeTitle" aria-modal="true" role="dialog">
+      <div class="welcome-card">
+        <div class="welcome-photo" aria-hidden="true"></div>
+        <div class="welcome-content">
+          <div class="welcome-brand-row"><div class="welcome-brand">GW <span>Groundwork</span></div><button class="theme-toggle" type="button" id="welcomeThemeToggle" aria-label="Toggle color theme">◐ <span>Theme</span></button></div>
+          <div class="eyebrow">NYC RESTAURANT LOCATION RESEARCH</div>
+          <h1 id="welcomeTitle">Find your place in New York.</h1>
+          <p>Shape your restaurant idea and explore locations with the Groundwork research dashboard.</p>
+          <div class="auth-switch" role="group" aria-label="Account options">
+            <button type="button" data-auth-mode="login">Log in</button>
+            <button type="button" data-auth-mode="signup">Sign up</button>
           </div>
-          <div class="brief-fields">
-            <div class="control-field wide concept-search">
-              <span>Restaurant Idea</span>
-              <input id="briefConceptName" type="text" value="Modern Bistro" maxlength="48" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="conceptSuggestions" />
-              <div id="conceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
-            </div>
-            <label class="control-field wide">
-              <span>Describe Your Concept</span>
-              <input id="briefDescription" type="text" maxlength="500" placeholder="e.g., Vegan Mexican dining with a cocktail bar" />
-            </label>
-            <label class="control-field">
-              <span>Cuisine</span>
-              <select id="briefCuisine">
-                <option value="any">Not Specified</option>
+          <form id="authForm" method="post" action="{{ url_for('auth_action', action=auth_mode) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}" />
+            <label class="control-field"><span>Email</span><input name="email" type="email" autocomplete="email" required maxlength="254" /></label>
+            <label class="control-field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128" /></label>
+            <label class="control-field" id="confirmField" hidden><span>Confirm password</span><input name="confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" /></label>
+            {% if auth_error %}<p class="form-error" role="alert">{{ auth_error }}</p>{% endif %}
+            <button class="primary-action auth-submit" type="submit">Log in</button>
+          </form>
+          <form method="post" action="{{ url_for('auth_action', action='guest') }}" class="guest-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}" />
+            <button type="submit" class="quiet-action">Continue as guest <span aria-hidden="true">→</span></button>
+          </form>
+          <p class="welcome-note">Guest access needs no account.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="brief-overlay {{ 'is-open' if access else '' }}" id="briefOverlay" aria-labelledby="briefTitle" aria-modal="true" role="dialog">
+      <div class="brief-dialog">
+        <div class="brief-photo" aria-hidden="true"><div class="photo-caption">A better location starts with a clearer idea.</div></div>
+        <form class="brief-form" id="briefForm" novalidate>
+          <div class="brief-heading">
+            <div><div class="eyebrow">CONCEPT STUDIO</div><h2 id="briefTitle">Define your restaurant</h2><p>A few details help shape your location search.</p></div>
+            <button class="theme-toggle" type="button" id="briefThemeToggle" aria-label="Toggle color theme">◐ <span>Theme</span></button>
+          </div>
+          <div class="brief-scroll">
+            <p class="required-note">* Required</p>
+            <div class="brief-fields">
+              <div class="control-field concept-search">
+                <label for="briefConceptName">Restaurant Idea <b>*</b></label>
+                <input id="briefConceptName" type="text" placeholder="Search ideas, e.g. Café" maxlength="48" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="conceptSuggestions" aria-required="true" />
+                <div id="conceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
+                <small id="ideaError" class="field-error" hidden>Choose an idea from the suggestions.</small>
+              </div>
+              <label class="control-field" id="customIdeaField" hidden><span>Custom Restaurant Idea <b>*</b></span><input id="briefCustomIdea" type="text" maxlength="80" placeholder="Describe your idea" /></label>
+              <div class="control-field cuisine-search">
+                <label for="cuisineSearch">Cuisine <b>*</b></label>
+                <input id="cuisineSearch" type="text" placeholder="Select cuisine" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cuisineSuggestions" aria-required="true" />
+                <div id="cuisineSuggestions" class="concept-suggestions" role="listbox" hidden></div>
+                <select id="briefCuisine" aria-label="Selected cuisine" hidden>
+                <option value="">Select cuisine</option>
                 <option value="american">American</option>
                 <option value="southern_soul">Southern / Soul Food</option>
                 <option value="cajun_creole">Cajun / Creole</option>
@@ -399,98 +430,36 @@
                 <option value="noodles">Noodles</option>
                 <option value="vegetarian_vegan">Vegetarian / Vegan</option>
                 <option value="health_focused">Health-Focused</option>
-                <option value="fusion">Fusion / Multiple Cuisines</option>
-                <option value="custom">Other / Custom Concept</option>
+                <option value="fusion">Fusion / Mixed</option>
+                <option value="custom">Other</option>
               </select>
-            </label>
-            <div class="control-field wide">
-              <span>Intended Price</span>
-              <div class="segmented-control price-mode" role="group" aria-label="Intended Price Input">
-                <button type="button" data-price-mode="tier" aria-pressed="true">Price Range</button>
-                <button type="button" data-price-mode="exact" aria-pressed="false">Per Guest</button>
+                <small id="cuisineError" class="field-error" hidden>Select a cuisine from the list.</small>
               </div>
+              <label class="control-field" id="customCuisineField" hidden><span>Other Cuisine <b>*</b></span><input id="briefCustomCuisine" type="text" maxlength="80" placeholder="Describe the cuisine" /></label>
+              <label class="control-field"><span>Price Range <b>*</b></span><select id="briefPriceTier" required><option value="">Select price range</option><option value="$">$ · Everyday</option><option value="$$">$$ · Midrange</option><option value="$$$">$$$ · Premium</option><option value="$$$$">$$$$ · Fine Dining</option></select><small id="priceError" class="field-error" hidden>Select a price range.</small></label>
+              <label class="control-field"><span>Dietary Focus <em>Optional</em></span><select id="briefDietary"><option value="none">No preference</option><option value="vegan">Vegan</option><option value="vegetarian">Vegetarian</option><option value="halal">Halal</option><option value="kosher">Kosher</option><option value="gluten_free">Gluten-Free</option></select></label>
+              <label class="control-field"><span>Space Preference <em>Optional</em></span><select id="briefDeal"><option value="">No preference</option><option value="lease">Lease a space</option><option value="purchase">Purchase a property</option><option value="either">Show lease and purchase</option></select></label>
+              <label class="control-field" id="monthlyBudgetField"><span>Monthly Rent Budget <em>Optional</em></span><div class="money-input"><span>$</span><input id="briefBudget" type="number" min="8000" max="35000" step="1000" placeholder="Amount" /><span>per month</span></div></label>
+              <label class="control-field" id="purchaseBudgetField" hidden><span>Purchase Budget <em>Optional</em></span><div class="money-input"><span>$</span><input id="briefPurchaseBudget" type="number" min="100000" max="50000000" step="50000" placeholder="Amount" /></div></label>
+              <label class="control-field"><span>Preferred Area <em>Optional</em></span><select id="briefArea"><option value="">Anywhere in NYC</option><option value="Brooklyn">Brooklyn</option><option value="Queens">Queens</option><option value="Manhattan">Manhattan</option><option value="Bronx">Bronx</option></select></label>
+              <div class="control-field wide description-field"><label for="briefDescription">Describe Your Concept <em>Optional</em></label><textarea id="briefDescription" maxlength="500" rows="2" placeholder="e.g. A neighborhood café with seasonal pastries"></textarea><small>What makes your restaurant different?</small><div class="starter-row"><button type="button" data-starter="Quick weekday lunches">Quick weekday lunches</button><button type="button" data-starter="Family dining">Family dining</button><button type="button" data-starter="Late-night dining">Late-night dining</button></div></div>
             </div>
-            <label class="control-field" id="briefTierField">
-              <span>Price Range</span>
-              <select id="briefPriceTier">
-                <option value="$">$ · Everyday</option>
-                <option value="$$" selected>$$ · Midrange</option>
-                <option value="$$$">$$$ · Premium</option>
-                <option value="$$$$">$$$$ · Fine Dining</option>
-              </select>
-            </label>
-            <label class="control-field" id="briefExactPriceField" hidden>
-              <span>Average Spend Per Guest ($)</span>
-              <input id="briefAverageCheck" type="number" min="5" max="250" step="1" value="35" />
-            </label>
-            <label class="control-field">
-              <span>Dietary Identity</span>
-              <select id="briefDietary">
-                <option value="none">None</option>
-                <option value="vegan">Vegan</option>
-                <option value="vegetarian">Vegetarian</option>
-                <option value="halal">Halal</option>
-                <option value="kosher">Kosher</option>
-                <option value="gluten_free">Gluten-Free</option>
-              </select>
-            </label>
-            <label class="control-field">
-              <span>Transaction</span>
-              <select id="briefDeal">
-                <option value="lease">Lease A Space</option>
-                <option value="purchase">Purchase A Property</option>
-                <option value="either">Show Lease And Purchase</option>
-              </select>
-            </label>
-            <label class="control-field">
-              <span>Format</span>
-              <select id="briefProfile">
-                <option value="restaurant">Sit-Down Restaurant</option>
-                <option value="bar">Bar Or Gastropub</option>
-                <option value="coffee">Coffee And Breakfast</option>
-                <option value="fast_casual">Fast Casual</option>
-                <option value="counter_service">Counter Service</option>
-                <option value="bakery">Bakery Or Pastry Shop</option>
-                <option value="fine_dining">Fine Dining</option>
-                <option value="takeout_delivery">Takeout And Delivery</option>
-              </select>
-            </label>
-            <label class="control-field" id="monthlyBudgetField">
-              <span>Monthly Budget Target</span>
-              <input id="briefBudget" type="number" min="8000" max="35000" step="1000" value="18000" />
-            </label>
-            <label class="control-field" id="purchaseBudgetField" hidden>
-              <span>Purchase Budget ($)</span>
-              <input id="briefPurchaseBudget" type="number" min="100000" max="50000000" step="50000" value="3000000" />
-            </label>
-            <label class="control-field">
-              <span>Preferred Area</span>
-              <select id="briefArea">
-                <option value="">Open To NYC</option>
-                <option value="Brooklyn">Brooklyn</option>
-                <option value="Queens">Queens</option>
-                <option value="Manhattan">Manhattan</option>
-                <option value="Bronx">Bronx</option>
-              </select>
-            </label>
+            <details class="dining-profile" id="diningProfile"><summary>Dining Profile <em>Optional</em></summary><div class="brief-fields">
+              <label class="control-field"><span>Service Style</span><select id="briefServiceStyle"><option value="">No preference</option><option value="quick_service">Quick Service</option><option value="casual">Casual Dining</option><option value="fine_dining">Fine Dining</option></select></label>
+              <label class="control-field"><span>Target Customers</span><select id="briefAudience"><option value="">No preference</option><option value="residents">Local Residents</option><option value="workers">Nearby Workers</option><option value="destination">Destination Diners</option></select></label>
+              <label class="control-field"><span>Main Service Hours</span><select id="briefDaypart"><option value="">No preference</option><option value="all_day">All Day</option><option value="morning">Morning</option><option value="lunch">Lunch</option><option value="evening">Evening</option></select></label>
+            </div></details>
           </div>
-          <details class="dining-profile">
-            <summary>Dining Profile</summary>
-            <div class="brief-fields">
-              <label class="control-field"><span>Service Style</span><select id="briefServiceStyle"><option value="quick_service">Quick Service</option><option value="casual" selected>Casual Dining</option><option value="fine_dining">Fine Dining</option></select></label>
-              <label class="control-field"><span>Customer Focus</span><select id="briefAudience"><option value="residents">Local Residents</option><option value="workers">Nearby Workers</option><option value="destination">Destination Diners</option></select></label>
-              <label class="control-field"><span>Primary Trading Period</span><select id="briefDaypart"><option value="all_day">All Day</option><option value="morning">Morning</option><option value="lunch">Lunch</option><option value="evening">Evening</option></select></label>
-            </div>
-          </details>
-          <div class="brief-actions">
-            <button class="quiet-action" id="briefSkip" type="button">Open Dashboard</button>
-            <button class="primary-action" type="submit">Run Location Search</button>
-          </div>
+          <div class="brief-actions"><button class="quiet-action" id="briefSkip" type="button">Explore Dashboard</button><button class="primary-action" type="submit">Find Locations <span aria-hidden="true">→</span></button></div>
         </form>
       </div>
     </section>
 
+    <form id="logoutForm" method="post" action="{{ url_for('auth_action', action='logout') }}" hidden><input type="hidden" name="csrf_token" value="{{ csrf }}" /></form>
+    <div class="account-bar" {{ '' if access else 'hidden' }}><span>{{ email if email else 'Browsing as guest' }}</span><button type="button" id="logoutButton">Log out</button></div>
+
+    <script>window.GROUNDWORK_HAS_STREET_TILES = {{ street_tiles_available|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260925-backend-final"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261001-concept-polish"></script>
   </body>
 </html>

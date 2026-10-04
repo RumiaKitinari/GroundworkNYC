@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import os
+import secrets
 import sqlite3
 from copy import deepcopy
 from contextlib import closing
@@ -8,7 +10,8 @@ from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, redirect, session, url_for
+from werkzeug.security import generate_password_hash, check_password_hash
 from scoring import CUISINES, Concept, ScreeningModel, MODEL_VERSION, resolve_concept
 from evaluation import evaluation_status, run_evaluation
 from osm_network import WalkingNetwork
@@ -16,6 +19,35 @@ from financials import operating_scenario
 
 
 app = Flask(__name__)
+INSTANCE_DIR = Path(__file__).resolve().parents[1] / "instance"
+INSTANCE_DIR.mkdir(exist_ok=True)
+INSTANCE_DIR.chmod(0o700)
+SECRET_PATH = INSTANCE_DIR / "flask-secret.key"
+if not SECRET_PATH.exists():
+    SECRET_PATH.write_text(secrets.token_hex(32))
+    SECRET_PATH.chmod(0o600)
+app.secret_key = os.environ.get("GROUNDWORK_SECRET_KEY") or SECRET_PATH.read_text().strip()
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+ACCOUNTS_PATH = INSTANCE_DIR / "accounts.sqlite3"
+
+
+def account_db():
+    connection = sqlite3.connect(ACCOUNTS_PATH)
+    ACCOUNTS_PATH.chmod(0o600)
+    connection.execute("CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL)")
+    return connection
+
+
+def csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return session["csrf_token"]
+
+
+def csrf_valid():
+    saved = session.get("csrf_token", "")
+    submitted = request.form.get("csrf_token", "")
+    return bool(saved and submitted) and secrets.compare_digest(saved, submitted)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INTEGRATED_DATA_DIR = PROJECT_ROOT / "data" / "integrated" / "restaurant_bar_location_data_ready"
@@ -878,7 +910,52 @@ def recommendation_for(score: int, confidence: int, risks: list[str]) -> str:
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", access=session.get("access"), email=session.get("email"), csrf=csrf_token(), auth_error=None, auth_mode="login", street_tiles_available=OSM_TILES_PATH.is_file())
+
+
+@app.post("/auth/<action>")
+def auth_action(action):
+    if action not in {"login", "signup", "guest", "logout"}:
+        return "Not found", 404
+    if not csrf_valid():
+        return "Invalid CSRF token. Reload the page and try again.", 400
+    if action == "logout":
+        session.clear()
+        return redirect(url_for("index"))
+    if action == "guest":
+        session.clear()
+        session["access"] = "guest"
+        return redirect(url_for("index"))
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    error = None
+    if len(email) > 254 or "@" not in email or email.startswith("@") or email.endswith("@"):
+        error = "Enter a valid email address."
+    elif not 8 <= len(password) <= 128:
+        error = "Password must be 8–128 characters."
+    elif action == "signup" and password != request.form.get("confirmation", ""):
+        error = "Passwords do not match."
+    if not error:
+        with account_db() as connection:
+            if action == "signup":
+                try:
+                    cursor = connection.execute("INSERT INTO accounts (email, password_hash) VALUES (?, ?)", (email, generate_password_hash(password)))
+                    account_id = cursor.lastrowid
+                except sqlite3.IntegrityError:
+                    error = "An account with this email already exists."
+            else:
+                row = connection.execute("SELECT id, password_hash FROM accounts WHERE email=?", (email,)).fetchone()
+                if not row or not check_password_hash(row[1], password):
+                    error = "Email or password is incorrect."
+                else:
+                    account_id = row[0]
+    if error:
+        return render_template("index.html", access=None, email=None, csrf=csrf_token(), auth_error=error, auth_mode=action, street_tiles_available=OSM_TILES_PATH.is_file()), 400
+    session.clear()
+    session["access"] = "account"
+    session["account_id"] = account_id
+    session["email"] = email
+    return redirect(url_for("index"))
 
 
 @app.post("/api/concepts/resolve")

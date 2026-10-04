@@ -7,8 +7,8 @@ let locationMap = null;
 let mapMarkers = [];
 let mapPopup = null;
 let mapDataset = "";
-let activeBasemap = "streets";
-let currentTheme = localStorage.getItem("groundwork-theme") === "light" ? "light" : "dark";
+let activeBasemap = window.GROUNDWORK_HAS_STREET_TILES ? "streets" : "aerial";
+let currentTheme = localStorage.getItem("groundwork-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 
 function mapStyle(view) {
   if (view === "aerial") return {
@@ -76,10 +76,10 @@ const state = {
 };
 const PRICE_DEFAULTS = {"$": 18, "$$": 35, "$$$": 65, "$$$$": 110};
 
-function setTheme(theme) {
+function setTheme(theme, persist = true) {
   currentTheme = theme === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = currentTheme;
-  localStorage.setItem("groundwork-theme", currentTheme);
+  if (persist) localStorage.setItem("groundwork-theme", currentTheme);
   document.querySelectorAll("[data-theme-choice]").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.themeChoice === currentTheme));
   });
@@ -153,14 +153,7 @@ function syncTransactionFields() {
   document.querySelector("#purchaseTargetValue").textContent = fmtPrice(state.purchaseBudget);
 }
 
-function syncPriceModeControls() {
-  document.querySelector("#briefTierField").hidden = state.priceMode !== "tier";
-  document.querySelector("#briefExactPriceField").hidden = state.priceMode !== "exact";
-  document.querySelector("#briefAverageCheck").required = state.priceMode === "exact";
-  document.querySelectorAll("[data-price-mode]").forEach(button => {
-    button.setAttribute("aria-pressed", String(button.dataset.priceMode === state.priceMode));
-  });
-}
+function syncPriceModeControls() {}
 
 function scoreClass(value) {
   if (value >= 82) return "score-good";
@@ -259,7 +252,7 @@ function conceptSuggestionsFor(query) {
 }
 
 function closeConceptSuggestions() {
-  document.querySelectorAll("#conceptInput, #briefConceptName, #searchInput").forEach(input => {
+  document.querySelectorAll("#conceptInput, #searchInput").forEach(input => {
     const list = document.querySelector(`#${input.getAttribute("aria-controls")}`);
     list.hidden = true;
     list.replaceChildren();
@@ -276,9 +269,7 @@ function chooseConceptSuggestion(item, input) {
     input.value = item.title;
     document.querySelector("#briefCuisine").value = item.cuisine;
     document.querySelector("#briefDietary").value = item.dietary;
-    document.querySelector("#briefProfile").value = item.profile;
-    document.querySelector("#briefServiceStyle").value = defaultServiceStyle(item.profile);
-  } else {
+    } else {
     state.conceptName = item.title;
     state.cuisine = item.cuisine;
     state.dietary = item.dietary;
@@ -855,27 +846,18 @@ document.querySelectorAll(".mini-tab").forEach((button) => {
 });
 
 function syncBriefControls() {
-  document.querySelector("#briefCuisine").value = state.cuisine;
-  document.querySelector("#briefAverageCheck").value = state.averageCheck;
-  document.querySelector("#briefPriceTier").value = state.priceTier;
-  document.querySelector("#briefDietary").value = state.dietary;
-  document.querySelector("#briefDescription").value = state.description;
-  document.querySelector("#briefPurchaseBudget").value = state.purchaseBudget;
-  document.querySelector("#briefServiceStyle").value = state.serviceStyle;
-  document.querySelector("#briefAudience").value = state.audience;
-  document.querySelector("#briefDaypart").value = state.daypart;
+  if (hasSubmittedBrief) document.querySelector("#briefCuisine").value = state.cuisine;
+  if (hasSubmittedBrief) document.querySelector("#briefPriceTier").value = state.priceTier;
+  if (hasSubmittedBrief) document.querySelector("#briefDietary").value = state.dietary;
   document.querySelector("#conceptInput").value = conceptName();
-  document.querySelector("#briefConceptName").value = conceptName();
+  if (hasSubmittedBrief && selectedIdea?.value !== "other") document.querySelector("#briefConceptName").value = conceptName();
   document.querySelector("#profileSelect").value = state.profile;
-  document.querySelector("#briefProfile").value = state.profile;
   document.querySelector("#dealSelect").value = state.dealType;
-  document.querySelector("#briefDeal").value = state.dealType;
-  document.querySelector("#briefBudget").value = String(state.rentCap);
-  document.querySelector("#briefArea").value = state.preferredArea;
+  if (hasSubmittedBrief && rentWasEntered) document.querySelector("#briefBudget").value = String(state.rentCap);
+  if (hasSubmittedBrief) document.querySelector("#briefArea").value = state.preferredArea;
   document.querySelector("#rentRange").value = String(Math.round(state.rentCap / 1000));
   document.querySelector("#rentLabel").textContent = `$${Math.round(state.rentCap / 1000)}k`;
   syncTransactionFields();
-  syncPriceModeControls();
   renderConceptChrome();
 }
 
@@ -889,29 +871,55 @@ function openBrief() {
 }
 
 function applyBrief() {
-  const ideaInput = document.querySelector("#briefConceptName");
-  const suggestion = conceptSuggestionsFor(ideaInput.value)[0];
-  if (suggestion && ideaInput.value.trim() !== state.conceptName &&
-      document.querySelector("#briefCuisine").value === state.cuisine &&
-      document.querySelector("#briefDietary").value === state.dietary &&
-      document.querySelector("#briefProfile").value === state.profile) {
-    chooseConceptSuggestion(suggestion, ideaInput);
+  const idea = document.querySelector("#briefConceptName");
+  const cuisine = document.querySelector("#briefCuisine");
+  const price = document.querySelector("#briefPriceTier");
+  const customIdea = document.querySelector("#briefCustomIdea");
+  const customCuisine = document.querySelector("#briefCustomCuisine");
+  const validIdea = selectedIdea && (idea.value === selectedIdea.label);
+  const checks = [
+    ["ideaError", validIdea], ["cuisineError", Boolean(cuisine.value)], ["priceError", Boolean(price.value)],
+  ];
+  checks.forEach(([id, valid]) => document.getElementById(id).hidden = valid);
+  customIdea.required = selectedIdea?.value === "other";
+  customCuisine.required = cuisine.value === "custom";
+  customIdea.setCustomValidity(customIdea.required && !customIdea.value.trim() ? "Enter your restaurant idea." : "");
+  customCuisine.setCustomValidity(customCuisine.required && !customCuisine.value.trim() ? "Enter your cuisine." : "");
+  document.querySelector("#briefDescription").setCustomValidity("");
+  if (!checks.every(([, valid]) => valid)) {
+    (validIdea ? (!cuisine.value ? document.querySelector("#cuisineSearch") : price) : idea).focus();
+    return;
   }
-  state.cuisine = document.querySelector("#briefCuisine").value;
-  state.priceTier = document.querySelector("#briefPriceTier").value;
-  state.averageCheck = state.priceMode === "tier" ? PRICE_DEFAULTS[state.priceTier] : Number(document.querySelector("#briefAverageCheck").value);
-  state.dietary = document.querySelector("#briefDietary").value;
-  state.description = document.querySelector("#briefDescription").value.trim();
-  state.purchaseBudget = Number(document.querySelector("#briefPurchaseBudget").value || 3000000);
-  state.serviceStyle = document.querySelector("#briefServiceStyle").value;
-  state.audience = document.querySelector("#briefAudience").value;
-  state.daypart = document.querySelector("#briefDaypart").value;
-  state.conceptName = document.querySelector("#briefConceptName").value.trim() || "Restaurant Concept";
-  state.dealType = document.querySelector("#briefDeal").value;
-  state.profile = document.querySelector("#briefProfile").value;
+  if (!document.querySelector("#briefForm").reportValidity()) return;
+  state.conceptName = selectedIdea.value === "other" ? customIdea.value.trim() : selectedIdea.label;
+  state.profile = selectedIdea.profile;
+  state.cuisine = cuisine.value;
+  state.priceTier = price.value;
+  state.priceMode = "tier";
+  state.averageCheck = PRICE_DEFAULTS[price.value];
+  state.dietary = document.querySelector("#briefDietary").value || "none";
+  const description = document.querySelector("#briefDescription").value.trim();
+  const otherCuisine = cuisine.value === "custom" ? customCuisine.value.trim() : "";
+  const combinedDescription = [description, otherCuisine ? `Cuisine: ${otherCuisine}` : ""].filter(Boolean).join(". ");
+  if (combinedDescription.length > 500) {
+    document.querySelector("#briefDescription").setCustomValidity("Shorten the description so your custom cuisine also fits within 500 characters.");
+    document.querySelector("#briefDescription").reportValidity();
+    return;
+  }
+  document.querySelector("#briefDescription").setCustomValidity("");
+  state.description = combinedDescription;
+  state.dealType = document.querySelector("#briefDeal").value || "lease";
   state.preferredArea = document.querySelector("#briefArea").value;
-  const budget = Number(document.querySelector("#briefBudget").value || 18000);
-  state.rentCap = Math.max(8000, Math.min(35000, budget));
+  state.serviceStyle = document.querySelector("#briefServiceStyle").value || defaultServiceStyle(state.profile);
+  state.audience = document.querySelector("#briefAudience").value || "residents";
+  state.daypart = document.querySelector("#briefDaypart").value || "all_day";
+  const rent = document.querySelector("#briefBudget").value;
+  rentWasEntered = Boolean(rent);
+  state.rentCap = rent ? Number(rent) : 18000;
+  const purchase = document.querySelector("#briefPurchaseBudget").value;
+  state.purchaseBudget = purchase ? Number(purchase) : 3000000;
+  if (rent && (state.rentCap < 8000 || state.rentCap > 35000)) {document.querySelector("#briefBudget").reportValidity(); return;}
+  hasSubmittedBrief = true;
   selectedId = null;
   syncBriefControls();
   closeBrief();
@@ -929,18 +937,9 @@ document.querySelector("#briefDeal").addEventListener("change", (event) => {
   syncTransactionFields();
 });
 
-document.querySelector("#briefPriceTier").addEventListener("change", (event) => {
-  if (state.priceMode === "tier") document.querySelector("#briefAverageCheck").value = PRICE_DEFAULTS[event.target.value];
-});
-
-document.querySelectorAll("[data-price-mode]").forEach(button => button.addEventListener("click", () => {
-  state.priceMode = button.dataset.priceMode;
-  syncPriceModeControls();
-}));
-
 document.querySelectorAll("[data-theme-choice]").forEach(button => button.addEventListener("click", () => setTheme(button.dataset.themeChoice)));
 
-document.querySelectorAll("#conceptInput, #briefConceptName, #searchInput").forEach(input => {
+document.querySelectorAll("#conceptInput, #searchInput").forEach(input => {
   input.addEventListener("input", () => renderConceptSuggestions(input));
   input.addEventListener("focus", () => renderConceptSuggestions(input));
   input.addEventListener("keydown", event => {
@@ -989,10 +988,6 @@ document.querySelector("#profileSelect").addEventListener("change", (event) => {
   selectedId = null;
   syncBriefControls();
   loadDashboard();
-});
-
-document.querySelector("#briefProfile").addEventListener("change", (event) => {
-  document.querySelector("#briefServiceStyle").value = defaultServiceStyle(event.target.value);
 });
 
 document.querySelector("#rentRange").addEventListener("input", (event) => {
@@ -1047,7 +1042,114 @@ document.querySelector("#searchInput").addEventListener("input", (event) => {
   }
 });
 
-setTheme(currentTheme);
+const ideaOptions = [
+  ["restaurant", "Sit-Down Restaurant", "restaurant"], ["bar", "Bar or Gastropub", "bar"],
+  ["coffee", "Coffee and Breakfast", "coffee"], ["fast_casual", "Fast Casual", "fast_casual"],
+  ["counter_service", "Counter Service", "counter_service"], ["bakery", "Bakery or Pastry Shop", "bakery"],
+  ["fine_dining", "Fine Dining", "fine_dining"], ["takeout_delivery", "Takeout and Delivery", "takeout_delivery"],
+  ["cafe", "Café", "coffee"], ["bistro", "Bistro", "restaurant"], ["pizzeria", "Pizzeria", "restaurant"],
+  ["dessert_shop", "Dessert Shop", "bakery"], ["food_truck", "Food Truck", "counter_service"],
+  ["other", "Other", "restaurant"],
+].map(([value, label, profile]) => ({value, label, profile}));
+let selectedIdea = null;
+let hasSubmittedBrief = false;
+let rentWasEntered = false;
+
+function setupChoice(input, list, options, onChoose) {
+  let shown = [], active = -1;
+  function render() {
+    const query = normalizeConceptText(input.value);
+    shown = options().filter(item => !query || normalizeConceptText(item.label).includes(query));
+    list.replaceChildren();
+    shown.forEach((item, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.role = "option";
+      button.id = `${list.id}-${index}`;
+      button.textContent = item.label;
+      button.addEventListener("mousedown", event => event.preventDefault());
+      button.addEventListener("click", () => choose(item));
+      list.append(button);
+    });
+    list.hidden = !shown.length;
+    input.setAttribute("aria-expanded", String(Boolean(shown.length)));
+    active = -1;
+  }
+  function choose(item) {
+    input.value = item.label;
+    onChoose(item);
+    input.dispatchEvent(new Event("change", {bubbles: true}));
+    list.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  }
+  input.addEventListener("focus", render);
+  input.addEventListener("input", render);
+  input.addEventListener("keydown", event => {
+    if (event.key === "Escape") {list.hidden = true; input.setAttribute("aria-expanded", "false"); return;}
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (list.hidden) render();
+      if (!shown.length) return;
+      active = (active + (event.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length;
+      list.querySelectorAll("button").forEach((button, index) => button.setAttribute("aria-selected", String(index === active)));
+      input.setAttribute("aria-activedescendant", `${list.id}-${active}`);
+    } else if (event.key === "Enter" && !list.hidden && shown.length) {event.preventDefault(); choose(shown[Math.max(active, 0)]);}
+  });
+  input.addEventListener("blur", () => setTimeout(() => {list.hidden = true; input.setAttribute("aria-expanded", "false");}, 100));
+}
+
+const ideaInput = document.querySelector("#briefConceptName");
+setupChoice(ideaInput, document.querySelector("#conceptSuggestions"), () => ideaOptions, item => {
+  selectedIdea = item;
+  document.querySelector("#customIdeaField").hidden = item.value !== "other";
+  document.querySelector("#ideaError").hidden = true;
+});
+ideaInput.addEventListener("input", () => {selectedIdea = null; document.querySelector("#customIdeaField").hidden = true;});
+const cuisineInput = document.querySelector("#cuisineSearch");
+const cuisineSelect = document.querySelector("#briefCuisine");
+setupChoice(cuisineInput, document.querySelector("#cuisineSuggestions"), () => [...cuisineSelect.options].filter(option => option.value).map(option => ({value: option.value, label: option.textContent})), item => {
+  cuisineSelect.value = item.value;
+  document.querySelector("#customCuisineField").hidden = item.value !== "custom";
+  document.querySelector("#cuisineError").hidden = true;
+});
+cuisineInput.addEventListener("input", () => {cuisineSelect.value = ""; document.querySelector("#customCuisineField").hidden = true;});
+document.querySelector("#briefPriceTier").addEventListener("change", () => document.querySelector("#priceError").hidden = true);
+for (const id of ["briefCustomIdea", "briefCustomCuisine", "briefDescription"]) {
+  document.getElementById(id).addEventListener("input", event => event.target.setCustomValidity(""));
+}
+document.querySelectorAll("[data-starter]").forEach(button => button.addEventListener("click", () => {
+  const field = document.querySelector("#briefDescription");
+  field.value = field.value.trim() ? `${field.value.trim()} · ${button.dataset.starter}` : button.dataset.starter;
+  field.focus();
+}));
+document.querySelector("#briefThemeToggle").addEventListener("click", () => setTheme(currentTheme === "dark" ? "light" : "dark"));
+document.querySelector("#welcomeThemeToggle").addEventListener("click", () => setTheme(currentTheme === "dark" ? "light" : "dark"));
+document.querySelector("#logoutButton").addEventListener("click", () => document.querySelector("#logoutForm").submit());
+document.querySelectorAll("[data-auth-mode]").forEach(button => button.addEventListener("click", () => {
+  const signup = button.dataset.authMode === "signup";
+  document.querySelector("#authForm").action = `/auth/${signup ? "signup" : "login"}`;
+  document.querySelector("#confirmField").hidden = !signup;
+  document.querySelector("#confirmField input").required = signup;
+  document.querySelector("#authForm input[name=password]").autocomplete = signup ? "new-password" : "current-password";
+  document.querySelector(".auth-submit").textContent = signup ? "Create account" : "Log in";
+  document.querySelectorAll("[data-auth-mode]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
+}));
+document.querySelector(`[data-auth-mode="${document.querySelector("#authForm").action.endsWith("signup") ? "signup" : "login"}"]`).click();
+const draftIds = ["briefConceptName", "briefCustomIdea", "cuisineSearch", "briefCuisine", "briefCustomCuisine", "briefPriceTier", "briefDietary", "briefDeal", "briefBudget", "briefPurchaseBudget", "briefArea", "briefDescription", "briefServiceStyle", "briefAudience", "briefDaypart"];
+try {
+  const draft = JSON.parse(sessionStorage.getItem("groundwork-concept-draft") || "null");
+  if (draft) {
+    draftIds.forEach(id => {if (draft[id] !== undefined) document.getElementById(id).value = draft[id];});
+    selectedIdea = ideaOptions.find(item => item.value === draft.selectedIdea) || null;
+    document.querySelector("#customIdeaField").hidden = selectedIdea?.value !== "other";
+    document.querySelector("#customCuisineField").hidden = cuisineSelect.value !== "custom";
+  }
+} catch (_) {}
+document.querySelector("#briefForm").addEventListener("input", () => sessionStorage.setItem("groundwork-concept-draft", JSON.stringify(Object.fromEntries([...draftIds.map(id => [id, document.getElementById(id).value]), ["selectedIdea", selectedIdea?.value]]))));
+document.querySelector("#briefForm").addEventListener("change", () => sessionStorage.setItem("groundwork-concept-draft", JSON.stringify(Object.fromEntries([...draftIds.map(id => [id, document.getElementById(id).value]), ["selectedIdea", selectedIdea?.value]]))));
+
+setTheme(currentTheme, false);
 loadDashboard();
 syncBriefControls();
 setActiveLayer(activeLayer);

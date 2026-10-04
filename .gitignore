@@ -6,6 +6,7 @@ __pycache__/
 
 # Local Django/MongoDB state
 .env
+instance/
 *.log
 
 # Raw and generated geospatial data (keep small examples under data/samples/)
