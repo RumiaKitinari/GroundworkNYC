@@ -40,25 +40,11 @@ If the download arrives as a zip file, unzip it so the folder itself is named `r
 
 The current demo supports tract-level location recommendations, score explanations, source coverage, and Storefront Registry property leads. Exact asking rent, sale price, listing photos, confirmed lease or purchase availability, review sentiment, and mobile-phone foot traffic are not included in the uploaded data package.
 
-The entry screen offers local email/password accounts or immediate guest access.
-Accounts are stored in `../instance/accounts.sqlite3` with hashed passwords;
-the Flask signing key is persisted in `../instance/flask-secret.key` unless
-`GROUNDWORK_SECRET_KEY` is set. Both files are ignored by Git. This is local
-demo authentication: it has no email verification, password recovery, rate
-limiting, or account management. The existing data APIs remain accessible to
-guests and are not account-protected.
-
-Restaurant briefs require an explicitly selected idea, cuisine, and $–$$$$
-price range. New idea labels map to existing supported backend restaurant
-profiles; they do not introduce specialized models. Other cuisine is carried
-as custom cuisine text in the description, while the existing backend marks
-it as not separately classified. Optional rent and purchase budgets stay blank
-in the form unless chosen. For backend compatibility, searches use a $18,000
-monthly rent cap, $3,000,000 purchase budget, lease preference, and derived
-Dining Profile defaults when omitted; these are analysis assumptions, not user
-answers. The price tier maps to the backend's existing spending assumptions.
-The entry and brief screens follow the system appearance. The dashboard keeps
-its existing light/dark preference control.
+Restaurant briefs include 50 cuisine and specialty categories, plus fusion and
+custom concepts. Typing an idea such as "Korean Bistro" offers cuisine and
+format suggestions. Pricing can be entered as a $-$$$$ range or an exact
+average spend per guest. The brief also accepts dietary identity and a free-text
+description. Appearance can be switched between light and dark in Settings.
 Lease, purchase, and combined searches have separate budgets and listing filters. See
 [PROPERTY_DATA.md](PROPERTY_DATA.md) for the optional listing CSV contract.
 `POST /api/concepts/resolve` accepts a JSON concept brief and returns the
@@ -75,15 +61,6 @@ the rendered map's vector source. Both files are private local data and
 should remain outside GitHub. The Aerial view uses Esri imagery online; OSM
 does not include aerial photography.
 
-The optional 3D Buildings view keeps that Aerial imagery and overlays
-[OpenFreeMap](https://openfreemap.org/) building geometry. Its OpenMapTiles
-`render_height` and `render_min_height` values are approximate heights derived
-from available OSM height or level tags; buildings without a positive rendered
-height are omitted. The view requires the public building tiles to load and
-returns to Aerial if they are unavailable. The map's NYC bounds are an
-approximate rectangle covering all five boroughs and include some neighboring
-areas; Reset to NYC restores the five-borough overview.
-
 For address-level 10-minute walking catchments, build the local graph once from
 the PBF. The generated SQLite file is roughly 400 MB and must also stay outside
 GitHub:
@@ -98,16 +75,16 @@ evidence as unavailable. A catchment counts geocoded active restaurants and
 subway stations reachable on the OSM pedestrian network. It is not measured
 foot traffic or a visit forecast.
 
-Run it from the repository root (Python 3.12+ for the pinned `networkx` dependency):
+Run it from this folder:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r demo/requirements.txt
-cd demo
-../.venv/bin/python -m flask --app app run --host 127.0.0.1 --port 5002 --no-reload
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
 ```
 
-Then visit `http://127.0.0.1:5002/`.
+Then visit `http://localhost:5001`.
 
 ## Concept Scoring
 

@@ -16,23 +16,34 @@ const systemTheme = matchMedia("(prefers-color-scheme: dark)");
 let dashboardThemeChoice = ["light", "dark"].includes(localStorage.getItem("groundwork-theme")) ? localStorage.getItem("groundwork-theme") : "system";
 let currentTheme = dashboardThemeChoice === "system" ? (systemTheme.matches ? "dark" : "light") : dashboardThemeChoice;
 
-function mapStyle(view) {
-  if (view === "buildings3d") {
-    const style = mapStyle("aerial");
-    // The existing Esri imagery stays underneath OpenMapTiles building geometry.
-    style.sources.buildingGeometry = {type: "vector", url: "https://tiles.openfreemap.org/planet"};
-    style.layers.push({
-      id: "nyc-buildings-3d", type: "fill-extrusion", source: "buildingGeometry", "source-layer": "building", minzoom: 14.5,
-      filter: ["all", [">", ["to-number", ["get", "render_height"], 0], 0], ["!=", ["get", "hide_3d"], true]],
-      paint: {
-        "fill-extrusion-color": "#7fa8d3",
-        "fill-extrusion-height": ["to-number", ["get", "render_height"], 0],
-        "fill-extrusion-base": ["to-number", ["get", "render_min_height"], 0],
-        "fill-extrusion-opacity": 0.76,
-      },
-    });
-    return style;
+const VECTOR_STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
+
+async function buildingMapStyle() {
+  const response = await fetch(VECTOR_STYLE_URL, {mode: "cors"});
+  if (!response.ok) throw new Error("3D street style unavailable");
+  const style = await response.json();
+  if (style.version !== 8 || style.sources?.openmaptiles?.type !== "vector" ||
+      !style.layers?.some(layer => layer.source === "openmaptiles" && layer["source-layer"] === "building")) {
+    throw new Error("3D building geometry unavailable");
   }
+  // Keep this view vector-only even if the provider adds a raster layer later.
+  style.layers = style.layers.filter(layer => layer.type !== "raster");
+  Object.keys(style.sources).forEach(id => {if (style.sources[id].type === "raster") delete style.sources[id];});
+  const firstLabel = style.layers.findIndex(layer => layer.type === "symbol");
+  style.layers.splice(firstLabel < 0 ? style.layers.length : firstLabel, 0, {
+    id: "nyc-buildings-3d", type: "fill-extrusion", source: "openmaptiles", "source-layer": "building", minzoom: 14.5,
+    filter: ["all", [">", ["to-number", ["get", "render_height"], 0], 0], ["!=", ["get", "hide_3d"], true]],
+    paint: {
+      "fill-extrusion-color": "#7fa8d3",
+      "fill-extrusion-height": ["to-number", ["get", "render_height"], 0],
+      "fill-extrusion-base": ["to-number", ["get", "render_min_height"], 0],
+      "fill-extrusion-opacity": 0.76,
+    },
+  });
+  return style;
+}
+
+function mapStyle(view) {
   if (view === "aerial") return {
     version: 8,
     sources: {imagery: {type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: 'Imagery &copy; <a href="https://www.esri.com/">Esri</a> and its data providers'}},
@@ -475,24 +486,22 @@ async function changeMapView(next) {
   const request = ++mapViewRequestId;
   if (!locationMap || !["streets", "aerial", "buildings3d"].includes(next)) return;
   if (next === activeBasemap) {setMapViewStatus(""); return;}
+  let style;
   if (next === "buildings3d") {
-    setMapViewStatus("Checking 3D building tiles…");
+    setMapViewStatus("Loading 3D street map…");
     try {
-      const response = await fetch("https://tiles.openfreemap.org/planet", {mode: "cors"});
-      if (!response.ok) throw new Error("Building tile source unavailable");
-      const tilejson = await response.json();
-      if (!tilejson.vector_layers?.some(layer => layer.id === "building")) throw new Error("Building geometry unavailable");
+      style = await buildingMapStyle();
     } catch (_) {
       if (request !== mapViewRequestId) return;
       document.querySelector("#mapBasemapSelect").value = activeBasemap;
-      setMapViewStatus("3D building tiles are unavailable. Aerial remains active.", true);
+      setMapViewStatus("3D street map is unavailable. Aerial remains active.", true);
       return;
     }
   }
   if (request !== mapViewRequestId) return;
   try {
     activeBasemap = next;
-    locationMap.setStyle(mapStyle(next));
+    locationMap.setStyle(style || mapStyle(next));
     updateNycConstraints();
     if (next === "buildings3d") {
       setMapViewStatus("Loading 3D buildings…");
@@ -514,8 +523,8 @@ function renderMap() {
     updateNycConstraints();
     locationMap.on("resize", updateNycConstraints);
     locationMap.on("error", event => {
-      if (activeBasemap === "buildings3d" && (event.sourceId === "buildingGeometry" || /openfreemap/i.test(event.error?.message || ""))) {
-        fallbackToAerial("3D building tiles failed to load. Aerial remains active.");
+      if (activeBasemap === "buildings3d" && (event.sourceId === "openmaptiles" || /openfreemap/i.test(event.error?.message || ""))) {
+        fallbackToAerial("3D street map failed to load. Aerial remains active.");
       }
     });
     locationMap.on("idle", () => {
@@ -1373,6 +1382,6 @@ try {
 document.querySelector("#briefForm").addEventListener("input", () => sessionStorage.setItem("groundwork-concept-draft", JSON.stringify(Object.fromEntries([...draftIds.map(id => [id, document.getElementById(id).value]), ["selectedIdea", selectedIdea?.value]]))));
 document.querySelector("#briefForm").addEventListener("change", () => sessionStorage.setItem("groundwork-concept-draft", JSON.stringify(Object.fromEntries([...draftIds.map(id => [id, document.getElementById(id).value]), ["selectedIdea", selectedIdea?.value]]))));
 
-setTheme(currentTheme, false);
+setTheme(dashboardThemeChoice, false);
 loadDashboard();
 setActiveLayer(activeLayer);

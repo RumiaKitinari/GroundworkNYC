@@ -1771,14 +1771,13 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--cyan); outline-
 #authForm input:focus {border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 20%,transparent)}
 #authForm .control-field span {color:var(--text);font-size:12px;font-weight:650}
 .welcome-brand-row {display:flex;align-items:center;justify-content:space-between;gap:10px}
-/* Entry and brief always follow the operating system, independent of the dashboard preference. */
-.welcome-overlay,.brief-overlay {--void:#edf3fa;--bg:#f5f8fc;--panel:#fff;--panel-2:#f1f5fb;--line:#d6e1ee;--line-bright:#a9bfd8;--text:#30445f;--bright:#12243d;--muted:#59708e;--faint:#6882a2;--cyan:#1662c2;--blue:#1662c2;color-scheme:light}
+/* Entry and brief use the dashboard's resolved theme; System follows the OS. */
+.welcome-overlay,.brief-overlay {color:var(--text);color-scheme:dark}
+:root[data-theme="light"] .welcome-overlay,:root[data-theme="light"] .brief-overlay {color-scheme:light}
 .welcome-card,.brief-dialog {background:var(--panel)!important}
-.brief-overlay {background:#15243b78}
-@media (prefers-color-scheme:dark) {
-  .welcome-overlay,.brief-overlay {--void:#090f1e;--bg:#0d1424;--panel:#121d30;--panel-2:#19263b;--line:#314158;--line-bright:#526783;--text:#dce6f5;--bright:#f8fbff;--muted:#aebed3;--faint:#93a7c0;--cyan:#5faaff;--blue:#5faaff;color-scheme:dark}
-  .brief-overlay {background:#07152ac4}
-}
+:root[data-theme="light"] .brief-overlay {background:#15243b78}
+:root .brief-overlay .brief-fields :is(input,select,textarea) {background:var(--panel-2);color:var(--bright)}
+.brief-overlay option {background:var(--panel);color:var(--bright)}
 @media (max-height:700px) and (min-width:761px) {
   .brief-overlay.is-open {overflow-y:auto;place-items:start center}
   .brief-dialog {height:auto;min-height:0;max-height:none}
