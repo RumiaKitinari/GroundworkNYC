@@ -11,10 +11,11 @@
 - Polished the dashboard layout, navigation, search, and location selection.
 - Added System theme, NYC map bounds, Reset to NYC, and 3D.
 - Corrected Aerial/3D separation, Edit Brief theme/readability, and an optional walking-graph dependency issue.
+- Documented the frontend architecture, map modes, APIs, and dataset in `demo/FRONTEND_ARCHITECTURE.md`.
 
 ## Changes to merge into main
 
-- 
+- Merge the `ui-concept-polish` dashboard polish and its Aerial/3D, System theme, Edit Brief, and optional walking-graph fixes after review.
 
 ## Data Folder
 
