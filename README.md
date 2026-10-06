@@ -68,3 +68,69 @@ python scripts/osm_pbf_to_csv.py \
 Run `python scripts/osm_pbf_to_csv.py --help` for all options. The
 `geometry_geojson` cell is valid GeoJSON and `tags_json` preserves the complete
 OSM tag dictionary for later MongoDB imports.
+
+## Detailed frontend changes and integration notes (2026-10-06)
+
+This compares the **application code on original main** (`0cae33b`) with the
+UI work. Current main adds only the README handoff commit `0d47f04` on top of
+that code; it has not received any of the UI application changes. The pushed
+`origin/ui-concept-polish` branch contains commit `4c5f0f0`. The latest preview
+also includes uncommitted work in the local worktree named below.
+
+### Changes available on the remote UI branch
+
+| File | Change from original main | Integration detail |
+| --- | --- | --- |
+| `demo/templates/index.html` | Loads the new `workspace.css`; replaces the sidebar's Format picker and Edit Brief button with active idea facts in the sidebar and Edit Brief in the header. Adds header System/Light/Dark controls and account actions, groups the existing feature tabs under Explore/Research/Workspace, adds a selected-location recommendation, and offers 3D Buildings in the map selector. | Keep the new element IDs (`headerEditBrief`, `activeCuisine`, `activePrice`, `activeArea`, `selectedRecommendation`) paired with the JS. The entry photo and brief form are retained. |
+| `demo/static/css/workspace.css` | New, scoped dashboard stylesheet for the sidebar, header, tabs, metrics, map/details panels, ranking table, feed cards, and responsive layouts. It also styles the Reset to NYC button, map status, and guest overlay close button. | `index.html` must load it after `dashboard.css`; copying the template alone leaves the polish unstyled. |
+| `demo/static/js/dashboard.js` | Adds location matches to header suggestions; selecting a match focuses the result. Ranking rows gain keyboard activation, selected-row reveal, escaped text, and scroll preservation. Map dots and ranking rows share `selectedId`; the selected-location note uses the API's existing recommendation. | These are browser interactions over the existing `/api/dashboard` response, not new scoring or API fields. Preserve the paired template IDs and CSS. |
+| `demo/static/js/dashboard.js` | Adds bounded NYC pan/zoom, Reset to NYC, 3D building extrusions, provider failure messages, and a System dashboard theme option that follows OS changes. | **This pushed version draws 3D buildings over Aerial photos.** It is an intermediate map implementation; apply the local correction below before calling the latest design integrated. |
+| `demo/README.md` | Documents the intermediate 3D overlay and NYC bounds. | Its 3D description is superseded by the uncommitted correction below. |
+
+The remote commit changes **only those four paths**. It does not change
+`demo/app.py`, `demo/scoring.py`, private datasets, or the entry/brief foundation
+already on main.
+
+### Latest preview changes that are local only
+
+These files are in `/Users/jas/Downloads/GroundworkNYC-ui-concept-polish-preview`
+on this machine, on `ui-concept-polish`, **but are not in**
+`origin/ui-concept-polish` or `origin/main`:
+
+| File | Local change and reason |
+| --- | --- |
+| `demo/static/js/dashboard.js` | Replaces the Aerial-backed 3D overlay with two separate styles: Aerial uses Esri raster imagery and dots without buildings; 3D fetches OpenFreeMap Positron vector streets and adds building extrusions without satellite imagery. It checks the style, shows a failure message and falls back to Aerial when needed. Style switching retains the same result set and selected location. Also fixes initial restoration of the System dashboard theme choice. |
+| `demo/static/css/dashboard.css` | Fixes Edit Brief input and dropdown contrast. Initial entry/brief follow system appearance when there is no dashboard choice; Edit Brief opened from the dashboard inherits its resolved Light, Dark, or System appearance. The form layout and values are unchanged. |
+| `demo/osm_network.py` | Checks whether the optional walking graph exists before importing `networkx`. An absent optional graph then leaves walking evidence unavailable instead of failing the dashboard request. No scoring formula changed. |
+| `demo/README.md` | Corrects the 3D setup description to vector streets without Aerial imagery and adds a UI handoff with review steps. |
+| `demo/FRONTEND_ARCHITECTURE.md` | New, untracked guide to Flask, the dashboard API, the six integrated CSVs, map modes, browser state, and the deterministic model. |
+
+The worktree also has an untracked `checkpoints/` directory containing local
+handoff material. It is **not** one of the application or documentation files
+to integrate. No local-only UI fix has been committed or pushed.
+
+### How to integrate the complete version
+
+1. Fetch and review the pushed delta with `git diff 0cae33b...origin/ui-concept-polish -- demo/`.
+   In the local preview worktree, separately review `git status`, `git diff`,
+   and the untracked architecture guide. A remote branch comparison cannot
+   show those uncommitted files.
+2. Arrange for the reviewed local fixes to be committed/shared before merging.
+   Bringing over only `4c5f0f0` keeps the aerial-plus-buildings version and
+   misses the theme and optional-graph fixes. Keep any newer main edits when
+   resolving conflicts; do not reset or overwrite either worktree.
+3. Keep private data and generated files out of Git. The Flask app expects the
+   private package at `data/integrated/restaurant_bar_location_data_ready/`:
+   `master_tract_features.csv`, `source_catalog.csv`, `feature_readiness.csv`,
+   `entities/current_restaurants.csv` (the original package file),
+   `entities/current_storefronts.csv`, and
+   `entities/subway_stations_weekly_activity.csv`. Local MBTiles, walking graph,
+   listings, and `instance/` files are separate optional/runtime data.
+4. Test with the real dataset: `/api/dashboard` must return locations; check
+   map tiles and clickable dots, rankings and selected-location details,
+   Edit Brief values/submission/refresh, both dashboard themes and System,
+   and Aerial/3D switching while a location is selected. A homepage HTTP 200
+   does not establish that data, tiles, or interactions work.
+
+Main's setup remains in [demo/README.md](demo/README.md). This section records
+the handoff; it does not add the UI implementation to main.
