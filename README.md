@@ -12,10 +12,13 @@
 - Added System theme, NYC map bounds, Reset to NYC, and 3D.
 - Corrected Aerial/3D separation, Edit Brief theme/readability, and an optional walking-graph dependency issue.
 - Documented the frontend architecture, map modes, APIs, and dataset in `demo/FRONTEND_ARCHITECTURE.md`.
+- Added CSV-backed existing-restaurant dots with clustering and name, cuisine, and address popups.
+- Kept restaurant dots, their toggle, and their legend in 3D Buildings only; recommendation markers stay visible in every map mode, and the toggle choice is remembered.
 
 ## Changes to merge into main
 
-- Merge the `ui-concept-polish` dashboard polish and its Aerial/3D, System theme, Edit Brief, and optional walking-graph fixes after review.
+- Port the `ui-concept-polish` 3D-only restaurant overlay into main's newer dashboard: the map API, clustered blue dots, detail popups, and 3D-only toggle and legend. Keep recommendation selection in every mode.
+- Selectively review remaining UI-branch differences against main: duplicate Format removal, conditional local Streets availability, tighter NYC bounds and position-preserving map switches, Edit Brief presentation, and the optional walking-graph fallback. Main already has a dashboard, System theme, Aerial, and 3D.
 
 ## Data Folder
 
