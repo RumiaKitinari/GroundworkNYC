@@ -229,7 +229,7 @@ class ScreeningModel:
         pedestrian = p("nearest_pedestrian_count_site_latest_pedestrian_count_total")
         reliability = 1 / (1 + (pedestrian_distance / .25) ** 2) if pedestrian_distance is not None else 0
         pedestrian = (pedestrian[0], pedestrian[1] * reliability)
-        evening = p("citibike_evening_departures_august_2026")
+        evening = p("citibike_evening_departures_latest_month") if row.get("citibike_evening_departures_latest_month") else p("citibike_evening_departures_august_2026")
         evening = (evening[0], evening[1] * .6)
         worker_weight = .4 if concept.audience == "workers" or concept.daypart in {"morning", "lunch"} else .15
         evening_weight = .25 if concept.daypart == "evening" else .08

@@ -75,6 +75,37 @@ reachable active restaurants and subway complexes from the integrated entities;
 it does not modify the unvalidated tract score or estimate actual pedestrians.
 Missing graph coverage is reported as unavailable.
 
+## Hierarchical Concept Demand Surface
+
+The optional map layer uses H3 resolution 7 sectors, resolution 8 local cells,
+and resolution 9 finer cells at zoom 14 and above. It is a hierarchical display
+of the existing screening model, not a trained demand forecast. Eligible NYC
+tract polygons are intersected with each cell; each intersecting tract
+contributes in proportion to its overlap. Cells with less than 10% eligible
+tract-polygon overlap are omitted. Parent values aggregate their child cells
+by eligible overlap share. The map hides recommendation markers while the
+Concept Demand layer is active. Resolution 10 remains offline research; see
+[HEX_RESOLUTION_STUDY.md](HEX_RESOLUTION_STUDY.md).
+
+The Concept Demand Index uses the existing restaurant-format weights for
+demand, customer fit, access, market opportunity, and competition balance,
+renormalized after excluding commercial suitability. Format and service style
+affect these weights and the underlying access and competition components;
+guest-spend tier or exact price affects customer fit independently of cuisine.
+Cuisine is optional and only affects market opportunity where supported by
+classified inventory. Dietary identity, customer focus, and trading period
+also feed the existing component model. Local cells replace the tract-centroid subway
+distance with the distance from the cell center for a small access adjustment.
+Evidence coverage is reported separately. Unclassified free text, deal type,
+rent ceiling, and purchase budget do not affect a demand index; they belong to
+property or commercial analysis. Hex boundaries do not make tract-level data
+more precise, and the index is not observed foot traffic, visits, sales, or
+probability of business success.
+
+`GET /api/hex-demand?level=sector|cell|fine` accepts the same concept fields as
+the dashboard and returns GeoJSON with scores, coverage and the integrated release.
+The same release and concept inputs produce the same cells and values.
+
 ## Interpretation
 
 "Potential Cuisine Gap" requires sufficient labeled inventory, demand and

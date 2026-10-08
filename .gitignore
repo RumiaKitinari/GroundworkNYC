@@ -10,6 +10,8 @@ instance/
 *.log
 
 # Raw and generated geospatial data (keep small examples under data/samples/)
+data/*
+!data/samples/
 *.osm.pbf
 *.mbtiles
 *.sqlite
