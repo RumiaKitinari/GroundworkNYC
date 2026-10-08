@@ -22,4 +22,5 @@ data/cleaned_sources/
 data/osm/
 data/listings/
 data/evaluation/
+data/c_rest_AI/
 .DS_Store
