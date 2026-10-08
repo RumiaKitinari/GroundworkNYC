@@ -20,6 +20,7 @@ data/output/
 data/integrated/
 data/cleaned_sources/
 data/osm/
+data/c_rest/
 data/listings/
 data/evaluation/
 .DS_Store
