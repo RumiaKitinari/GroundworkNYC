@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004-workspace" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261004-workspace" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261008-3d-restaurants" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261008-restaurants" />
   </head>
   <body>
     <div class="app-frame">
@@ -168,6 +168,7 @@
                 <h2 id="mapModeTitle">NYC Score Surface</h2>
               </div>
               <div class="module-tabs">
+                <label class="restaurant-toggle" hidden><input id="showRestaurantsToggle" type="checkbox" checked /> Show existing restaurants</label>
                 <select id="mapBasemapSelect" aria-label="Map View">
                   <option value="streets" {{ 'disabled' if not street_tiles_available else '' }}>Streets{{ ' (local tiles unavailable)' if not street_tiles_available else '' }}</option>
                   <option value="aerial" {{ 'selected' if not street_tiles_available else '' }}>Aerial</option>
@@ -464,6 +465,6 @@
 
     <script>window.GROUNDWORK_HAS_STREET_TILES = {{ street_tiles_available|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261004-workspace"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261008-3d-restaurants"></script>
   </body>
 </html>

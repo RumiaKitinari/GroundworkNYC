@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import os
 import secrets
 import sqlite3
@@ -322,6 +323,44 @@ def integrated_package() -> dict:
             "lon_max": max(longitudes),
         },
     }
+
+
+@lru_cache(maxsize=1)
+def restaurant_map_data() -> dict:
+    features = []
+    seen = set()
+    excluded = {"inactive": 0, "missing_coordinates": 0, "outside_nyc_bounds": 0, "missing_identifier": 0, "duplicate_identifier": 0}
+    for row in integrated_package()["restaurants"]:
+        if not as_bool(row.get("active_establishment")):
+            excluded["inactive"] += 1
+            continue
+        identifier = (row.get("camis") or "").strip()
+        if not identifier:
+            excluded["missing_identifier"] += 1
+            continue
+        try:
+            latitude = float(row.get("latitude") or "")
+            longitude = float(row.get("longitude") or "")
+        except ValueError:
+            excluded["missing_coordinates"] += 1
+            continue
+        if not math.isfinite(latitude) or not math.isfinite(longitude):
+            excluded["missing_coordinates"] += 1
+            continue
+        if not 40.43 <= latitude <= 40.97 or not -74.32 <= longitude <= -73.65:
+            excluded["outside_nyc_bounds"] += 1
+            continue
+        if identifier in seen:
+            excluded["duplicate_identifier"] += 1
+            continue
+        seen.add(identifier)
+        street_address = " ".join(part for part in ((row.get("building") or "").strip(), (row.get("street") or "").strip()) if part)
+        address = ", ".join(part for part in (street_address, (row.get("boro") or "").strip(), (row.get("zipcode") or "").strip()) if part)
+        features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [longitude, latitude]},
+                         "properties": {"id": identifier, "name": (row.get("dba") or "").strip(),
+                                        "cuisine": (row.get("cuisine_description") or "").strip(), "address": address}})
+    return {"type": "FeatureCollection", "features": features,
+            "meta": {"mapped": len(features), "excluded": excluded}}
 
 
 def concept_competition_column(profile: str) -> str:
@@ -1008,6 +1047,11 @@ def osm_tile(z: int, x: int, y: int):
         response.headers["Content-Encoding"] = "gzip"
     response.headers["Cache-Control"] = "public, max-age=86400"
     return response
+
+
+@app.get("/api/map/restaurants")
+def map_restaurants():
+    return jsonify(restaurant_map_data())
 
 
 @app.route("/api/dashboard")

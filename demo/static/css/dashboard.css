@@ -1459,6 +1459,21 @@ input[type="range"] {
 .map-stage.maplibregl-map { height: 440px; min-height: 440px; z-index: 0; background: #e4e9e7; }
 .map-legend { position: absolute; left: 12px; bottom: 28px; z-index: 2; display: flex; align-items: center; gap: 8px; background: #fff; color: #263236; border-radius: 4px; padding: 8px 10px; font-size: 11px; pointer-events: none; }
 .map-legend i { display: block; width: 70px; height: 5px; }
+.map-legend { flex-direction: column; align-items: flex-start; gap: 5px; }
+.map-legend > div { display: flex; align-items: center; gap: 5px; }
+.map-legend > div span:nth-of-type(2) { margin-left: 7px; }
+.legend-recommendation-dot, .legend-restaurant-dot { display: block; flex: none; border-radius: 50%; }
+.legend-recommendation-dot { width: 13px; height: 13px; border: 1px solid #172321; background: linear-gradient(135deg, #b6404a, #e9b967, #39ae88); }
+.legend-restaurant-dot { width: 8px; height: 8px; margin: 2px; border: 1px solid #fff; background: #2487df; box-shadow: 0 0 0 1px #1662c2; }
+.restaurant-toggle { display: inline-flex; align-items: center; gap: 6px; flex: none; white-space: nowrap; color: var(--text); font-size: 11px; cursor: pointer; }
+.restaurant-toggle[hidden], .legend-restaurant-entry[hidden] { display: none; }
+.restaurant-toggle input { width: 15px; height: 15px; margin: 0; accent-color: #2487df; cursor: pointer; }
+.map-module .module-head, .map-module .module-tabs { flex-wrap: wrap; }
+.map-restaurant-detail { display: grid; gap: 7px; min-width: 180px; color: #253336; font-size: 12px; }
+.map-restaurant-detail strong { padding-right: 14px; font-size: 14px; line-height: 1.25; }
+.map-restaurant-detail div { display: grid; grid-template-columns: 55px minmax(0, 1fr); gap: 8px; }
+.map-restaurant-detail span { color: #5f6e72; }
+.map-restaurant-detail b { font-weight: 650; overflow-wrap: anywhere; }
 .module-tabs select { width: 185px; height: 34px; font-size: 12px; }
 .module-tabs #mapBasemapSelect { width: 96px; }
 .map-stage .maplibregl-ctrl-group button { background-color: #fff; }
@@ -1669,6 +1684,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--cyan); outline-
   .rail-brief { display: none; }
   .module-head { flex-wrap: wrap; }
   .module-tabs { flex-wrap: wrap; }
+  .map-module .module-tabs { width: 100%; }
+  .map-module .restaurant-toggle { width: 100%; }
   .metric-ribbon { display: grid; gap: 18px 12px; }
   .metric { min-height: 0; }
   .search { max-width: none; }

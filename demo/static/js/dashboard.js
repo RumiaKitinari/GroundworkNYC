@@ -6,6 +6,10 @@ let requestId = 0;
 let locationMap = null;
 let mapMarkers = [];
 let mapPopup = null;
+let restaurantPopup = null;
+let restaurantDataPromise = null;
+let restaurantStyleRevision = 0;
+let showExistingRestaurants = true;
 let mapDataset = "";
 let mapViewRequestId = 0;
 let activeBasemap = window.GROUNDWORK_HAS_STREET_TILES ? "streets" : "aerial";
@@ -27,6 +31,7 @@ async function buildingMapStyle() {
     throw new Error("3D building geometry unavailable");
   }
   // Keep this view vector-only even if the provider adds a raster layer later.
+  style.glyphs ||= `${window.location.origin}/static/fonts/{fontstack}/{range}.pbf`;
   style.layers = style.layers.filter(layer => layer.type !== "raster");
   Object.keys(style.sources).forEach(id => {if (style.sources[id].type === "raster") delete style.sources[id];});
   const firstLabel = style.layers.findIndex(layer => layer.type === "symbol");
@@ -476,10 +481,83 @@ function fallbackToAerial(message) {
   if (!locationMap || activeBasemap !== "buildings3d") return;
   activeBasemap = "aerial";
   document.querySelector("#mapBasemapSelect").value = "aerial";
+  syncRestaurantVisibility();
   locationMap.setStyle(mapStyle("aerial"));
   locationMap.easeTo({pitch: 0, bearing: 0, duration: 250});
   updateNycConstraints();
   setMapViewStatus(message, true);
+}
+
+const RESTAURANT_LAYERS = ["restaurant-clusters", "restaurant-cluster-count", "restaurant-points"];
+
+function syncRestaurantVisibility() {
+  const in3D = activeBasemap === "buildings3d";
+  document.querySelector(".restaurant-toggle").hidden = !in3D;
+  const legendEntry = document.querySelector(".legend-restaurant-entry");
+  if (legendEntry) legendEntry.hidden = !in3D;
+  if (!locationMap) return;
+  const visible = in3D && showExistingRestaurants;
+  RESTAURANT_LAYERS.forEach(id => {
+    if (locationMap.getLayer(id)) locationMap.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+  });
+  if (!visible) {
+    restaurantPopup?.remove();
+    restaurantPopup = null;
+  }
+}
+
+function restaurantData() {
+  if (!restaurantDataPromise) {
+    restaurantDataPromise = fetch("/api/map/restaurants")
+      .then(response => {if (!response.ok) throw new Error("Restaurant map data unavailable"); return response.json();})
+      .catch(error => {restaurantDataPromise = null; throw error;});
+  }
+  return restaurantDataPromise;
+}
+
+async function installRestaurantLayers(revision) {
+  try {
+    const data = await restaurantData();
+    if (!locationMap || activeBasemap !== "buildings3d" || revision !== restaurantStyleRevision || locationMap.getSource("existing-restaurants")) return;
+    locationMap.addSource("existing-restaurants", {type: "geojson", data, cluster: true, clusterRadius: 45, clusterMaxZoom: 13});
+    locationMap.addLayer({id: "restaurant-clusters", type: "circle", source: "existing-restaurants", filter: ["has", "point_count"],
+      paint: {"circle-color": "#1662c2", "circle-radius": ["step", ["get", "point_count"], 12, 100, 16, 1000, 21],
+        "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5, "circle-opacity": 0.9}});
+    locationMap.addLayer({id: "restaurant-cluster-count", type: "symbol", source: "existing-restaurants", filter: ["has", "point_count"],
+      layout: {"text-field": ["get", "point_count_abbreviated"], "text-font": ["Open Sans Regular"], "text-size": 11},
+      paint: {"text-color": "#ffffff"}});
+    locationMap.addLayer({id: "restaurant-points", type: "circle", source: "existing-restaurants", filter: ["!", ["has", "point_count"]],
+      paint: {"circle-color": "#2487df", "circle-radius": 3.5, "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 0.8, "circle-opacity": 0.85}});
+    syncRestaurantVisibility();
+  } catch (error) {
+    setMapViewStatus("Existing restaurant dots could not load.", true);
+  }
+}
+
+async function handleRestaurantClick(event) {
+  if (activeBasemap !== "buildings3d" || !showExistingRestaurants || !locationMap?.getLayer("restaurant-points")) return;
+  const feature = locationMap.queryRenderedFeatures(event.point, {layers: ["restaurant-points", "restaurant-clusters"]})[0];
+  if (!feature) return;
+  if (feature.properties.cluster) {
+    const source = locationMap.getSource("existing-restaurants");
+    try {
+      const zoom = await source.getClusterExpansionZoom(feature.properties.cluster_id);
+      if (activeBasemap === "buildings3d" && showExistingRestaurants && source === locationMap.getSource("existing-restaurants")) {
+        locationMap.easeTo({center: feature.geometry.coordinates, zoom, duration: 400});
+      }
+    } catch (_) {} // A background switch can remove the source while the zoom request is pending.
+    return;
+  }
+  mapPopup?.remove();
+  restaurantPopup?.remove();
+  const details = document.createElement("div");
+  details.className = "map-restaurant-detail";
+  details.innerHTML = `<strong>${escapeHtml(feature.properties.name || "Name unavailable")}</strong>
+    <div><span>Cuisine</span><b>${escapeHtml(feature.properties.cuisine || "Unavailable")}</b></div>
+    <div><span>Address</span><b>${escapeHtml(feature.properties.address || "Unavailable")}</b></div>`;
+  restaurantPopup = new maplibregl.Popup({closeButton: true, closeOnClick: true, offset: 10, maxWidth: "290px"})
+    .setLngLat(feature.geometry.coordinates).setDOMContent(details).addTo(locationMap);
 }
 
 async function changeMapView(next) {
@@ -501,12 +579,12 @@ async function changeMapView(next) {
   if (request !== mapViewRequestId) return;
   try {
     activeBasemap = next;
+    syncRestaurantVisibility();
     locationMap.setStyle(style || mapStyle(next));
     updateNycConstraints();
     if (next === "buildings3d") {
       setMapViewStatus("Loading 3D buildings…");
-      const location = selectedLocation();
-      locationMap.easeTo({center: [location.longitude, location.latitude], zoom: Math.max(locationMap.getZoom(), 15.4), pitch: 52, bearing: -18, duration: 450});
+      locationMap.easeTo({pitch: 52, bearing: -18, duration: 450});
     } else {
       locationMap.easeTo({pitch: 0, bearing: 0, duration: 300});
       setMapViewStatus("");
@@ -528,8 +606,10 @@ function renderMap() {
       }
     });
     locationMap.on("idle", () => {
+      if (activeBasemap === "buildings3d" && !locationMap.getSource("existing-restaurants")) installRestaurantLayers(++restaurantStyleRevision);
       if (activeBasemap === "buildings3d" && locationMap.getLayer("nyc-buildings-3d")) setMapViewStatus("");
     });
+    locationMap.on("click", handleRestaurantClick);
     const expand = document.createElement("button");
     expand.id = "expandMapButton";
     expand.className = "map-expand-button";
@@ -554,7 +634,7 @@ function renderMap() {
     document.querySelector("#mapStage").append(viewStatus);
     const legend = document.createElement("div");
     legend.className = "map-legend";
-    legend.innerHTML = '<span>0</span><i></i><span>100</span>';
+    legend.innerHTML = '<div><b class="legend-recommendation-dot"></b><span>Recommended area</span><span>0</span><i></i><span>100</span></div><div class="legend-restaurant-entry" hidden><b class="legend-restaurant-dot"></b><span>Existing restaurant</span></div>';
     document.querySelector("#mapStage").append(legend);
   }
   mapPopup?.remove();
@@ -591,7 +671,8 @@ function renderMap() {
     element.addEventListener("focus", showDetail);
     element.addEventListener("mouseleave", () => mapPopup?.remove());
     element.addEventListener("blur", () => mapPopup?.remove());
-    element.addEventListener("click", () => {
+    element.addEventListener("click", event => {
+      event.stopPropagation();
       selectedId = location.id;
       renderAll();
       revealSelectedRanking();
@@ -1192,6 +1273,10 @@ document.querySelector("#refreshButton").addEventListener("click", () => {
 document.querySelector("#viewAnalysis").addEventListener("click", () => selectView("scorecard"));
 document.querySelector("#mapLayerSelect").addEventListener("change", event => setActiveLayer(event.target.value));
 document.querySelector("#mapBasemapSelect").addEventListener("change", event => changeMapView(event.target.value));
+document.querySelector("#showRestaurantsToggle").addEventListener("change", event => {
+  showExistingRestaurants = event.target.checked;
+  syncRestaurantVisibility();
+});
 
 const ideaOptions = [
   ["restaurant", "Sit-Down Restaurant", "restaurant"], ["bar", "Bar or Gastropub", "bar"],
@@ -1382,6 +1467,7 @@ try {
 document.querySelector("#briefForm").addEventListener("input", () => sessionStorage.setItem("groundwork-concept-draft", JSON.stringify(Object.fromEntries([...draftIds.map(id => [id, document.getElementById(id).value]), ["selectedIdea", selectedIdea?.value]]))));
 document.querySelector("#briefForm").addEventListener("change", () => sessionStorage.setItem("groundwork-concept-draft", JSON.stringify(Object.fromEntries([...draftIds.map(id => [id, document.getElementById(id).value]), ["selectedIdea", selectedIdea?.value]]))));
 
+syncRestaurantVisibility();
 setTheme(dashboardThemeChoice, false);
 loadDashboard();
 setActiveLayer(activeLayer);
