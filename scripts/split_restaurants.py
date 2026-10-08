@@ -14,7 +14,10 @@ split_interval = math.ceil(len(csvfile) / 8) # Split the file into 8
 for i in range(len(csvfile)):
     if i % split_interval == 0:
         new_path = os.path.relpath(f'..\\data\\raw\\c_rest\\current_restaurants_{filename}.csv')
-        open(new_path, 'w+').writelines(csvfile[0:1] + csvfile[i:i+split_interval])
+        if(i == 0):
+            open(new_path, 'w+').writelines(csvfile[i:i+split_interval])
+        else:
+            open(new_path, 'w+').writelines(csvfile[0:1] + csvfile[i:i+split_interval])
         filename += 1
 
 print(f"{filename - 1} files created in data/raw/c_rest.") 
