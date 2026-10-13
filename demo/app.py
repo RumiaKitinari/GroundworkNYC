@@ -341,7 +341,8 @@ def subway_daypart_profiles() -> dict:
 
 
 def integrated_package() -> dict:
-    directory = CURRENT_DATA_LINK if CURRENT_DATA_LINK.is_dir() else BASELINE_DATA_DIR
+    configured = os.environ.get("GROUNDWORK_DATA_DIR")
+    directory = Path(configured) if configured else CURRENT_DATA_LINK if CURRENT_DATA_LINK.is_dir() else BASELINE_DATA_DIR
     return _load_integrated_package(directory.resolve())
 
 
@@ -402,6 +403,7 @@ def _load_integrated_package(directory: Path) -> dict:
     latitudes = [as_float(row["centroid_latitude"]) for row in eligible_rows]
     longitudes = [as_float(row["centroid_longitude"]) for row in eligible_rows]
     return {
+        "preview": json.loads((directory / "preview_manifest.json").read_text()) if (directory / "preview_manifest.json").exists() else None,
         "tracts": eligible_rows,
         "percentiles": percentile_maps(eligible_rows, numeric_columns),
         "storefronts": read_csv(directory / "entities" / "current_storefronts.csv"),
@@ -486,7 +488,7 @@ def real_location_from_tract(row: dict, profile: str, rent_cap: int, package: di
         "business_draw_coverage": assessment["business_draw_coverage"],
         "concept_evidence": assessment["concept_evidence"],
         "market_profile": {
-            "population": as_float(row.get("population_2024")) if row.get("population_2024") else None,
+            "population": as_float(row.get("population_2024") or row.get("source_population")) if row.get("population_2024") or row.get("source_population") else None,
             "jobs": as_float(row.get("total_jobs")) if row.get("total_jobs") else None,
             "median_household_income": as_float(row.get("median_household_income_2024")) if row.get("median_household_income_2024") else None,
             "income_margin_of_error": as_float(row.get("median_household_income_margin_of_error_2024")) if row.get("median_household_income_margin_of_error_2024") else None,
@@ -1347,6 +1349,7 @@ def dashboard():
                              for row in locations + saved_locations if row["id"] in rent_by_geoid},
             },
             "meta": {
+                "preview": integrated_package().get("preview"),
                 "project": "Groundwork NYC",
                 "concept_name": concept_name,
                 "concept": concept.public(),
