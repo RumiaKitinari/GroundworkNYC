@@ -1,0 +1,23 @@
+{
+  "version": "survival_v1",
+  "features": [
+    "residents",
+    "workers",
+    "transit_inflow",
+    "capacity"
+  ],
+  "horizon_months": 24,
+  "positive_class": "survived",
+  "artifact_sha256": "REPLACE_WITH_ACTUAL_SHA256",
+  "training_cutoff": "REPLACE_WITH_ACTUAL_DATE",
+  "validation": {
+    "status": "REPLACE_WITH_ACTUAL_HELD_OUT_RESULTS",
+    "temporal_split": null,
+    "spatial_split": null,
+    "roc_auc": null,
+    "brier_score": null,
+    "calibration": null
+  },
+  "resolution": 8,
+  "prediction_unit": "hex_location"
+}

@@ -156,6 +156,7 @@
           </div>
         </nav>
 
+        {% if real_data_preview %}<div class="dashboard-status" role="status">Live EPA data preview · 20 recovered Queens block groups · partial coverage; restaurant, property, income and transit data unavailable.</div>{% endif %}
         <div class="dashboard-status" id="dashboardStatus" role="status" hidden></div>
         <section class="metric-ribbon" id="metricRibbon" aria-label="Dashboard Metrics"></section>
 
@@ -179,6 +180,7 @@
                   <option value="whitespace">Cuisine Opportunity</option>
                   <option value="cost">Commercial Fit</option>
                   <option value="concept_demand">Concept Demand Index</option>
+                  {% if spatial_backend_enabled %}<option value="huff_demand" disabled>Huff Market Gaps (Unavailable)</option>{% endif %}
                 </select>
               </div>
             </div>
@@ -541,7 +543,7 @@
     </section>
 
     <form id="logoutForm" method="post" action="{{ url_for('auth_action', action='logout') }}" hidden><input type="hidden" name="csrf_token" value="{{ csrf }}" /></form>
-    <script>window.GROUNDWORK_MENU_OWNER = {{ (email or 'guest')|tojson }}; window.GROUNDWORK_ACCESS = {{ access|tojson }}; window.GROUNDWORK_CSRF = {{ csrf|tojson }};</script>
+    <script>window.GROUNDWORK_MENU_OWNER = {{ (email or 'guest')|tojson }}; window.GROUNDWORK_ACCESS = {{ access|tojson }}; window.GROUNDWORK_CSRF = {{ csrf|tojson }}; window.GROUNDWORK_REAL_PREVIEW = {{ (real_data_preview or false)|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
     <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261008-ui"></script>
   </body>

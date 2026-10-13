@@ -1,5 +1,12 @@
 # GroundworkNYC
 
+## Backend implementation
+
+The supplied frontend now runs through a FastAPI service that preserves the existing Flask UI and API contracts. New PostGIS/Redis services provide versioned vector tiles, offline Huff demand allocation, and lookup-based XGBoost survival predictions with precomputed explanations.
+
+See [backend/README.md](backend/README.md) for setup, data requirements, pipeline commands, API documentation and verification limits. Start locally with `docker compose up --build` after configuring `.env` from `.env.example`. Private datasets and the trained model must be supplied separately.
+
+
 ## Jas — frontend and UI changes
 
 - Added Log in, Sign up, and Continue as guest.
