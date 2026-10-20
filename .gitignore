@@ -26,3 +26,8 @@ data/listings/
 data/evaluation/
 data/c_rest_AI/
 .DS_Store
+
+# Optional spatial backend tooling
+.pytest_cache/
+.ruff_cache/
+backend/.venv/

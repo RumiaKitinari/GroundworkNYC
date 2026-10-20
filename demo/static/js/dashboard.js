@@ -498,6 +498,7 @@ const toneFor = {
   cost: ["#a74b52", "#c47a5e", "#d5ab6f", "#b8c684", "#73af85", "#367d72"],
   walkability: ["#955158", "#c48261", "#d6b776", "#acc78c", "#6cac9a", "#337f90"],
   business_draw: ["#a34359", "#cf7968", "#deac70", "#b2c782", "#71b394", "#28878a"],
+  huff_demand: ["#ad4648", "#db7952", "#e9ba6e", "#a9c77b", "#49ad8c", "#087d82"],
   concept_demand: ["#ad4648", "#db7952", "#e9ba6e", "#a9c77b", "#49ad8c", "#087d82"],
 };
 
@@ -509,6 +510,7 @@ const layerTitles = {
   walkability: "Area Walkability",
   business_draw: "Business Draw",
   concept_demand: "Concept Demand Index",
+  huff_demand: "Huff Market Gaps (Scenario)",
 };
 
 function fmtMoney(value) {
@@ -587,6 +589,7 @@ function colorFor(value, layer = activeLayer) {
 }
 
 function setActiveLayer(layer) {
+  if (layer !== activeLayer) {hexRequestId++; clearHexLayer();}
   activeLayer = layer;
   document.querySelector("#mapLayerSelect").value = layer;
   document.querySelectorAll(".layer").forEach((item) => {
@@ -792,6 +795,7 @@ async function loadDashboard() {
       return;
     }
     dashboard = result;
+    updateHuffAvailability();
     hexCache.clear();
     hexRequestId++;
     clearHexLayer();
@@ -884,18 +888,36 @@ function clearHexLayer() {
 }
 
 function paintHexLayer(data) {
-  if (activeLayer !== "concept_demand" || !locationMap?.getStyle()) return;
+  if (!isHexLayer() || !locationMap?.getStyle()) return;
   clearHexLayer();
-  locationMap.addSource("concept-hexes", {type: "geojson", data});
+  const vector = data.tiles && data.source_layer;
+  locationMap.addSource("concept-hexes", vector ? {type: "vector", tiles: data.tiles, minzoom: 0, maxzoom: 18} : {type: "geojson", data});
+  const sourceLayer = vector ? {"source-layer": data.source_layer} : {};
   const labelLayer = activeBasemap === "streets" && locationMap.getLayer("street-labels") ? "street-labels" :
     activeBasemap === "buildings3d" ? locationMap.getStyle().layers.find(layer => layer.type === "symbol")?.id : undefined;
-  locationMap.addLayer({id: "concept-hex-fill", type: "fill", source: "concept-hexes", paint: {
+  locationMap.addLayer({id: "concept-hex-fill", type: "fill", source: "concept-hexes", ...sourceLayer, paint: {
     "fill-color": ["interpolate", ["linear"], ["get", "score"], 0, "#ad4648", 20, "#db7952", 40, "#e9ba6e", 60, "#a9c77b", 80, "#49ad8c", 100, "#087d82"],
     "fill-opacity": .57,
   }}, labelLayer);
-  locationMap.addLayer({id: "concept-hex-outline", type: "line", source: "concept-hexes", paint: {
+  locationMap.addLayer({id: "concept-hex-outline", type: "line", source: "concept-hexes", ...sourceLayer, paint: {
     "line-color": "#f0f5ed", "line-opacity": .78, "line-width": ["interpolate", ["linear"], ["zoom"], 9, .5, 12, 1.1],
   }}, labelLayer);
+}
+
+function isHexLayer() {
+  return ["concept_demand", "huff_demand"].includes(activeLayer);
+}
+
+async function updateHuffAvailability() {
+  const option = document.querySelector('option[value="huff_demand"]');
+  if (!option) return;
+  try {
+    const response = await fetch("/api/v1/spatial/huff");
+    option.disabled = !response.ok;
+    option.textContent = response.ok ? "Huff Market Gaps (Scenario)" : "Huff Market Gaps (Unavailable)";
+  } catch {
+    option.disabled = true;
+  }
 }
 
 function hexLevel() {
@@ -904,33 +926,47 @@ function hexLevel() {
 }
 
 async function showHexLayer() {
-  if (!locationMap || activeLayer !== "concept_demand" || !dashboard) return;
+  if (!locationMap || !isHexLayer() || !dashboard) return;
   const level = hexLevel();
   const params = conceptParams();
   params.set("level", level);
-  const key = `${dashboard.meta.data_release}:${params}`;
+  const key = `${activeLayer}:${dashboard.meta.data_release}:${params}`;
+  const requestedLayer = activeLayer;
   const currentRequest = ++hexRequestId;
   if (hexCache.has(key)) {
     paintHexLayer(hexCache.get(key));
     return;
   }
   try {
-    const response = await fetch(`/api/hex-demand?${params}`);
-    if (!response.ok) throw new Error("Hex demand request failed");
-    const data = await response.json();
+    let data;
+    const resolution = level === "fine" ? "9" : level === "cell" ? "8" : "7";
+    const manifestResponse = await fetch(requestedLayer === "huff_demand" ? "/api/v1/spatial/huff" : `/api/v1/spatial/resolve?${params}`);
+    if (manifestResponse.ok) {
+      const manifest = await manifestResponse.json();
+      if (manifest.tiles[resolution]) {
+        data = {tiles: [new URL(manifest.tiles[resolution], window.location.origin).href.replace(/%7B/gi, "{").replace(/%7D/gi, "}")], source_layer: manifest.source_layer};
+      }
+    }
+    if (!data) {
+      if (requestedLayer === "huff_demand") throw new Error("Huff surface unavailable");
+      const response = await fetch(`/api/hex-demand?${params}`);
+      if (!response.ok) throw new Error("Hex demand request failed");
+      data = await response.json();
+    }
     hexCache.set(key, data);
-    if (currentRequest === hexRequestId && activeLayer === "concept_demand" && level === hexLevel()) paintHexLayer(data);
+    if (currentRequest === hexRequestId && activeLayer === requestedLayer && level === hexLevel()) paintHexLayer(data);
   } catch {
-    if (currentRequest === hexRequestId) {
+    if (currentRequest === hexRequestId && activeLayer === requestedLayer) {
+      clearHexLayer();
       const status = document.querySelector("#dashboardStatus");
-      status.textContent = "Concept Demand Is Temporarily Unavailable.";
+      status.textContent = requestedLayer === "huff_demand" ? "Huff Market Gaps Are Temporarily Unavailable." : "Concept Demand Is Temporarily Unavailable.";
       status.hidden = false;
     }
   }
 }
 
 function hexAtPoint(point) {
-  if (activeLayer !== "concept_demand" || !locationMap.getLayer("concept-hex-fill")) return null;
+  if (!isHexLayer() || !locationMap.getLayer("concept-hex-fill")) return null;
   return locationMap.queryRenderedFeatures(point, {layers: ["concept-hex-fill"]})[0] || null;
 }
 
@@ -1054,13 +1090,13 @@ function renderMap() {
     });
     collapseMapAttribution();
     locationMap.on("zoomend", () => {
-      if (activeLayer === "concept_demand") showHexLayer();
+      if (isHexLayer()) showHexLayer();
     });
     locationMap.on("load", () => {
-      if (activeLayer === "concept_demand") showHexLayer();
+      if (isHexLayer()) showHexLayer();
     });
     locationMap.on("idle", () => {
-      if (activeLayer === "concept_demand" && !locationMap.getLayer("concept-hex-fill")) showHexLayer();
+      if (isHexLayer() && !locationMap.getLayer("concept-hex-fill")) showHexLayer();
       if (activeBasemap === "buildings3d" && locationMap.getLayer("nyc-buildings-3d") && locationMap.isSourceLoaded("openmaptiles")) setMapViewStatus("");
       collapseMapAttribution();
     });
@@ -1073,7 +1109,7 @@ function renderMap() {
       }
     });
     locationMap.on("style.load", () => {
-      if (activeLayer === "concept_demand") showHexLayer();
+      if (isHexLayer()) showHexLayer();
     });
     locationMap.on("error", event => {
       if (activeBasemap === "buildings3d" && (event.sourceId === "openmaptiles" || /openfreemap/i.test(event.error?.message || ""))) {
@@ -1081,7 +1117,7 @@ function renderMap() {
       }
     });
     locationMap.on("mousemove", (event) => {
-      if (activeLayer !== "concept_demand") return;
+      if (!isHexLayer()) return;
       const feature = hexAtPoint(event.point);
       locationMap.getCanvas().style.cursor = feature ? "pointer" : "";
       if (!feature) {
@@ -1094,7 +1130,13 @@ function renderMap() {
       const {score, coverage, level, cell_count: count} = feature.properties;
       const detail = document.createElement("div");
       detail.className = "map-location-detail";
+      if (activeLayer === "huff_demand") {
+        const gap = Number(score);
+        const demand = Number(feature.properties.unserved_demand);
+        detail.innerHTML = `<strong>Huff Market Gap Scenario</strong><div><span>Outside Option Share</span><b>${Number.isFinite(gap) ? gap.toFixed(1) : "--"}%</b></div><div><span>Unserved Demand Units</span><b>${Number.isFinite(demand) ? Math.round(demand).toLocaleString("en-US") : "--"}</b></div><small>Scenario estimate; weights and capacity require calibration.</small>`;
+      } else {
       detail.innerHTML = `<strong>${level === "sector" ? "Demand Sector" : "Local Demand Cell"}</strong><div><span>Concept Demand</span><b>${score}/100</b></div><div><span>Evidence Coverage</span><b>${coverage}%</b></div>${count ? `<small>${count} Local Cells</small>` : ""}`;
+      }
       mapPopup?.remove();
       mapPopup = new maplibregl.Popup({closeButton: false, closeOnClick: false, offset: 12, maxWidth: "230px"})
         .setLngLat(event.lngLat).setDOMContent(detail).addTo(locationMap);
@@ -1108,7 +1150,7 @@ function renderMap() {
       }
     });
     locationMap.on("mousemove", event => {
-      if (activeBasemap !== "buildings3d" || activeLayer === "concept_demand" || pinned3DFeature) return;
+      if (activeBasemap !== "buildings3d" || isHexLayer() || pinned3DFeature) return;
       const feature = featureAtPoint(event.point);
       locationMap.getCanvas().style.cursor = feature ? "pointer" : "";
       if (!feature) {
@@ -1122,7 +1164,7 @@ function renderMap() {
       show3DFeature(feature, event.lngLat);
     });
     locationMap.on("click", event => {
-      if (activeBasemap !== "buildings3d" || activeLayer === "concept_demand") return;
+      if (activeBasemap !== "buildings3d" || isHexLayer()) return;
       const feature = featureAtPoint(event.point);
       if (feature) show3DFeature(feature, event.lngLat, true);
       else mapPopup?.remove();
@@ -1145,10 +1187,10 @@ function renderMap() {
   pinned3DFeature = false;
   mapMarkers.forEach(marker => marker.remove());
   mapMarkers = [];
-  if (activeLayer === "concept_demand") showHexLayer();
+  if (isHexLayer()) showHexLayer();
   else clearHexLayer();
   const locations = allLocations().filter(row => Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
-  if (activeLayer !== "concept_demand") locations.forEach((location) => {
+  if (!isHexLayer()) locations.forEach((location) => {
     const selected = location.id === selectedId;
     const element = document.createElement("button");
     element.className = `map-score-marker${selected ? " is-selected" : ""}`;

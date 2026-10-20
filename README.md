@@ -1,5 +1,11 @@
 # GroundworkNYC
 
+The Flask dashboard remains in `demo/`. The optional [FastAPI spatial backend](backend/README.md)
+mounts that dashboard at `/` and adds PostGIS vector tiles with Redis caching.
+It does not replace the existing routes or publish an unvalidated survival model.
+Private integrated data, accounts, and model artifacts stay outside Git.
+Run the backend locally using the instructions in `backend/README.md`.
+
 ## Jas — frontend and UI changes
 
 - Added Log in, Sign up, and Continue as guest.

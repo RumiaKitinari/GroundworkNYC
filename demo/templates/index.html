@@ -179,6 +179,7 @@
                   <option value="whitespace">Cuisine Opportunity</option>
                   <option value="cost">Commercial Fit</option>
                   <option value="concept_demand">Concept Demand Index</option>
+                  {% if spatial_backend_enabled %}<option value="huff_demand" disabled>Huff Market Gaps (Unavailable)</option>{% endif %}
                 </select>
               </div>
             </div>
@@ -543,6 +544,6 @@
     <form id="logoutForm" method="post" action="{{ url_for('auth_action', action='logout') }}" hidden><input type="hidden" name="csrf_token" value="{{ csrf }}" /></form>
     <script>window.GROUNDWORK_MENU_OWNER = {{ (email or 'guest')|tojson }}; window.GROUNDWORK_ACCESS = {{ access|tojson }}; window.GROUNDWORK_CSRF = {{ csrf|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261008-ui"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261020-spatial"></script>
   </body>
 </html>

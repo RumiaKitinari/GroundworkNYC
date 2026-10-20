@@ -1,0 +1,5 @@
+-r requirements-ml.txt
+pytest==8.4.2
+httpx==0.28.1
+ruff==0.16.10
+mapbox-vector-tile==2.2.0

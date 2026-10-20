@@ -1,0 +1,39 @@
+name: Backend checks
+on:
+  push:
+  pull_request:
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: groundwork_test
+          POSTGRES_USER: groundwork
+          POSTGRES_PASSWORD: test_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U groundwork -d groundwork_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r backend/requirements-dev.txt
+      - run: ruff check backend && node --check demo/static/js/dashboard.js
+      - run: node --test backend/tests/frontend_hex.test.cjs
+      - run: pytest -q
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql://groundwork:test_only@localhost:5432/groundwork_test
+      - run: >-
+          pytest -q demo/test_auth.py demo/test_scoring.py demo/test_financials.py
+          demo/test_dashboard_summaries.py demo/test_menu_catalog.py
+        env:
+          PYTHONPATH: demo

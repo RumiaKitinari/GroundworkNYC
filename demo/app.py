@@ -340,9 +340,14 @@ def subway_daypart_profiles() -> dict:
             for station, dates in days.items() if dates}
 
 
+def integrated_directory() -> Path:
+    configured = os.environ.get("GROUNDWORK_DATA_DIR")
+    directory = Path(configured) if configured else CURRENT_DATA_LINK if CURRENT_DATA_LINK.is_dir() else BASELINE_DATA_DIR
+    return directory.resolve()
+
+
 def integrated_package() -> dict:
-    directory = CURRENT_DATA_LINK if CURRENT_DATA_LINK.is_dir() else BASELINE_DATA_DIR
-    return _load_integrated_package(directory.resolve())
+    return _load_integrated_package(integrated_directory())
 
 
 @lru_cache(maxsize=2)
@@ -413,7 +418,7 @@ def _load_integrated_package(directory: Path) -> dict:
         "subway_vintage": next((row["vintage"] for row in sources if row.get("source") == "MTA ridership"), "Nearest station · one complete week"),
         "readiness": read_csv(directory / "feature_readiness.csv"),
         "data_release": directory.name,
-        "data_path": str(directory.relative_to(PROJECT_ROOT)),
+        "data_path": str(directory.relative_to(PROJECT_ROOT)) if directory.is_relative_to(PROJECT_ROOT) else directory.name,
         "screening_model": ScreeningModel(eligible_rows, restaurants),
         "bounds": {
             "lat_min": min(latitudes),
@@ -1388,7 +1393,7 @@ def hex_demand():
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     package = integrated_package()
-    directory = PROJECT_ROOT / package["data_path"]
+    directory = integrated_directory()
     cell_resolution = 9 if level == "fine" else 8
     surface = cached_hex_surface(directory, concept, resolution["profile"], borough, cell_resolution)
     return jsonify({"type": "FeatureCollection", "features": surface["sector" if level == "sector" else "cell"], "meta": {
