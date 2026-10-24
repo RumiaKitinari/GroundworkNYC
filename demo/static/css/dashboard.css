@@ -936,7 +936,7 @@ input[type="range"] {
 .scorecard-hero p {
   max-width: 720px;
   margin: 0;
-  color: #bdd0df;
+  color: var(--text);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -1022,6 +1022,19 @@ input[type="range"] {
   font-size: 22px;
 }
 
+.score-component__top .score-component-unavailable {
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.score-component p.score-component-note {
+  margin: 8px 0 0;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .component-bars {
   display: grid;
   gap: 9px;
@@ -1056,9 +1069,9 @@ input[type="range"] {
 }
 
 .risk-panel li {
-  border-left: 2px solid rgba(251, 191, 36, 0.78);
+  border-left: 2px solid var(--amber);
   padding-left: 10px;
-  color: #d6c8a4;
+  color: var(--text);
   font-size: 12px;
   line-height: 1.35;
 }

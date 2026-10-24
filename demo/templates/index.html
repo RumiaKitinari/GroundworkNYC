@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261008-3d-restaurants" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261008-restaurants" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261015-scorecard" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261015-properties-tabs" />
   </head>
   <body>
     <div class="app-frame">
@@ -251,10 +251,19 @@
           <div class="table-module is-hidden" data-panel="lease">
             <div class="module-head compact">
               <div>
-                <h2 id="propertyHeading">Property Leads</h2>
+                <h2 id="propertyHeading">Properties</h2>
               </div>
             </div>
-            <div class="lease-board" id="leaseBoard"></div>
+            <div class="property-view-tabs" role="tablist" aria-label="Property research views">
+              <button type="button" role="tab" id="propertyTabResearch" aria-controls="propertyPanelResearch" aria-selected="true" tabindex="0" data-property-tab="research">Storefront Research</button>
+              <button type="button" role="tab" id="propertyTabListings" aria-controls="propertyPanelListings" aria-selected="false" tabindex="-1" data-property-tab="listings">Lease Listings</button>
+            </div>
+            <section id="propertyPanelResearch" role="tabpanel" aria-labelledby="propertyTabResearch" tabindex="0">
+              <div class="storefront-explorer" id="storefrontExplorer" aria-label="Storefront Registry Explorer"></div>
+            </section>
+            <section id="propertyPanelListings" role="tabpanel" aria-labelledby="propertyTabListings" tabindex="0" hidden>
+              <div class="lease-board" id="leaseBoard"></div>
+            </section>
           </div>
 
           <div class="table-module is-hidden" data-panel="whitespace">
@@ -465,6 +474,6 @@
 
     <script>window.GROUNDWORK_HAS_STREET_TILES = {{ street_tiles_available|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261008-3d-restaurants"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261015-properties-tabs"></script>
   </body>
 </html>

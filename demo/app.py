@@ -228,6 +228,60 @@ def read_csv(path: Path) -> list[dict]:
         return list(csv.DictReader(handle))
 
 
+PROFILE_RESIDENT_FIELDS = ("population_2024", "population_under_18_2024", "population_65_plus_2024",
+                           "median_household_income_2024", "median_household_income_margin_of_error_2024")
+PROFILE_WORKER_FIELDS = (
+    "total_jobs", "jobs_age_29_or_younger", "jobs_age_30_to_54", "jobs_age_55_or_older",
+    "jobs_earn_1250_or_less_monthly", "jobs_earn_1251_to_3333_monthly", "jobs_earn_more_than_3333_monthly",
+    "jobs_agriculture_forestry_fishing_hunting", "jobs_mining_quarrying_oil_gas", "jobs_utilities",
+    "jobs_construction", "jobs_manufacturing", "jobs_wholesale_trade", "jobs_retail_trade",
+    "jobs_transportation_warehousing", "jobs_information", "jobs_finance_insurance",
+    "jobs_real_estate_rental_leasing", "jobs_professional_scientific_technical", "jobs_management",
+    "jobs_admin_support_waste_management", "jobs_educational_services",
+    "jobs_health_care_social_assistance", "jobs_arts_entertainment_recreation",
+    "jobs_accommodation_food_services", "jobs_other_services", "jobs_public_administration",
+)
+
+
+def source_number(row: dict, column: str) -> int | float | None:
+    """Keep a recorded zero, but never turn a blank source cell into zero."""
+    value = row.get(column)
+    if value is None or str(value).strip() == "":
+        return None
+    number = float(value)
+    return int(number) if number.is_integer() else number
+
+
+@lru_cache(maxsize=1)
+def profile_source_rows() -> tuple[dict, dict]:
+    residents = read_csv(INTEGRATED_DATA_DIR / "features" / "tract_demographics_income.csv")
+    workers = read_csv(INTEGRATED_DATA_DIR / "features" / "tract_workers.csv")
+    return ({row["geoid"]: row for row in residents}, {row["geoid"]: row for row in workers})
+
+
+def resident_worker_profile(tract: dict) -> dict:
+    residents, workers = profile_source_rows()
+    geoid = tract["geoid"]
+    resident_row = residents.get(geoid, {})
+    worker_row = workers.get(geoid, {})
+    return {
+        "geoid": geoid,
+        "name": tract_display_name(tract),
+        "borough": tract["borough"],
+        "market_profile": {
+            "population": source_number(resident_row, "population_2024"),
+            "median_household_income": source_number(resident_row, "median_household_income_2024"),
+            "income_margin_of_error": source_number(resident_row, "median_household_income_margin_of_error_2024"),
+            "resident_age": {key: source_number(resident_row, key) for key in PROFILE_RESIDENT_FIELDS[1:3]},
+            "jobs": source_number(worker_row, "total_jobs"),
+            "job_age": {key: source_number(worker_row, key) for key in PROFILE_WORKER_FIELDS[1:4]},
+            "job_earnings": {key: source_number(worker_row, key) for key in PROFILE_WORKER_FIELDS[4:7]},
+            "job_industry": {key: source_number(worker_row, key) for key in PROFILE_WORKER_FIELDS[7:]},
+        },
+        "sources": {"residents": "2024 ACS five-year estimates", "jobs": "2023 LODES workplace jobs"},
+    }
+
+
 def public_url(value: str | None) -> str | None:
     parsed = urlparse(value or "")
     return value if parsed.scheme == "https" and parsed.netloc else None
@@ -1054,6 +1108,199 @@ def map_restaurants():
     return jsonify(restaurant_map_data())
 
 
+@app.get("/api/areas")
+def profile_areas():
+    return jsonify({"areas": [
+        {"geoid": row["geoid"], "name": tract_display_name(row), "borough": row["borough"]}
+        for row in integrated_package()["tracts"]
+    ]})
+
+
+@app.get("/api/areas/<geoid>/profile")
+def area_profile(geoid: str):
+    if len(geoid) != 11 or not geoid.isdigit():
+        return jsonify({"error": "Invalid tract identifier."}), 400
+    tract = next((row for row in integrated_package()["tracts"] if row["geoid"] == geoid), None)
+    if tract is None:
+        return jsonify({"error": "Area not found."}), 404
+    return jsonify(resident_worker_profile(tract))
+
+
+@lru_cache(maxsize=1)
+def transit_activity_tables() -> dict:
+    paths = {
+        "subway": "features/tract_subway_access.csv",
+        "bike": "features/tract_citibike_activity.csv",
+        "pedestrian": "features/tract_pedestrian_access.csv",
+        "taxi": "features/tract_taxi_activity.csv",
+    }
+    tables = {name: {row["geoid"]: row for row in read_csv(INTEGRATED_DATA_DIR / path)} for name, path in paths.items()}
+    stations = read_csv(INTEGRATED_DATA_DIR / "entities/subway_stations_weekly_activity.csv")
+    bike_stations = read_csv(INTEGRATED_DATA_DIR / "entities/citibike_stations_august_2026.csv")
+    sites = {}
+    for row in read_csv(INTEGRATED_DATA_DIR / "entities/pedestrian_counts_long.csv"):
+        identifier = row.get("objectid")
+        period = (int(row.get("count_year") or 0), int(row.get("count_month") or 0))
+        if identifier and period > sites.get(identifier, ((0, 0), []))[0]:
+            sites[identifier] = (period, [row])
+        elif identifier and period == sites.get(identifier, ((0, 0), []))[0]:
+            sites[identifier][1].append(row)
+    tables["stations"] = stations
+    tables["bike_stations"] = bike_stations
+    tables["sites"] = sites
+    tables["taxi_zones"] = {row["location_id"]: row for row in read_csv(INTEGRATED_DATA_DIR / "features/taxi_zone_monthly_activity.csv")}
+    return tables
+
+
+@app.get("/api/areas/<geoid>/transit-activity")
+def area_transit_activity(geoid: str):
+    if len(geoid) != 11 or not geoid.isdigit():
+        return jsonify({"error": "Invalid tract identifier."}), 400
+    tract = next((row for row in integrated_package()["tracts"] if row["geoid"] == geoid), None)
+    if tract is None:
+        return jsonify({"error": "Area not found."}), 404
+    try:
+        tables = transit_activity_tables()
+    except FileNotFoundError:
+        return jsonify({"error": "Transit or activity source table is unavailable."}), 503
+    subway = tables["subway"].get(geoid, {})
+    bike = tables["bike"].get(geoid, {})
+    pedestrian = tables["pedestrian"].get(geoid, {})
+    taxi = tables["taxi"].get(geoid, {})
+    in_tract_stations = [row for row in tables["stations"] if row.get("geoid") == geoid]
+    in_tract_bikes = [row for row in tables["bike_stations"] if row.get("geoid") == geoid]
+    site_period, site_rows = tables["sites"].get(pedestrian.get("nearest_pedestrian_count_site_objectid"), ((0, 0), []))
+    zone = tables["taxi_zones"].get(taxi.get("location_id"), {})
+    number = source_number
+    return jsonify({
+        "geoid": geoid, "tract_name": tract_display_name(tract), "borough": tract.get("borough"),
+        "subway": {
+            "station_count": len(in_tract_stations),
+            "weekly_entries": sum(number(row, "weekly_ridership") or 0 for row in in_tract_stations),
+            "weekly_transfers": sum(number(row, "weekly_transfers") or 0 for row in in_tract_stations),
+            "stations": [{"name": row.get("station_complex") or "Unnamed station", "weekly_entries": number(row, "weekly_ridership"),
+                          "weekly_transfers": number(row, "weekly_transfers")} for row in in_tract_stations],
+            "nearest_name": subway.get("nearest_subway_station_complex") or None,
+            "nearest_distance_miles": number(subway, "nearest_subway_distance_miles"),
+            "nearest_weekly_entries": number(subway, "nearest_subway_weekly_ridership"),
+            "period": "2025-03-03 through 2025-03-09", "source": "MTA hourly ridership",
+        },
+        "bike": {
+            "station_count": len(in_tract_bikes),
+            "departures": number(bike, "citibike_departures_august_2026"),
+            "arrivals": number(bike, "citibike_arrivals_august_2026"),
+            "evening_departures": number(bike, "citibike_evening_departures_august_2026"),
+            "weekend_departures": number(bike, "citibike_weekend_departures_august_2026"),
+            "nearest_name": bike.get("nearest_citibike_station_name") or None,
+            "nearest_distance_miles": number(bike, "nearest_citibike_distance_miles"),
+            "nearest_departures": number(bike, "nearest_citibike_departures_august_2026"),
+            "period": "August 2026", "source": "Citi Bike trip archive",
+        },
+        "pedestrian": {
+            "monitor_name": pedestrian.get("nearest_pedestrian_count_site_loc") or None,
+            "distance_miles": number(pedestrian, "nearest_pedestrian_count_site_distance_miles"),
+            "observed_total": number(pedestrian, "nearest_pedestrian_count_site_latest_pedestrian_count_total"),
+            "period": f"{date(site_period[0], site_period[1], 1).strftime('%B %Y')}" if site_period[0] and site_period[1] else None,
+            "period_counts": {row["time_period"]: number(row, "pedestrian_count") for row in site_rows},
+            "source": "NYC DOT pedestrian counts",
+        },
+        "taxi": {
+            "zone": taxi.get("taxi_zone") or zone.get("taxi_zone") or None,
+            "zone_borough": taxi.get("taxi_borough") or zone.get("taxi_borough") or None,
+            "pickups": number(taxi, "pickups_may_2026"), "dropoffs": number(taxi, "dropoffs_may_2026"),
+            "active_days": number(taxi, "active_days_may_2026"),
+            "period": "May 2026", "source": "TLC HVFHV trip records",
+        },
+    })
+
+
+@app.get("/api/storefronts")
+def storefront_registry():
+    if not STOREFRONTS_PATH.is_file():
+        return jsonify({"error": "Storefront registry file is unavailable."}), 503
+    rows = integrated_package().get("storefronts")
+    if rows is None:
+        return jsonify({"error": "Storefront registry records are unavailable."}), 503
+    records = []
+    for row in rows:
+        reported = as_bool(row.get("vacant_current"))
+        records.append({
+            "id": row.get("borough_block_lot") or None,
+            "address": (row.get("property_street_address_or") or "").strip() or None,
+            "borough": row.get("borough") or None,
+            "geoid": row.get("geoid") or None,
+            "zip_code": row.get("zip_code") or row.get("postcode") or None,
+            "unit": row.get("unit") or None,
+            "reported_activity": row.get("primary_business_activity") or None,
+            "vacancy_status": "reported_vacant" if reported else "unknown",
+            "vacant_on_dec_31": str(row.get("vacant_on_12_31") or "").lower() == "yes",
+            "vacant_on_jun_30_or_sale": str(row.get("vacant_6_30_or_date_sold") or "").lower() == "yes",
+            "reporting_year": row.get("reporting_year") or None,
+            "filing_due_date": row.get("filing_due_date") or None,
+        })
+    return jsonify({"records": records, "total": len(records), "source": "NYC Storefront Registry",
+                    "reporting_years": sorted({row["reporting_year"] for row in records if row["reporting_year"]}),
+                    "filing_due_dates": sorted({row["filing_due_date"] for row in records if row["filing_due_date"]})})
+
+
+def current_restaurant_records(rows: list[dict]) -> list[dict]:
+    """Keep one latest recorded row per establishment before checking its current status."""
+    by_id = {}
+    for row in rows:
+        identifier = (row.get("camis") or "").strip()
+        if identifier and (identifier not in by_id or
+                           (row.get("inspection_date") or "") >= (by_id[identifier].get("inspection_date") or "")):
+            by_id[identifier] = row
+    return [row for row in by_id.values() if as_bool(row.get("active_establishment"))]
+
+
+@app.get("/api/locations/<geoid>/competition")
+def location_competition(geoid: str):
+    if len(geoid) != 11 or not geoid.isdigit():
+        return jsonify({"error": "Invalid tract identifier."}), 400
+    cuisine = request.args.get("cuisine", "any")
+    if cuisine not in CUISINES:
+        return jsonify({"error": "Unsupported cuisine."}), 400
+    restaurant_file = INTEGRATED_DATA_DIR / "entities" / "current_restaurants.csv"
+    if not restaurant_file.is_file():
+        return jsonify({"error": "Restaurant records are unavailable."}), 503
+    package = integrated_package()
+    tract = next((row for row in package["tracts"] if row["geoid"] == geoid), None)
+    if tract is None:
+        return jsonify({"error": "Location not found."}), 404
+    source_rows = package.get("restaurants")
+    if not source_rows:
+        return jsonify({"error": "Restaurant records are unavailable."}), 503
+    labels = set(CUISINES[cuisine])
+    eligible = [row for row in current_restaurant_records(source_rows) if row.get("geoid") == geoid]
+    counts = {}
+    restaurants = []
+    for row in eligible:
+        classification = (row.get("cuisine_description") or "").strip() or "Unclassified"
+        counts[classification] = counts.get(classification, 0) + 1
+        restaurants.append({
+            "name": (row.get("dba") or "").strip() or "Unnamed Restaurant",
+            "cuisine": classification,
+            "address": " ".join(part for part in ((row.get("building") or "").strip(),
+                                                      (row.get("street") or "").strip()) if part),
+            "same_cuisine": classification in labels,
+        })
+    restaurants.sort(key=lambda row: (row["name"].casefold(), row["cuisine"].casefold(), row["address"].casefold()))
+    return jsonify({
+        "geoid": geoid,
+        "tract_name": tract_display_name(tract),
+        "borough": tract.get("borough") or "Borough unavailable",
+        "tract_restaurant_count": len(restaurants),
+        "cuisine_counts": [{"cuisine": label, "count": count} for label, count in
+                           sorted(counts.items(), key=lambda item: (-item[1], item[0].casefold()))],
+        "same_cuisine_count": sum(row["same_cuisine"] for row in restaurants) if labels else None,
+        "cuisine_supported": bool(labels),
+        "restaurants": restaurants,
+        "source": "NYC DOHMH restaurant inspections, integrated current establishments",
+        "latest_inspection_date": max((row.get("inspection_date") or "" for row in source_rows), default="") or None,
+    })
+
+
 @app.route("/api/dashboard")
 def dashboard():
     try:
@@ -1092,6 +1339,7 @@ def dashboard():
             "whitespace": market_gap_rows(locations),
             "vendor_windows": VENDOR_WINDOWS,
             "properties": matching_properties(ranked_locations, deal_type, rent_cap, purchase_budget, concept),
+            "listing_source_connected": LISTINGS_PATH.is_file(),
             "data_layers": DATA_LAYERS,
             "reports": REPORTS,
             "scoring": {
