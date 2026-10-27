@@ -1,0 +1,19 @@
+{
+  "version": "customer-access-1.0",
+  "walking_meters_per_minute": 80.0,
+  "max_walk_minutes": 30.0,
+  "max_snap_meters": 200.0,
+  "minimum_mass_coverage": 0.7,
+  "annual_income_per_dollar_check": 2000.0,
+  "half_life_minutes": {"quick_service": 5.0, "casual": 10.0, "fine_dining": 15.0},
+  "audience_weights": {"residents": [1.0, 0.15], "workers": [0.2, 1.0], "destination": [0.6, 0.6]},
+  "daypart_weights": {"all_day": [1.0, 0.6], "morning": [0.5, 0.9], "lunch": [0.4, 1.0], "evening": [1.0, 0.25]},
+  "limitations": [
+    "Parameters are predeclared hypotheses, not fitted travel preferences.",
+    "Tract centroids represent distributed populations; access to individual residents is not observed.",
+    "Resident and job opportunity units are not unique people and are never labeled visits.",
+    "Household income is a resident affordability proxy, not individual spending or worker income.",
+    "Transit schedules, cycling and driving routes are not modeled by the walking component.",
+    "The local OSM graph has no independently verified historical availability manifest."
+  ]
+}

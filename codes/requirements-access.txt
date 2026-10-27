@@ -1,0 +1,4 @@
+# Tested on Python 3.14. No model, map service, or API credentials are needed.
+numpy==2.5.3
+pandas==3.0.6
+scipy==1.18.1
