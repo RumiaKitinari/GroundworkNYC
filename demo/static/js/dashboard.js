@@ -1,11 +1,30 @@
 let dashboard = null;
 let selectedId = null;
 let activeLayer = "opportunity";
+let activeHeatMetric = "";
+const heatmapTitles = {concept_demand:"Concept Demand",location_score:"Location Fit",demand:"Area Demand",customer_fit:"Customer Fit",access:"Accessibility",inverse_walkability:"Network Customer Access",walkability:"Walkability",competition_balance:"Competition Balance",market_gap:"Cuisine Supply",economics:"Commercial Fit"};
+let economicsCharts = [];
+let economicsRequestId = 0;
+let economicsContext = "";
+let economicsResult = null;
+let economicsInputTimer = null;
+let mapInventory = "properties";
+let selectedPropertyId = null;
+let opportunityVisible = 48;
+let propertyMapData = null;
+let nycBoundaryData = null;
+let nycBoundaryPending = false;
+let nycBoundaryRetryAfter = 0;
 let activeView = "discover";
 let requestId = 0;
 let locationMap = null;
+let mapSizeObserver = null;
 let mapMarkers = [];
 let mapPopup = null;
+let restaurantPopup = null;
+let restaurantDataPromise = null;
+let restaurantStyleRevision = 0;
+let showExistingRestaurants = localStorage.getItem("groundwork-show-restaurants") === "true";
 let mapDataset = "";
 let mapViewRequestId = 0;
 let hovered3DFeatureId = "";
@@ -13,8 +32,8 @@ let pinned3DFeature = false;
 let activeBasemap = "streets";
 const mapLimits = {
   streets: {bounds: [[-74.55, 40.43], [-73.37, 41.02]], minZoom: 10},
-  aerial: {bounds: [[-74.20, 40.49], [-73.60, 41.00]], minZoom: 9.7},
-  buildings3d: {bounds: [[-74.20, 40.49], [-73.60, 41.00]], minZoom: 9.7},
+  aerial: {bounds: [[-74.30, 40.47], [-73.60, 41.00]], minZoom: 9.7},
+  buildings3d: {bounds: [[-74.30, 40.47], [-73.60, 41.00]], minZoom: 9.7},
 };
 const systemTheme = matchMedia("(prefers-color-scheme: dark)");
 let dashboardThemeChoice = ["light", "dark"].includes(localStorage.getItem("groundwork-theme")) ? localStorage.getItem("groundwork-theme") : "system";
@@ -23,8 +42,11 @@ let savedIds = [];
 let savedKey = "";
 const competitionCache = new Map();
 const catchmentCache = new Map();
+const customerAccessCache = new Map();
+let customerAccessRequest = 0;
 let competitionRequest = 0;
 let propertyView = "all";
+let propertyVisible = 12;
 const hexCache = new Map();
 let hexRequestId = 0;
 let hoveredHexId = null;
@@ -46,6 +68,7 @@ async function buildingMapStyle() {
       !style.layers?.some(layer => layer.source === "openmaptiles" && layer["source-layer"] === "building")) {
     throw new Error("3D building geometry unavailable");
   }
+  style.glyphs ||= `${window.location.origin}/static/fonts/{fontstack}/{range}.pbf`;
   style.layers = style.layers.filter(layer => layer.type !== "raster");
   Object.keys(style.sources).forEach(id => {if (style.sources[id].type === "raster") delete style.sources[id];});
   const firstLabel = style.layers.findIndex(layer => layer.type === "symbol");
@@ -67,6 +90,7 @@ async function buildingMapStyle() {
 function mapStyle(view) {
   if (view === "aerial") return {
     version: 8,
+    glyphs: `${window.location.origin}/static/fonts/{fontstack}/{range}.pbf`,
     sources: {imagery: {type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: 'Imagery &copy; <a href="https://www.esri.com/">Esri</a> and its data providers'}},
     layers: [{id: "imagery", type: "raster", source: "imagery"}],
   };
@@ -111,8 +135,14 @@ function selectView(view) {
     button.classList.toggle("is-active", button.dataset.view === view);
     button.setAttribute("aria-current", button.dataset.view === view ? "page" : "false");
   });
+  document.querySelectorAll(".nav-group").forEach(group => group.classList.toggle("has-active-tab", !!group.querySelector(".is-active")));
+  document.querySelector(`.feature-tab[data-view="${view}"]`)?.scrollIntoView({block: "nearest", inline: "nearest"});
+  if (dashboard) renderConceptChrome();
   renderPanels();
   if (view === "menu") loadMenuSuggestions();
+  if (view === "access") renderCustomerAccess();
+  if (view === "finance") prepareEconomicsLab();
+  if (view === "reports" && dashboard) renderReports();
 }
 
 function shortlistKey() {
@@ -123,7 +153,7 @@ function shortlistKey() {
 const accountOwner = window.GROUNDWORK_ACCESS === "account" ? window.GROUNDWORK_MENU_OWNER : null;
 const BRIEF_STORAGE_KEY = accountOwner ? `groundwork-active-brief-v1:${accountOwner}` : "groundwork-active-brief-v1";
 const BRIEFS_STORAGE_KEY = `groundwork-saved-briefs-v1:${accountOwner || "guest"}`;
-const briefFields = ["conceptName", "profile", "rentCap", "dealType", "preferredArea", "cuisine", "averageCheck", "priceMode", "priceTier", "dietary", "description", "purchaseBudget", "otherFixedCosts", "variableCostPct", "operatingDays", "serviceStyle", "audience", "daypart"];
+const briefFields = ["conceptName", "profile", "rentCap", "dealType", "preferredArea", "cuisine", "averageCheck", "priceMode", "priceTier", "dietary", "description", "purchaseBudget", "otherFixedCosts", "variableCostPct", "operatingDays", "serviceStyle", "audience", "daypart", "sortBy"];
 
 function restoreBrief() {
   try {
@@ -216,6 +246,7 @@ const state = {
   serviceStyle: "casual",
   audience: "residents",
   daypart: "all_day",
+  sortBy: "opportunity",
 };
 const PRICE_DEFAULTS = {"$": 18, "$$": 35, "$$$": 65, "$$$$": 110};
 let availableConceptImages = {};
@@ -226,6 +257,7 @@ let workspaceSyncTimer = null;
 let workspaceEditVersion = 0;
 let pendingImportMarker = "";
 let pendingGuestVersion = "";
+let workspaceBaseline = null;
 
 function briefIdentity(brief) {
   return [normalizeConceptText(brief.conceptName || ""), brief.cuisine, brief.profile, brief.dietary, brief.dealType].join("|");
@@ -273,6 +305,8 @@ function workspaceSnapshot() {
     briefs: readStoredBriefs(),
     shortlists,
     menus,
+    plans: storedObject(`groundwork-plans:${accountOwner || "guest"}`) || {},
+    profile: storedObject(`groundwork-profile:${accountOwner || "guest"}`) || {},
   };
 }
 
@@ -287,6 +321,10 @@ function applyWorkspace(workspace) {
   localStorage.setItem(BRIEFS_STORAGE_KEY, JSON.stringify(workspace.briefs || []));
   for (const [key, value] of Object.entries(workspace.shortlists || {})) localStorage.setItem(key, JSON.stringify(value));
   for (const [key, value] of Object.entries(workspace.menus || {})) localStorage.setItem(key, JSON.stringify(value));
+  localStorage.setItem(`groundwork-plans:${accountOwner || "guest"}`, JSON.stringify(workspace.plans || {}));
+  localStorage.setItem(`groundwork-profile:${accountOwner || "guest"}`, JSON.stringify(workspace.profile || {}));
+  const profileForm = document.querySelector("#businessProfileForm");
+  if (profileForm) for (const field of ["display_name", "company"]) profileForm.elements.namedItem(field).value = workspace.profile?.[field] || "";
   savedKey = "";
   menuSavedKey = "";
 }
@@ -296,6 +334,8 @@ function mergeWorkspaces(base, incoming) {
   const seen = new Set();
   return {
     active_brief: incoming.active_brief || base.active_brief || null,
+    plans: {...base.plans, ...incoming.plans},
+    profile: {...base.profile, ...incoming.profile},
     briefs: briefs.filter(row => {
       const key = briefIdentity(row);
       if (seen.has(key)) return false;
@@ -343,6 +383,10 @@ function guestWorkspace() {
     briefs: Array.isArray(briefs) ? briefs : active ? [active] : [],
     shortlists,
     menus,
+    plans: Object.fromEntries(Object.entries(storedObject("groundwork-plans:guest") || {}).map(([key, value]) => {
+      const parts = ownerOfStorageKey(key, "groundwork-menu-v2:");
+      return [parts ? `groundwork-menu-v2:${JSON.stringify([accountOwner, ...parts.slice(1)])}` : key, value];
+    })),
   };
 }
 
@@ -369,9 +413,9 @@ function queueWorkspaceSync() {
     workspaceStatus("Saved on this device");
     return;
   }
-  if (!workspaceReady) return;
   workspaceEditVersion++;
   localStorage.setItem(`groundwork-workspace-dirty:${accountOwner}`, "1");
+  if (!workspaceReady) { workspaceStatus("Saved On This Device; Account Sync Pending"); return; }
   workspaceStatus("Saving...");
   clearTimeout(workspaceSyncTimer);
   workspaceSyncTimer = setTimeout(syncWorkspace, 500);
@@ -394,12 +438,13 @@ async function syncWorkspace() {
         if (!current.ok) throw new Error("Unable to reconcile workspace.");
         const remote = await current.json();
         workspaceRevision = remote.revision;
-        payload = mergeWorkspaces(remote.workspace || {active_brief: null, briefs: [], shortlists: {}, menus: {}}, payload);
+        payload = reconcileWorkspace(workspaceBaseline || {}, remote.workspace || {active_brief: null, briefs: [], shortlists: {}, menus: {}}, workspaceSnapshot());
         applyWorkspace(payload);
         continue;
       }
       if (!response.ok) throw new Error("Unable to save workspace.");
       workspaceRevision = (await response.json()).revision;
+      workspaceBaseline = structuredClone(payload);
       if (version === workspaceEditVersion) {
         localStorage.removeItem(`groundwork-workspace-dirty:${accountOwner}`);
         if (pendingImportMarker) localStorage.setItem(pendingImportMarker, pendingGuestVersion);
@@ -430,6 +475,7 @@ async function initializeWorkspace() {
       workspaceRevision = remote.revision;
       const local = workspaceSnapshot();
       const blank = {active_brief: null, briefs: [], shortlists: {}, menus: {}};
+      workspaceBaseline = structuredClone(remote.workspace || blank);
       let workspace = localStorage.getItem(`groundwork-workspace-dirty:${accountOwner}`)
         ? mergeWorkspaces(remote.workspace || blank, local) : remote.workspace || local;
       const importMarker = `groundwork-guest-imported:${accountOwner}`;
@@ -488,6 +534,7 @@ function setTheme(theme, persist = true) {
     button.setAttribute("aria-pressed", String(button.dataset.themeChoice === dashboardThemeChoice));
   });
   if (locationMap && activeBasemap === "streets") locationMap.setStyle(mapStyle("streets"));
+  if (economicsResult && activeView === "finance") renderEconomicsCharts(economicsResult);
 }
 systemTheme.addEventListener("change", () => {if (dashboardThemeChoice === "system") setTheme("system", false);});
 
@@ -498,8 +545,9 @@ const toneFor = {
   cost: ["#a74b52", "#c47a5e", "#d5ab6f", "#b8c684", "#73af85", "#367d72"],
   walkability: ["#955158", "#c48261", "#d6b776", "#acc78c", "#6cac9a", "#337f90"],
   business_draw: ["#a34359", "#cf7968", "#deac70", "#b2c782", "#71b394", "#28878a"],
-  huff_demand: ["#ad4648", "#db7952", "#e9ba6e", "#a9c77b", "#49ad8c", "#087d82"],
+  inverse_walkability: ["#8d5261", "#bc8074", "#d2b17e", "#9fbc96", "#54a59b", "#167e88"],
   concept_demand: ["#ad4648", "#db7952", "#e9ba6e", "#a9c77b", "#49ad8c", "#087d82"],
+  huff_demand: ["#ad4648", "#db7952", "#e9ba6e", "#a9c77b", "#49ad8c", "#087d82"],
 };
 
 const layerTitles = {
@@ -508,7 +556,8 @@ const layerTitles = {
   whitespace: "Market Gaps",
   cost: "Commercial Suitability",
   walkability: "Area Walkability",
-  business_draw: "Business Draw",
+  business_draw: "Business Fit",
+  inverse_walkability: "Customer Walking Access",
   concept_demand: "Concept Demand Index",
   huff_demand: "Huff Market Gaps (Scenario)",
 };
@@ -589,7 +638,8 @@ function colorFor(value, layer = activeLayer) {
 }
 
 function setActiveLayer(layer) {
-  if (layer !== activeLayer) {hexRequestId++; clearHexLayer();}
+  if (activeHeatMetric) { activeHeatMetric = ""; document.querySelector("#heatmapMetricSelect").value = ""; }
+  if (layer !== activeLayer) { hexRequestId++; clearHexLayer(); }
   activeLayer = layer;
   document.querySelector("#mapLayerSelect").value = layer;
   document.querySelectorAll(".layer").forEach((item) => {
@@ -602,6 +652,7 @@ function setActiveLayer(layer) {
   if (dashboard) {
     renderMap();
     renderIntel();
+    renderRanking();
   }
 }
 
@@ -688,6 +739,9 @@ function closeConceptSuggestions() {
 }
 
 function chooseConceptSuggestion(item, input, preserveName = false) {
+  if (item.kind === "property") {
+    openPlanProperty(item.id); input.value = ""; closeConceptSuggestions(); return;
+  }
   if (item.kind === "location") {
     selectedId = item.id;
     selectView("discover");
@@ -729,7 +783,10 @@ function renderConceptSuggestions(input) {
     ? allLocations().filter(row => normalizeConceptText(`${row.name} ${row.borough}`).includes(query))
       .slice(0, 5).map(row => ({kind: "location", id: row.id, title: `${row.name} · ${row.borough}`}))
     : [];
-  visibleSuggestions = locations.length ? locations : conceptSuggestionsFor(input.value);
+  const properties = input.id === "searchInput" && dashboard && query.length >= 2
+    ? (dashboard.properties || []).filter(row => normalizeConceptText(`${row.id} ${row.address} ${row.location_name} ${row.borough}`).includes(query)).slice(0, 5)
+      .map(row => ({kind: "property", id: row.id, title: `${row.address} · ${row.price_label}`})) : [];
+  visibleSuggestions = properties.length || locations.length ? [...properties, ...locations] : conceptSuggestionsFor(input.value);
   selectedSuggestionIndex = -1;
   list.replaceChildren();
   visibleSuggestions.forEach((item, index) => {
@@ -771,6 +828,7 @@ function conceptParams() {
     service_style: state.serviceStyle,
     audience: state.audience,
     daypart: state.daypart,
+    sort_by: state.sortBy,
   });
   const currentSaved = storedObject(shortlistKey());
   if (Array.isArray(currentSaved)) currentSaved.slice(0, 4).forEach(id => params.append("saved_id", id));
@@ -788,22 +846,31 @@ async function loadDashboard() {
     const response = await fetch(`/api/dashboard?${params}`);
     if (!response.ok) throw new Error("Dashboard request failed");
     const result = await response.json();
-    if (currentRequest !== requestId) return;
+    if (currentRequest !== requestId) return false;
     if (!result.locations?.length) {
       status.textContent = "No Locations Found. Update Your Search Brief.";
       document.querySelector(".workspace").classList.add("has-no-results");
-      return;
+      return false;
     }
     dashboard = result;
+    opportunityVisible = 48;
+    if (!selectedPropertyId) selectedPropertyId = currentPlan().selected_property_id || null;
+    if (!(dashboard.properties || []).some(row => row.id === selectedPropertyId)) selectedPropertyId = null;
     updateHuffAvailability();
     hexCache.clear();
     hexRequestId++;
     clearHexLayer();
     competitionCache.clear();
     catchmentCache.clear();
+    customerAccessCache.clear();
+    customerAccessRequest++;
     persistBrief();
     document.querySelector(".workspace").classList.remove("has-no-results");
     selectedId = selectedId || dashboard.selected;
+    if (mapInventory === "properties" && !selectedPropertyId) {
+      const property = (dashboard.properties || []).find(row => row.lead_type === "synthetic");
+      if (property) { selectedPropertyId = property.id; selectedId = property.location_id; }
+    }
     if (!allLocations().some((location) => location.id === selectedId)) {
       selectedId = dashboard.selected;
     }
@@ -811,10 +878,12 @@ async function loadDashboard() {
     renderAll();
     if (activeView === "menu") loadMenuSuggestions();
     status.hidden = true;
+    return true;
   } catch (error) {
     if (currentRequest === requestId) {
       status.textContent = "Unable To Update Locations. Select Refresh To Retry.";
     }
+    return false;
   } finally {
     if (currentRequest === requestId) document.querySelector(".workspace").setAttribute("aria-busy", "false");
   }
@@ -823,8 +892,8 @@ async function loadDashboard() {
 function allLocations() {
   const rows = [...dashboard.locations];
   const existing = new Set(rows.map(row => row.id));
-  for (const row of dashboard.saved_locations || []) {
-    if (!existing.has(row.id)) rows.push(row);
+  for (const row of [...(dashboard.saved_locations || []), ...(dashboard.property_locations || [])]) {
+    if (!existing.has(row.id)) { rows.push(row); existing.add(row.id); }
   }
   return rows;
 }
@@ -836,8 +905,8 @@ function selectedLocation() {
 function renderMetrics() {
   const best = dashboard.locations[0];
   const metrics = [
-    ["Leading Location", best.name, `${best.opportunity}/100 Location Score`],
-    ["Locations Ranked", dashboard.locations.length, state.preferredArea || "New York City"],
+    ["Leading Location", best.name, dashboard.meta.sort_by === "inverse_walkability" ? `${best.inverse_walkability ?? "--"}/100 Customer Access` : `${best.opportunity}/100 Location Score`],
+    [mapInventory === "properties" ? "Matching Properties" : "Areas Shortlisted", mapInventory === "properties" ? (dashboard.properties || []).filter(row => row.lead_type !== "registry_record").length : dashboard.locations.length, mapInventory === "properties" ? `${dashboard.property_search?.synthetic_matches ?? 0} Synthetic Scenarios` : state.preferredArea || "New York City"],
     [state.dealType === "purchase" ? "Purchase Budget" : "Monthly Budget", state.dealType === "purchase" ? fmtPrice(state.purchaseBudget) : fmtMoney(state.rentCap), "Planning Assumption"],
   ];
 
@@ -888,6 +957,10 @@ function clearHexLayer() {
 }
 
 function paintHexLayer(data) {
+  const status = document.querySelector("#dashboardStatus");
+  if (data.meta?.status === "no_feature_coverage") {
+    status.textContent = "No Recorded Coverage For This Feature And Concept."; status.hidden = false;
+  } else if (status.textContent === "No Recorded Coverage For This Feature And Concept.") status.hidden = true;
   if (!isHexLayer() || !locationMap?.getStyle()) return;
   clearHexLayer();
   const vector = data.tiles && data.source_layer;
@@ -896,16 +969,17 @@ function paintHexLayer(data) {
   const labelLayer = activeBasemap === "streets" && locationMap.getLayer("street-labels") ? "street-labels" :
     activeBasemap === "buildings3d" ? locationMap.getStyle().layers.find(layer => layer.type === "symbol")?.id : undefined;
   locationMap.addLayer({id: "concept-hex-fill", type: "fill", source: "concept-hexes", ...sourceLayer, paint: {
-    "fill-color": ["interpolate", ["linear"], ["get", "score"], 0, "#ad4648", 20, "#db7952", 40, "#e9ba6e", 60, "#a9c77b", 80, "#49ad8c", 100, "#087d82"],
-    "fill-opacity": .57,
+    "fill-color": ["interpolate", ["linear"], ["get", "score"], 0, "#b2182b", 25, "#ef8a62", 45, "#fddc7a", 60, "#a6dba0", 78, "#1b9e77", 100, "#006837"],
+    "fill-opacity": ["interpolate", ["linear"], ["get", "coverage"], 0, .12, 35, .48, 70, .78, 100, .86],
   }}, labelLayer);
   locationMap.addLayer({id: "concept-hex-outline", type: "line", source: "concept-hexes", ...sourceLayer, paint: {
     "line-color": "#f0f5ed", "line-opacity": .78, "line-width": ["interpolate", ["linear"], ["zoom"], 9, .5, 12, 1.1],
   }}, labelLayer);
+  installNycBoundary();
 }
 
 function isHexLayer() {
-  return ["concept_demand", "huff_demand"].includes(activeLayer);
+  return !!activeHeatMetric || activeLayer === "concept_demand" || activeLayer === "huff_demand";
 }
 
 async function updateHuffAvailability() {
@@ -930,7 +1004,8 @@ async function showHexLayer() {
   const level = hexLevel();
   const params = conceptParams();
   params.set("level", level);
-  const key = `${activeLayer}:${dashboard.meta.data_release}:${params}`;
+  params.set("metric", activeHeatMetric || "concept_demand");
+  const key = `${activeLayer}:${activeHeatMetric}:${dashboard.meta.data_release}:${params}`;
   const requestedLayer = activeLayer;
   const currentRequest = ++hexRequestId;
   if (hexCache.has(key)) {
@@ -939,12 +1014,16 @@ async function showHexLayer() {
   }
   try {
     let data;
-    const resolution = level === "fine" ? "9" : level === "cell" ? "8" : "7";
-    const manifestResponse = await fetch(requestedLayer === "huff_demand" ? "/api/v1/spatial/huff" : `/api/v1/spatial/resolve?${params}`);
-    if (manifestResponse.ok) {
-      const manifest = await manifestResponse.json();
-      if (manifest.tiles[resolution]) {
-        data = {tiles: [new URL(manifest.tiles[resolution], window.location.origin).href.replace(/%7B/gi, "{").replace(/%7D/gi, "}")], source_layer: manifest.source_layer};
+    if (window.GROUNDWORK_SPATIAL_BACKEND && (!activeHeatMetric || activeHeatMetric === "concept_demand")) {
+      const resolution = level === "fine" ? "9" : level === "cell" ? "8" : "7";
+      const endpoint = requestedLayer === "huff_demand" ? "/api/v1/spatial/huff" : `/api/v1/spatial/resolve?${params}`;
+      const response = await fetch(endpoint);
+      if (response.ok) {
+        const manifest = await response.json();
+        const tile = manifest.tiles?.[resolution];
+        if (tile && manifest.source_layer && (requestedLayer === "huff_demand" || manifest.data_release === dashboard.meta.data_release)) {
+          data = {tiles: [new URL(tile, window.location.origin).href.replace(/%7B/gi, "{").replace(/%7D/gi, "}")], source_layer: manifest.source_layer};
+        }
       }
     }
     if (!data) {
@@ -989,10 +1068,85 @@ function fallbackToAerial(message) {
   if (!locationMap || activeBasemap !== "buildings3d") return;
   activeBasemap = "aerial";
   document.querySelector("#mapBasemapSelect").value = "aerial";
+  syncRestaurantVisibility();
   locationMap.setStyle(mapStyle("aerial"));
   applyMapLimits("aerial");
   locationMap.easeTo({pitch: 0, bearing: 0, duration: 250});
   setMapViewStatus(message, true);
+}
+
+const RESTAURANT_LAYERS = ["restaurant-clusters", "restaurant-cluster-count", "restaurant-points"];
+
+function syncRestaurantVisibility() {
+  const in3D = activeBasemap === "buildings3d";
+  document.querySelector(".restaurant-toggle").hidden = !in3D;
+  const legend = document.querySelector(".legend-restaurant-entry");
+  if (legend) legend.hidden = !in3D || !showExistingRestaurants || isHexLayer();
+  if (!locationMap) return;
+  const visible = in3D && showExistingRestaurants && !isHexLayer();
+  document.querySelector("#showRestaurantsToggle").disabled = isHexLayer();
+  RESTAURANT_LAYERS.forEach(id => {
+    if (locationMap.getLayer(id)) locationMap.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+  });
+  if (!visible) {
+    restaurantPopup?.remove();
+    restaurantPopup = null;
+  }
+}
+
+function restaurantData() {
+  if (!restaurantDataPromise) {
+    restaurantDataPromise = fetch("/api/map/restaurants")
+      .then(response => { if (!response.ok) throw new Error("Restaurant map data unavailable"); return response.json(); })
+      .catch(error => { restaurantDataPromise = null; throw error; });
+  }
+  return restaurantDataPromise;
+}
+
+async function installRestaurantLayers(revision) {
+  try {
+    const data = await restaurantData();
+    if (!locationMap || activeBasemap !== "buildings3d" || revision !== restaurantStyleRevision || locationMap.getSource("existing-restaurants")) return;
+    locationMap.addSource("existing-restaurants", {type: "geojson", data, cluster: true, clusterRadius: 45, clusterMaxZoom: 13});
+    locationMap.addLayer({id: "restaurant-clusters", type: "circle", source: "existing-restaurants", filter: ["has", "point_count"],
+      paint: {"circle-color": "#1662c2", "circle-radius": ["step", ["get", "point_count"], 12, 100, 16, 1000, 21],
+        "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5, "circle-opacity": 1}});
+    locationMap.addLayer({id: "restaurant-cluster-count", type: "symbol", source: "existing-restaurants", filter: ["has", "point_count"],
+      layout: {"text-field": ["get", "point_count_abbreviated"], "text-font": ["Open Sans Regular"], "text-size": 11},
+      paint: {"text-color": "#ffffff"}});
+    locationMap.addLayer({id: "restaurant-points", type: "circle", source: "existing-restaurants", filter: ["!", ["has", "point_count"]],
+      paint: {"circle-color": "#2487df", "circle-radius": 3.5, "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 0.8, "circle-opacity": 1}});
+    syncRestaurantVisibility();
+  } catch {
+    setMapViewStatus("Existing restaurant locations could not load.", true);
+  }
+}
+
+async function handleRestaurantClick(event) {
+  if (activeBasemap !== "buildings3d" || !showExistingRestaurants || !locationMap?.getLayer("restaurant-points")) return false;
+  const feature = locationMap.queryRenderedFeatures(event.point, {layers: ["restaurant-points", "restaurant-clusters"]})[0];
+  if (!feature) return false;
+  if (feature.properties.cluster) {
+    const source = locationMap.getSource("existing-restaurants");
+    try {
+      const zoom = await source.getClusterExpansionZoom(feature.properties.cluster_id);
+      if (activeBasemap === "buildings3d" && showExistingRestaurants && source === locationMap.getSource("existing-restaurants")) {
+        locationMap.easeTo({center: feature.geometry.coordinates, zoom, duration: 400});
+      }
+    } catch (_) {}
+    return true;
+  }
+  mapPopup?.remove();
+  restaurantPopup?.remove();
+  const details = document.createElement("div");
+  details.className = "map-restaurant-detail";
+  details.innerHTML = `<strong>${escapeHtml(feature.properties.name || "Name unavailable")}</strong>
+    <div><span>Cuisine</span><b>${escapeHtml(feature.properties.cuisine || "Unavailable")}</b></div>
+    <div><span>Address</span><b>${escapeHtml(feature.properties.address || "Unavailable")}</b></div>`;
+  restaurantPopup = new maplibregl.Popup({closeButton: true, closeOnClick: true, offset: 10, maxWidth: "290px"})
+    .setLngLat(feature.geometry.coordinates).setDOMContent(details).addTo(locationMap);
+  return true;
 }
 
 async function changeMapView(next) {
@@ -1013,14 +1167,16 @@ async function changeMapView(next) {
   }
   if (request !== mapViewRequestId) return;
   activeBasemap = next;
+  restaurantStyleRevision++;
+  restaurantPopup?.remove();
+  syncRestaurantVisibility();
   pinned3DFeature = false;
   hovered3DFeatureId = "";
   mapPopup?.remove();
   locationMap.setStyle(style || mapStyle(next));
   applyMapLimits(next);
   if (next === "buildings3d") {
-    const location = selectedLocation();
-    locationMap.easeTo({center: [location.longitude, location.latitude], zoom: Math.max(locationMap.getZoom(), 15.4), pitch: 54, bearing: -18, duration: 550});
+    locationMap.easeTo({pitch: 54, bearing: -18, duration: 550});
     setMapViewStatus("Loading 3D buildings...");
   } else {
     locationMap.easeTo({pitch: 0, bearing: 0, duration: 300});
@@ -1072,6 +1228,72 @@ function show3DFeature(feature, lngLat, pinned = false) {
   mapPopup = popup;
 }
 
+function installNycBoundary() {
+  if (!locationMap?.getStyle()) return;
+  if (!nycBoundaryData) {
+    if (nycBoundaryPending || Date.now() < nycBoundaryRetryAfter) return;
+    nycBoundaryPending = true;
+    fetch("/api/geography/nyc-boundary").then(response => {
+      if (!response.ok) throw new Error("Boundary unavailable");
+      return response.json();
+    }).then(data => {
+      if (data.type !== "FeatureCollection" || data.features?.length !== 3) throw new Error("Invalid city boundary");
+      nycBoundaryData = data;
+      installNycBoundary();
+    }).catch(() => { nycBoundaryRetryAfter = Date.now() + 60000; })
+      .finally(() => { nycBoundaryPending = false; });
+    return;
+  }
+  if (!locationMap.isStyleLoaded()) return;
+  const ids = ["nyc-context-mask", "nyc-boundary-halo", "nyc-boundary-line"];
+  if (!locationMap.getSource("nyc-city-partition")) {
+    locationMap.addSource("nyc-city-partition", {type:"geojson",data:nycBoundaryData});
+    locationMap.addLayer({id:ids[0],type:"fill",source:"nyc-city-partition",filter:["==",["get","kind"],"outside"],paint:{"fill-color":"#102030","fill-opacity":.27}});
+    locationMap.addLayer({id:ids[1],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#ffffff","line-opacity":.92,"line-width":["interpolate",["linear"],["zoom"],9,5,14,7]}});
+    locationMap.addLayer({id:ids[2],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#2764d8","line-opacity":1,"line-width":["interpolate",["linear"],["zoom"],9,2.4,14,3.2]}});
+  }
+  const opacity = activeBasemap === "aerial" ? .38 : currentTheme === "dark" ? .4 : .23;
+  if (locationMap.getPaintProperty(ids[0],"fill-opacity") !== opacity) locationMap.setPaintProperty(ids[0],"fill-opacity",opacity);
+  // Keep the city partition above heatmaps, but below every interactive marker and label.
+  const foreground = ["restaurant-clusters", "restaurant-points", "property-clusters", "property-points", "property-selection",
+    "restaurant-cluster-count", "property-cluster-count", "property-rank-label", "property-selection-rank"].filter(id=>locationMap.getLayer(id));
+  const ordered = [...ids, ...foreground];
+  const last = locationMap.getStyle().layers.slice(-ordered.length).map(layer=>layer.id);
+  if (ordered.some((id,index)=>last[index] !== id)) ordered.forEach(id=>locationMap.moveLayer(id));
+}
+
+function propertyFeatureAtPoint(point) {
+  const layers = ["property-selection", "property-points", "property-clusters"].filter(id => locationMap.getLayer(id));
+  return layers.length ? locationMap.queryRenderedFeatures(point, {layers})[0] : null;
+}
+
+function installPropertyLayers() {
+  if (!locationMap.isStyleLoaded() || !propertyMapData) return;
+  if (!locationMap.getSource("property-opportunities")) {
+    locationMap.addSource("property-opportunities", {type: "geojson", data: propertyMapData, cluster: true, clusterMaxZoom: 12, clusterRadius: 35});
+    locationMap.addLayer({id: "property-clusters", type: "circle", source: "property-opportunities", filter: ["has", "point_count"], paint: {"circle-color": "#246da5", "circle-opacity": 1, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2, "circle-radius": ["step", ["get", "point_count"], 13, 10, 18, 40, 24]}});
+    locationMap.addLayer({id: "property-points", type: "circle", source: "property-opportunities", filter: ["!", ["has", "point_count"]], paint: {"circle-color": ["get", "color"], "circle-radius": ["case", ["get", "selected"], 16, 13], "circle-stroke-color": "#ffffff", "circle-stroke-width": 2}});
+    const font = locationMap.getStyle().layers.find(layer => layer.type === "symbol" && Array.isArray(layer.layout?.["text-font"]))?.layout["text-font"] || ["Open Sans Regular"];
+    locationMap.addLayer({id:"property-cluster-count",type:"symbol",source:"property-opportunities",filter:["has","point_count"],layout:{"text-field":["get","point_count_abbreviated"],"text-font":font,"text-size":12,"text-allow-overlap":true},paint:{"text-color":"#ffffff"}});
+    locationMap.addLayer({id:"property-rank-label",type:"symbol",source:"property-opportunities",filter:["!",["has","point_count"]],layout:{"text-field":["to-string",["get","rank"]],"text-font":font,"text-size":10,"text-allow-overlap":true},paint:{"text-color":"#102a33","text-halo-color":"#ffffff","text-halo-width":.7}});
+  }
+  const visible = mapInventory === "properties" && !isHexLayer();
+  const selection = {type:"FeatureCollection", features:propertyMapData.features.filter(row => row.properties.selected)};
+  if (!locationMap.getSource("property-selection")) {
+    locationMap.addSource("property-selection", {type:"geojson", data:selection});
+    locationMap.addLayer({id:"property-selection",type:"circle",source:"property-selection",paint:{"circle-color":["get","color"],"circle-radius":16,"circle-stroke-color":"#ffffff","circle-stroke-width":4}});
+    const font = locationMap.getStyle().layers.find(layer => layer.type === "symbol" && Array.isArray(layer.layout?.["text-font"]))?.layout["text-font"] || ["Open Sans Regular"];
+    locationMap.addLayer({id:"property-selection-rank",type:"symbol",source:"property-selection",layout:{"text-field":["to-string",["get","rank"]],"text-font":font,"text-size":11,"text-allow-overlap":true},paint:{"text-color":"#102a33","text-halo-color":"#ffffff","text-halo-width":1}});
+  } else {
+    const signature = JSON.stringify(selection);
+    if (locationMap._groundworkSelection !== signature) { locationMap.getSource("property-selection").setData(selection); locationMap._groundworkSelection = signature; }
+  }
+  const visibility = visible ? "visible" : "none";
+  for (const id of ["property-clusters", "property-points", "property-cluster-count", "property-rank-label", "property-selection", "property-selection-rank"]) {
+    if (locationMap.getLayoutProperty(id, "visibility") !== visibility) locationMap.setLayoutProperty(id, "visibility", visibility);
+  }
+}
+
 function renderMap() {
   if (!locationMap) {
     locationMap = new maplibregl.Map({container: "mapStage", style: mapStyle(activeBasemap), center: [-73.96, 40.73], zoom: 11, minZoom: mapLimits[activeBasemap].minZoom, maxZoom: 19, maxBounds: mapLimits[activeBasemap].bounds, attributionControl: false});
@@ -1092,10 +1314,19 @@ function renderMap() {
     locationMap.on("zoomend", () => {
       if (isHexLayer()) showHexLayer();
     });
+    mapSizeObserver = new ResizeObserver(() => requestAnimationFrame(() => {
+      const bounds = document.querySelector("#mapStage").getBoundingClientRect();
+      if (bounds.width && bounds.height) locationMap.resize();
+    }));
+    mapSizeObserver.observe(document.querySelector("#mapStage"));
     locationMap.on("load", () => {
+      installNycBoundary();
       if (isHexLayer()) showHexLayer();
     });
     locationMap.on("idle", () => {
+      installNycBoundary();
+      installPropertyLayers();
+      if (activeBasemap === "buildings3d" && !locationMap.getSource("existing-restaurants")) installRestaurantLayers(restaurantStyleRevision);
       if (isHexLayer() && !locationMap.getLayer("concept-hex-fill")) showHexLayer();
       if (activeBasemap === "buildings3d" && locationMap.getLayer("nyc-buildings-3d") && locationMap.isSourceLoaded("openmaptiles")) setMapViewStatus("");
       collapseMapAttribution();
@@ -1109,6 +1340,8 @@ function renderMap() {
       }
     });
     locationMap.on("style.load", () => {
+      installNycBoundary();
+      installPropertyLayers();
       if (isHexLayer()) showHexLayer();
     });
     locationMap.on("error", event => {
@@ -1125,8 +1358,9 @@ function renderMap() {
         mapPopup?.remove();
         return;
       }
-      if (feature.properties.id === hoveredHexId) return;
-      hoveredHexId = feature.properties.id;
+      const identity = feature.id ?? feature.properties.cell_id ?? feature.properties.id;
+      if (identity === hoveredHexId) return;
+      hoveredHexId = identity;
       const {score, coverage, level, cell_count: count} = feature.properties;
       const detail = document.createElement("div");
       detail.className = "map-location-detail";
@@ -1135,11 +1369,42 @@ function renderMap() {
         const demand = Number(feature.properties.unserved_demand);
         detail.innerHTML = `<strong>Huff Market Gap Scenario</strong><div><span>Outside Option Share</span><b>${Number.isFinite(gap) ? gap.toFixed(1) : "--"}%</b></div><div><span>Unserved Demand Units</span><b>${Number.isFinite(demand) ? Math.round(demand).toLocaleString("en-US") : "--"}</b></div><small>Scenario estimate; weights and capacity require calibration.</small>`;
       } else {
-      detail.innerHTML = `<strong>${level === "sector" ? "Demand Sector" : "Local Demand Cell"}</strong><div><span>Concept Demand</span><b>${score}/100</b></div><div><span>Evidence Coverage</span><b>${coverage}%</b></div>${count ? `<small>${count} Local Cells</small>` : ""}`;
+        detail.innerHTML = `<strong>${level === "sector" ? "Area Sector" : "Local Cell"}</strong><div><span>${heatmapTitles[activeHeatMetric || "concept_demand"]}</span><b>${score}/100</b></div><div><span>Evidence Coverage</span><b>${coverage}%</b></div>${count ? `<small>${count} Local Cells</small>` : ""}`;
       }
       mapPopup?.remove();
       mapPopup = new maplibregl.Popup({closeButton: false, closeOnClick: false, offset: 12, maxWidth: "230px"})
         .setLngLat(event.lngLat).setDOMContent(detail).addTo(locationMap);
+    });
+    locationMap.on("mousemove", event => {
+      if (mapInventory !== "properties" || isHexLayer()) return;
+      const feature = propertyFeatureAtPoint(event.point);
+      locationMap.getCanvas().style.cursor = feature ? "pointer" : "";
+      if (!feature) { mapPopup?.remove(); return; }
+      const detail = document.createElement("div"); detail.className = "map-location-detail";
+      if (feature.properties.cluster) {
+        detail.innerHTML = `<strong>${displayNumber(Number(feature.properties.point_count))} Property Scenarios / Leads</strong><small>Zoom In To View Individual Properties</small>`;
+      } else {
+        const property = dashboard.properties.find(row => row.id === feature.properties.property_id);
+        if (!property) return;
+        detail.innerHTML = `<strong>${escapeHtml(property.address)}</strong><small>${property.lead_type === "synthetic" ? "Synthetic Scenario · Approximate Location" : "Source-Reported Property Lead"}</small><div><span>${property.transaction === "purchase" ? "Purchase Price" : "Monthly Rent"}${property.lead_type === "synthetic" ? " (Modeled)" : ""}</span><b>${escapeHtml(property.price_label)}</b></div><div><span>Floor Area</span><b>${displayNumber(property.sqft)} Sq Ft</b></div><div><span>Area Score</span><b>${property.location_score}/100</b></div><div><span>Customer Access</span><b>${property.customer_access?.index == null ? "Unavailable" : `${property.customer_access.index}/100`}</b></div>${property.broker_name ? `<div><span>Broker / Owner</span><b>${escapeHtml(property.broker_name)}</b></div>` : ""}`;
+      }
+      mapPopup?.remove(); mapPopup = new maplibregl.Popup({closeButton:false,closeOnClick:false,offset:14,maxWidth:"290px"}).setLngLat(feature.geometry.coordinates).setDOMContent(detail).addTo(locationMap);
+    });
+    locationMap.on("click", async event => {
+      if (mapInventory !== "properties" || isHexLayer()) return;
+      const feature = propertyFeatureAtPoint(event.point);
+      if (!feature) return;
+      if (feature.properties.cluster) {
+        try {
+          const source = locationMap.getSource("property-opportunities");
+          const zoom = await source.getClusterExpansionZoom(Number(feature.properties.cluster_id));
+          if (locationMap.getSource("property-opportunities") === source) locationMap.easeTo({center: feature.geometry.coordinates, zoom, duration: 400});
+        } catch { /* A basemap change can replace the source while expansion is pending. */ }
+      } else {
+        const property = dashboard.properties.find(row => row.id === feature.properties.property_id);
+        if (!property) return;
+        selectedPropertyId = property.id; selectedId = property.location_id; renderAll();
+      }
     });
     locationMap.on("click", (event) => {
       const feature = hexAtPoint(event.point);
@@ -1150,6 +1415,7 @@ function renderMap() {
       }
     });
     locationMap.on("mousemove", event => {
+      if (mapInventory === "properties" && propertyFeatureAtPoint(event.point)) return;
       if (activeBasemap !== "buildings3d" || isHexLayer() || pinned3DFeature) return;
       const feature = featureAtPoint(event.point);
       locationMap.getCanvas().style.cursor = feature ? "pointer" : "";
@@ -1164,7 +1430,13 @@ function renderMap() {
       show3DFeature(feature, event.lngLat);
     });
     locationMap.on("click", event => {
+      if (mapInventory === "properties" && propertyFeatureAtPoint(event.point)) return;
       if (activeBasemap !== "buildings3d" || isHexLayer()) return;
+      if (showExistingRestaurants && locationMap.getLayer("restaurant-points") &&
+          locationMap.queryRenderedFeatures(event.point, {layers: ["restaurant-points", "restaurant-clusters"]}).length) {
+        handleRestaurantClick(event);
+        return;
+      }
       const feature = featureAtPoint(event.point);
       if (feature) show3DFeature(feature, event.lngLat, true);
       else mapPopup?.remove();
@@ -1180,8 +1452,10 @@ function renderMap() {
     document.querySelector("#mapStage").append(expand);
     const legend = document.createElement("div");
     legend.className = "map-legend";
-    legend.innerHTML = '<span>0</span><i></i><span>100</span>';
+    legend.innerHTML = '<div><b class="legend-recommendation-dot"></b><span>Recommended Area</span><span>0</span><i></i><span>100</span></div><div class="legend-restaurant-entry" hidden><b class="legend-restaurant-dot"></b><span>Existing Restaurant</span></div>';
+    legend.insertAdjacentHTML("beforeend", '<div><b class="nyc-boundary-key"></b><span>NYC Boundary</span></div>');
     document.querySelector("#mapStage").append(legend);
+    syncRestaurantVisibility();
   }
   mapPopup?.remove();
   pinned3DFeature = false;
@@ -1189,32 +1463,51 @@ function renderMap() {
   mapMarkers = [];
   if (isHexLayer()) showHexLayer();
   else clearHexLayer();
-  const locations = allLocations().filter(row => Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
-  if (!isHexLayer()) locations.forEach((location) => {
-    const selected = location.id === selectedId;
+  const locationLookup = new Map(allLocations().map(row => [row.id, row]));
+  const points = mapInventory === "properties"
+    ? (dashboard.properties || []).filter(row => row.lead_type !== "registry_record").map((property,index) => ({
+        property, location: locationLookup.get(property.location_id),
+        latitude: Number(property.latitude), longitude: Number(property.longitude), id: property.id, rank: index + 1,
+      }))
+    : [...dashboard.locations, ...(dashboard.saved_locations || [])].filter((row, index, rows) => rows.findIndex(item => item.id === row.id) === index)
+      .map(location => ({location, latitude: location.latitude, longitude: location.longitude, id: location.id}));
+  const locations = points.filter(row => row.location && Number.isFinite(row.latitude) && Number.isFinite(row.longitude) && row.latitude >= 40.45 && row.latitude <= 40.95 && row.longitude >= -74.3 && row.longitude <= -73.65);
+  if (mapInventory === "properties") {
+    propertyMapData = {type:"FeatureCollection",features:locations.map(point => ({type:"Feature",geometry:{type:"Point",coordinates:[point.longitude,point.latitude]},properties:{property_id:point.property.id,rank:point.rank,color:colorFor(activeLayer === "inverse_walkability" ? point.property.customer_access?.index : activeMetric(point.location)),selected:point.property.id === selectedPropertyId}}))};
+    locationMap.getSource("property-opportunities")?.setData(propertyMapData);
+  }
+  installPropertyLayers();
+  syncRestaurantVisibility();
+  document.querySelector("#mapInventorySelect").disabled = isHexLayer();
+  document.querySelector("#mapLayerSelect").disabled = !!activeHeatMetric;
+  document.querySelector(".legend-recommendation-dot + span").textContent = mapInventory === "properties" && !isHexLayer() ? "Property Scenario / Lead" : "Recommended Area";
+  if (!isHexLayer() && mapInventory === "areas") locations.forEach((point,index) => {
+    const {location, property} = point;
+    const selected = property ? property.id === selectedPropertyId : location.id === selectedId;
     const element = document.createElement("button");
-    element.className = `map-score-marker${selected ? " is-selected" : ""}`;
+    element.className = `map-score-marker${property ? " map-property-marker" : ""}${selected ? " is-selected" : ""}`;
+    element.dataset.propertyId = property?.id || "";
     element.type = "button";
+    element.textContent = String(index + 1);
     element.style.backgroundColor = colorFor(activeMetric(location));
-    element.title = `${location.name} · ${activeMetric(location) ?? "Unavailable"}`;
+    element.title = `${property?.address || location.name} · ${property?.price_label || `Area Score ${location.opportunity}`}`;
     element.setAttribute("aria-label", element.title);
     const showDetail = () => {
       mapPopup?.remove();
-      const property = (dashboard.properties || []).find(row => row.geoid === location.geoid);
-      const propertyLabel = property ? property.lead_type === "listing" ? "Nearby Property Listing" : "Nearby Storefront Record" : "Nearby Property";
+      const propertyLabel = property?.lead_type === "synthetic" ? "Synthetic Scenario · Approximate Location" : property ? "Source-Reported Property Lead" : "Area Assessment";
       const detail = document.createElement("div");
       detail.className = "map-location-detail";
       detail.innerHTML = `
-        <strong>${escapeHtml(location.name)}</strong>
-        <div><span>Location Score</span><b>${location.opportunity}/100</b></div>
-        <div><span>Business Draw</span><b>${location.business_draw}/100</b></div>
+        <strong>${escapeHtml(property?.address || location.name)}</strong>
+        <div><span>Area Score</span><b>${location.opportunity}/100</b></div>
+        <div><span>Customer Access</span><b>${(property ? property.customer_access?.index : location.inverse_walkability) ?? "Unavailable"}${(property ? property.customer_access?.index : location.inverse_walkability) != null ? "/100" : ""}</b></div>
         <small>${propertyLabel}</small>
-        <p>${property ? escapeHtml(property.address) : "No Property Record Matched"}</p>
-        <div><span>${property?.transaction === "purchase" ? "Asking Price" : property?.transaction === "lease" ? "Asking Rent" : "Asking Price / Rent"}</span><b>${escapeHtml(property?.price_label || "Unavailable")}</b></div>
-        <div><span>Broker / Owner</span><b>${escapeHtml(property?.broker_name || "Not In Source")}</b></div>
+        <p>${escapeHtml(location.name)}</p>
+        ${property ? `<div><span>${property.transaction === "purchase" ? "Purchase Price" : "Monthly Rent"}${property.lead_type === "synthetic" ? " (Modeled)" : ""}</span><b>${escapeHtml(property.price_label || "Unavailable")}</b></div><div><span>Floor Area</span><b>${property.sqft ? `${displayNumber(property.sqft)} Sq Ft` : "Unavailable"}</b></div>` : `<div><span>Matching Scenarios</span><b>${(dashboard.properties || []).filter(row => row.geoid === location.geoid && row.lead_type === "synthetic").length}</b></div>`}
+        ${property?.lead_type === "listing" ? `<div><span>Broker / Owner</span><b>${escapeHtml(property.broker_name || "Not In Source")}</b></div>` : ""}
       `;
       mapPopup = new maplibregl.Popup({closeButton: false, closeOnClick: false, offset: 16, maxWidth: "270px"})
-        .setLngLat([location.longitude, location.latitude]).setDOMContent(detail).addTo(locationMap);
+        .setLngLat([point.longitude, point.latitude]).setDOMContent(detail).addTo(locationMap);
     };
     element.addEventListener("mouseenter", showDetail);
     element.addEventListener("focus", showDetail);
@@ -1222,41 +1515,70 @@ function renderMap() {
     element.addEventListener("blur", () => mapPopup?.remove());
     element.addEventListener("click", () => {
       selectedId = location.id;
+      selectedPropertyId = property?.id || null;
       renderAll();
       revealSelectedRanking();
     });
-    mapMarkers.push(new maplibregl.Marker({element, anchor: "center"}).setLngLat([location.longitude, location.latitude]).addTo(locationMap));
+    mapMarkers.push(new maplibregl.Marker({element, anchor: "center"}).setLngLat([point.longitude, point.latitude]).addTo(locationMap));
   });
-  const key = locations.map(row => row.id).join(",");
+  const key = `${mapInventory}:${dashboard.meta.data_release}:${locations.map(row => row.id).join(",")}`;
   if (key !== mapDataset && locations.length) {
-    const latitudes = dashboard.locations.map(row => row.latitude);
-    const longitudes = dashboard.locations.map(row => row.longitude);
+    const latitudes = locations.map(row => row.latitude);
+    const longitudes = locations.map(row => row.longitude);
     locationMap.fitBounds([[Math.min(...longitudes), Math.min(...latitudes)], [Math.max(...longitudes), Math.max(...latitudes)]], {padding: 35, maxZoom: 14, duration: 0});
     mapDataset = key;
   }
   document.querySelector(".map-legend i").style.background = `linear-gradient(90deg, ${toneFor[activeLayer].join(",")})`;
+  if (activeHeatMetric) {
+    document.querySelector(".legend-recommendation-dot + span").textContent = `${heatmapTitles[activeHeatMetric]} · Relative Index`;
+    document.querySelector(".map-legend i").style.background = "linear-gradient(90deg,#b2182b,#fddc7a,#1b9e77,#006837)";
+  }
+}
+
+function assessmentBasis(location) {
+  const mode = location.assessment_policy?.cuisine_mode;
+  if (location.assessment_policy?.recommendation_eligible === false) return "Insufficient Evidence";
+  if (mode === "cuisine_supply_supported") return "Cuisine-Supported Fit";
+  if (mode === "pooled_cuisine_supply") return "Limited Cuisine Evidence";
+  return "General Location Fit";
 }
 
 function renderIntel() {
   const location = selectedLocation();
+  const property = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
+  const summary = document.querySelector("#selectedPropertySummary");
+  summary.hidden = !property;
+  summary.innerHTML = property ? `<span class="eyebrow">${property.lead_type === "synthetic" ? "Synthetic Property Scenario" : "Source-Reported Property Lead"}</span><strong>${escapeHtml(property.address)}</strong><div><span>${property.transaction === "purchase" ? "Purchase" : "Lease"}</span><b>${escapeHtml(property.price_label)}</b></div><div><span>Floor Area</span><b>${displayNumber(property.sqft)} Sq Ft</b></div><button type="button" class="quiet-action" id="inspectSelectedProperty">Property Details</button>` : "";
+  document.querySelector("#inspectSelectedProperty")?.addEventListener("click", () => { propertyView = property.lead_type; propertyVisible = Math.max(12, (dashboard.properties || []).filter(row => row.lead_type === propertyView).findIndex(row => row.id === property.id) + 1); renderLease(); selectView("lease"); document.querySelector(`[data-property-card="${CSS.escape(property.id)}"]`)?.scrollIntoView({block:"center"}); });
   document.querySelector("#selectedName").textContent = location.name;
   document.querySelector("#selectedMeta").textContent = `${location.borough} · ${titleCase(location.archetype)}`;
   document.querySelector("#selectedScore").textContent = location.opportunity;
   document.querySelector("#scoreOrb").style.background = `conic-gradient(${colorFor(location.opportunity, "opportunity")} 0 ${location.opportunity}%, rgba(33,54,77,.95) ${location.opportunity}% 100%)`;
-  document.querySelector("#confidencePill").textContent = "Screening Estimate";
+  document.querySelector("#confidencePill").textContent = location.ranking_components ? "Experimental Model Ranking" : "Screening Estimate";
+  document.querySelector("#confidencePill").textContent += ` · ${assessmentBasis(location)}`;
+  document.querySelector("#confidencePill").title = "Assessment basis, not a calibrated probability of success";
   document.querySelector("#walkabilityPair").innerHTML = `
     <div><span>Walkability</span><strong>${location.walkability ?? "--"}<small>/100</small></strong></div>
-    <div title="Inverse Walkability: Relative Concept Fit, Not Predicted Visits"><span>Business Draw</span><strong>${location.business_draw}<small>/100</small></strong></div>
+    <button class="access-insight-link" id="openCustomerAccess" type="button" title="Network-Based Customer Access; Not Predicted Visits"><span>${property ? "Property Access" : "Customer Access"}</span><strong>${(property ? property.customer_access?.index : location.inverse_walkability) ?? "--"}<small>/100</small></strong></button>
   `;
+  document.querySelector("#openCustomerAccess").addEventListener("click", () => selectView("access"));
 
-  document.querySelector("#barStack").innerHTML = [...location.score_components].sort((a, b) => b.score - a.score).slice(0, 3).map((component) => `
+  const ranking = location.ranking_components;
+  const scoreSignals = ranking ? [
+    {label: "Survival Percentile", score: Math.round(100 * ranking.survival_percentile)},
+    ranking.general_fit_index != null
+      ? {label: "General Location Fit", score: ranking.general_fit_index}
+      : {label: "H3 Cuisine Supply", score: Math.round(100 * ranking.cuisine_gap)},
+  ] : location.score_components.filter((component) => component.coverage > 0);
+  if (!scoreSignals.length) scoreSignals.push({label: "Insufficient Evidence", score: 0});
+  document.querySelector("#barStack").innerHTML = [...scoreSignals].sort((a, b) => b.score - a.score).slice(0, 3).map((component) => `
     <div class="bar-row">
       <div class="bar-line"><span>${component.label}</span><strong>${component.score}</strong></div>
       <div class="bar-track"><div class="bar-fill" style="width:${component.score}%;background:${colorFor(component.score, "opportunity")}"></div></div>
     </div>
   `).join("");
 
-  const signals = [...location.score_components].sort((a, b) => b.score - a.score);
+  const signals = [...scoreSignals].sort((a, b) => b.score - a.score);
   document.querySelector("#driverList").innerHTML = `
     <li><span>Strongest Factor</span><strong>${escapeHtml(signals[0].label)}</strong></li>
     <li><span>Key Tradeoff</span><strong>${escapeHtml(signals[signals.length - 1].label)}</strong></li>
@@ -1273,18 +1595,38 @@ function renderRanking() {
   const table = document.querySelector("#rankingTable");
   const previousTop = table.scrollTop;
   const previousLeft = table.scrollLeft;
+  table.classList.toggle("is-property-ranking", mapInventory === "properties" && !isHexLayer());
+  if (mapInventory === "properties" && !isHexLayer()) {
+    const properties = (dashboard.properties || []).filter(row => row.lead_type !== "registry_record");
+    const selectedIndex = properties.findIndex(row => row.id === selectedPropertyId);
+    const shown = properties.slice(0, Math.max(opportunityVisible, selectedIndex + 1));
+    table.innerHTML = `<div class="table-row header"><span>#</span><span>Property / Scenario</span><span>Area Score</span><span>Customer Access</span><span>Transaction</span><span>Price</span><span>Floor Area</span><span>Details</span></div>${shown.map((row, index) => `<div class="table-row${row.id === selectedPropertyId ? " is-selected" : ""}" data-opportunity-property="${escapeHtml(row.id)}" tabindex="0"><span>${index + 1}</span><button class="place-name" type="button">${escapeHtml(row.address)}<small>${row.lead_type === "synthetic" ? "Synthetic Scenario" : "Source-Reported Lead"}</small></button><span>${row.location_score}</span><span>${row.customer_access?.index ?? "Unavailable"}</span><span>${row.transaction === "purchase" ? "Purchase" : "Lease"}</span><span>${escapeHtml(row.price_label)}</span><span>${displayNumber(row.sqft)} Sq Ft</span><button type="button" class="quiet-action">Select</button></div>`).join("")}${properties.length > shown.length ? `<button type="button" class="quiet-action" id="moreOpportunities">Show More · ${properties.length - shown.length} Remaining</button>` : ""}${!properties.length ? '<div class="property-empty"><h3>No Properties Match This Brief</h3><button type="button" class="quiet-action" id="editOpportunityBrief">Edit Brief</button></div>' : ""}`;
+    document.querySelector("#editOpportunityBrief")?.addEventListener("click", () => openBrief());
+    document.querySelector("#moreOpportunities")?.addEventListener("click", () => { opportunityVisible += 48; renderRanking(); });
+    document.querySelectorAll("[data-opportunity-property]").forEach(row => {
+      const choose = () => {
+        const property = properties.find(item => item.id === row.dataset.opportunityProperty);
+        selectedPropertyId = property.id; selectedId = property.location_id;
+        renderAll(); locationMap.flyTo({center: [Number(property.longitude), Number(property.latitude)], zoom: 14});
+      };
+      row.addEventListener("click", choose);
+      row.addEventListener("keydown", event => { if (event.target === row && ["Enter", " "].includes(event.key)) { event.preventDefault(); choose(); } });
+    });
+    table.scrollTop = previousTop; table.scrollLeft = previousLeft;
+    return;
+  }
   table.innerHTML = `
     <div class="table-row header">
-      <span>#</span><span>Location</span><span>Score</span><span>Business Draw</span><span>Walkability</span><span>Cuisine Fit</span><span>Commercial Fit</span><span>Compare</span>
+      <span>#</span><span>Location</span><span>Score</span><span>Customer Access</span><span>Walkability</span><span>Cuisine Supply</span><span>Commercial Fit</span><span>Compare</span>
     </div>
     ${rows.map((row, index) => `
       <div class="table-row${row.id === selectedId ? " is-selected" : ""}" data-id="${row.id}" tabindex="0" role="row" aria-current="${row.id === selectedId ? "true" : "false"}">
         <button type="button">${index + 1}</button>
         <button class="place-name" type="button">${escapeHtml(row.name)}</button>
         <span class="${scoreClass(row.opportunity)}">${row.opportunity}</span>
-        <span>${row.business_draw}</span>
+        <span>${row.inverse_walkability ?? "--"}</span>
         <span>${row.walkability ?? "--"}</span>
-        <span>${row.score_components.find((item) => item.key === "market_gap").score}</span>
+        <span>${row.score_components.find((item) => item.key === "market_gap").coverage > 0 ? row.score_components.find((item) => item.key === "market_gap").score : "Unavailable"}</span>
         <span>${row.score_components.find((item) => item.key === "economics").score}</span>
         <button class="save-row" type="button" data-save-id="${row.id}" aria-label="${savedIds.includes(row.id) ? "Remove" : "Save"} ${escapeHtml(row.name)} ${savedIds.includes(row.id) ? "from" : "to"} comparison" aria-pressed="${savedIds.includes(row.id)}">${savedIds.includes(row.id) ? "Saved" : "Save"}</button>
       </div>
@@ -1294,6 +1636,7 @@ function renderRanking() {
   document.querySelectorAll(".table-row[data-id]").forEach((row) => {
     const choose = () => {
       selectedId = row.dataset.id;
+      selectedPropertyId = null;
       renderAll();
     };
     row.addEventListener("click", choose);
@@ -1330,6 +1673,10 @@ function renderMarketProfile() {
   const measure = (label, value, basis) => `<div class="market-measure"><span>${label}</span><strong>${value}</strong><small>${basis}</small></div>`;
   document.querySelector("#scorecardBoard").innerHTML = `
     <div class="view-heading"><div><span class="eyebrow">${escapeHtml(location.borough)} / ${escapeHtml(profile.neighborhood || "NYC")}</span><h3>${escapeHtml(location.name)}</h3></div><button class="quiet-action" type="button" id="marketCompetition">View Competition</button></div>
+    <div class="market-group"><h3>Location Outlook</h3><div class="market-measures">
+      ${measure("Estimated Three-Year Survival", location.survival?.status === "available" ? `${(100 * location.survival.probability).toFixed(1)}%` : "Unavailable", location.survival?.status === "available" ? `Experimental estimate · ${Math.round(100 * location.survival.feature_coverage)}% feature coverage` : "Not available for this assessment")}
+      ${location.ranking_components ? measure("Ranking", "60% / 40%", location.ranking_components.general_fit_index != null ? "Survival percentile / general location fit; not a survival probability" : "Survival percentile / H3 cuisine supply; not a survival probability") : ""}
+    </div></div>
     <div class="market-group"><h3>Local Customer Base</h3><div class="market-measures">
       ${measure("Residents", displayNumber(profile.population), "2020-2024 ACS five-year estimate")}
       ${measure("Jobs", displayNumber(profile.jobs), "2023 LODES workplace employment")}
@@ -1337,6 +1684,7 @@ function renderMarketProfile() {
     </div></div>
     <div class="market-group"><h3>Access And Movement</h3><div class="market-measures">
       ${measure("Walkability", location.walkability == null ? "Unavailable" : `${location.walkability}/100`, "EPA built-environment index")}
+      ${measure("Customer Access", location.inverse_walkability == null ? "Unavailable" : `${location.inverse_walkability}/100`, "Network-based inverse walkability · relative index")}
       ${measure("Nearest Subway", profile.subway_distance_miles == null ? "Unavailable" : `${Number(profile.subway_distance_miles).toFixed(2)} mi`, escapeHtml(profile.nearest_subway_station || "Nearest complex"))}
       ${measure("Subway Entries", displayNumber(profile.nearest_subway_weekly_ridership), escapeHtml(profile.subway_vintage || "Nearest station · one complete week"))}
       ${profile.nearest_subway_dayparts ? measure("Weekday Morning Entries", displayNumber(profile.nearest_subway_dayparts.morning), "7-10 AM · four sampled 2025 weeks") : ""}
@@ -1347,8 +1695,8 @@ function renderMarketProfile() {
     </div></div>
     <div class="market-group"><h3>Commercial Context</h3><div class="market-measures">
       ${measure("Recorded Restaurants", displayNumber(profile.active_restaurants), "DOHMH tract records")}
-      ${measure("Reported Vacant Storefronts", displayNumber(profile.reported_vacant_storefronts), "Registry filings; availability unverified")}
-      ${measure("Business Draw", `${location.business_draw}/100`, "Concept-specific screening index")}
+      ${measure("Parcels With Reported Vacancy", displayNumber(profile.reported_vacant_storefronts), "DOF filings; availability unverified")}
+      ${measure("Business Fit", `${location.business_draw}/100`, "Concept-specific screening index")}
     </div></div>
     <div class="catchment-result" id="catchmentResult"><button class="primary-action" type="button" id="analyzeCatchment">Analyze 10-Minute Walk</button><span>From Tract Centroid</span></div>
   `;
@@ -1356,6 +1704,88 @@ function renderMarketProfile() {
   const cached = catchmentCache.get(`${location.id}:${dashboard.meta.concept.cuisine}`);
   if (cached) renderCatchmentResult(cached);
   else document.querySelector("#analyzeCatchment").addEventListener("click", analyzeSelectedCatchment);
+}
+
+function renderCustomerAccess() {
+  const board = document.querySelector("#customerAccessBoard");
+  if (!board || !dashboard) return;
+  const location = selectedLocation();
+  const access = location.customer_access || {};
+  const property = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
+  const percentage = value => value == null ? "Unavailable" : `${Math.round(value * 100)}%`;
+  const options = (values, selected) => values.map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
+  const priceField = mode => mode === "tier"
+    ? `<label class="control-field"><span>Price Range</span><select name="priceTier">${options(Object.entries(PRICE_DEFAULTS).map(([tier, price]) => [tier, `${tier} · About $${price} Per Guest`]), state.priceTier)}</select></label>`
+    : `<label class="control-field"><span>Spend Per Guest ($)</span><input name="averageCheck" type="number" min="5" max="250" step="1" required value="${dashboard.meta.concept.average_check}" /></label>`;
+  const measure = (label, value, caption) => `<div class="market-measure"><span>${label}</span><strong>${value}</strong><small>${caption}</small></div>`;
+  board.innerHTML = `
+    <div class="access-heading"><div><span class="eyebrow">${escapeHtml(location.borough)}</span><h3>${escapeHtml(location.name)}</h3></div><span class="access-status">${access.index == null ? "Limited Coverage" : "Network Assessment"}</span></div>
+    ${property ? `<div class="selected-property-access"><div><span>${property.lead_type === "synthetic" ? "Synthetic Property Scenario" : "Source-Reported Lead"}</span><strong>${escapeHtml(property.address)}</strong></div><div><span>Property Access</span><strong>${property.customer_access?.index == null ? "Unavailable" : `${property.customer_access.index}/100`}</strong></div></div>` : ""}
+    <form class="access-controls" id="customerAccessForm" data-price-mode="${state.priceMode}">
+      <label class="control-field"><span>Dining Style</span><select name="serviceStyle">${options([["quick_service", "Quick Service"], ["casual", "Casual Dining"], ["fine_dining", "Fine Dining"]], state.serviceStyle)}</select></label>
+      <label class="control-field"><span>Customer Focus</span><select name="audience">${options([["residents", "Local Residents"], ["workers", "Nearby Workers"], ["destination", "Destination Diners"]], state.audience)}</select></label>
+      <label class="control-field"><span>Service Hours</span><select name="daypart">${options([["all_day", "All Day"], ["morning", "Morning"], ["lunch", "Lunch"], ["evening", "Evening"]], state.daypart)}</select></label>
+      <div id="accessPriceValue">${priceField(state.priceMode)}</div>
+      <div class="access-form-actions"><div class="segmented-control" role="group" aria-label="Customer Access Price Input"><button type="button" data-access-price="tier" aria-pressed="${state.priceMode === "tier"}">Price Tier</button><button type="button" data-access-price="exact" aria-pressed="${state.priceMode === "exact"}">Per Guest</button></div><button class="primary-action" type="submit">Update Assessment</button></div>
+    </form>
+    <div class="access-summary market-measures">
+      ${measure("Area Inverse Walkability", access.index == null ? "Unavailable" : `${access.index}<small>/100</small>`, "Tract-Center Customer-Access Index")}
+      ${measure("Resident Reach", displayNumber(access.resident_opportunities), "Distance-Weighted Resident Opportunities")}
+      ${measure("Workplace Reach", displayNumber(access.worker_opportunities), "Distance-Weighted Job Opportunities")}
+      ${measure("Reachable Origins", displayNumber(access.reachable_origin_tracts), `${access.max_walk_minutes || 30}-Minute Walking Catchment`)}
+    </div>
+    <div class="access-detail-grid"><section class="access-origins"><div class="access-section-head"><h3>Origin Areas</h3><button class="quiet-action" id="accessMapButton" type="button">View On Map</button></div><div id="accessOriginRows" aria-live="polite">${access.index == null ? '<p class="access-empty">Insufficient coverage for a customer-access ranking.</p>' : '<p class="access-empty">Loading Origin Areas...</p>'}</div></section>
+    <aside class="access-coverage"><h3>Assessment Coverage</h3><div class="kv"><span>Walking Routes</span><strong>${percentage(access.routing_coverage)}</strong></div><div class="kv"><span>Resident Income</span><strong>${percentage(access.income_coverage)}</strong></div><div class="kv"><span>Area Walkability</span><strong>${location.walkability ?? "--"}/100</strong></div><div class="kv"><span>Travel Half-Life</span><strong>${access.travel_half_life_minutes ?? "--"} min</strong></div><div class="kv"><span>Assessment Date</span><strong>${escapeHtml(access.as_of || "Unavailable")}</strong></div>
+    <details class="access-assumptions"><summary>Assessment Basis</summary><p>Local OSM walking routes, ACS residents and LODES jobs. Tract centroids represent origin areas. Travel and affordability settings are assumptions; transit journeys are not included.</p></details></aside></div>
+    <div class="access-footer"><small>Relative access estimates, not predicted visits.</small><button class="quiet-action" id="accessRankButton" type="button">${state.sortBy === "inverse_walkability" ? "Restore Location Ranking" : "Rank Locations By Access"}</button></div>
+  `;
+  const form = document.querySelector("#customerAccessForm");
+  form.querySelectorAll("[data-access-price]").forEach(button => button.addEventListener("click", () => {
+    form.dataset.priceMode = button.dataset.accessPrice;
+    form.querySelectorAll("[data-access-price]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
+    document.querySelector("#accessPriceValue").innerHTML = priceField(form.dataset.priceMode);
+  }));
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    const values = new FormData(form);
+    state.serviceStyle = values.get("serviceStyle");
+    state.audience = values.get("audience");
+    state.daypart = values.get("daypart");
+    state.priceMode = form.dataset.priceMode;
+    if (state.priceMode === "tier") { state.priceTier = values.get("priceTier"); state.averageCheck = PRICE_DEFAULTS[state.priceTier]; }
+    else state.averageCheck = Number(values.get("averageCheck"));
+    syncBriefControls();
+    loadDashboard();
+  });
+  document.querySelector("#accessMapButton").addEventListener("click", () => {setActiveLayer("inverse_walkability"); selectView("discover");});
+  document.querySelector("#accessRankButton").addEventListener("click", async () => {
+    const previous = state.sortBy;
+    state.sortBy = state.sortBy === "inverse_walkability" ? "opportunity" : "inverse_walkability";
+    if (!await loadDashboard()) { state.sortBy = previous; return; }
+    setActiveLayer(state.sortBy === "inverse_walkability" ? "inverse_walkability" : "opportunity");
+    selectView("discover");
+  });
+  if (activeView !== "access" || access.index == null) return;
+  const params = conceptParams();
+  params.set("geoid", location.geoid);
+  const key = params.toString();
+  const showOrigins = origins => {
+    const target = document.querySelector("#accessOriginRows");
+    if (!target) return;
+    target.innerHTML = origins.length ? `<table class="access-origin-table"><thead><tr><th scope="col">Area</th><th scope="col">Walk</th><th scope="col">Weighted Reach</th></tr></thead><tbody>${origins.map(row => `<tr><th scope="row">${escapeHtml(row.name)}<small>Tract ${escapeHtml(row.geoid.slice(-6))}</small></th><td>${row.walking_minutes} min</td><td>${displayNumber(row.weighted_opportunities)}</td></tr>`).join("")}</tbody></table>` : '<p class="access-empty">No reachable origin areas recorded.</p>';
+  };
+  if (customerAccessCache.has(key)) {showOrigins(customerAccessCache.get(key)); return;}
+  const revision = ++customerAccessRequest;
+  fetch(`/api/customer-access?${params}`).then(response => {if (!response.ok) throw new Error("Unavailable"); return response.json();}).then(result => {
+    if (revision !== customerAccessRequest || selectedId !== location.id || activeView !== "access") return;
+    customerAccessCache.set(key, result.origins || []);
+    showOrigins(result.origins || []);
+  }).catch(() => {
+    if (revision !== customerAccessRequest || activeView !== "access") return;
+    document.querySelector("#accessOriginRows").innerHTML = '<p class="access-empty">Origin details are currently unavailable.</p><button class="quiet-action" id="retryAccessOrigins" type="button">Retry</button>';
+    document.querySelector("#retryAccessOrigins").addEventListener("click", renderCustomerAccess);
+  });
 }
 
 function renderCatchmentResult(evidence) {
@@ -1393,8 +1823,8 @@ function renderCompare() {
     document.querySelector("#compareBoard").innerHTML = `<div class="comparison-empty"><h3>No Saved Locations Yet</h3><p>Select locations from Explore or add one here.</p>${addControl}</div>`;
   } else {
     const rows = [
-      ["Location Score", "opportunity"], ["Business Draw", "business_draw"],
-      ["Customer Fit", "customer"], ["Cuisine Opportunity", "whitespace"],
+      ["Location Score", "opportunity"], ["Customer Access", "inverse_walkability"],
+      ["Customer Fit", "customer"], ["Cuisine Supply", "whitespace"],
       ["Walkability", "walkability"], ["Commercial Fit", "cost"],
       ["Evidence Strength", "confidence_score"],
     ];
@@ -1408,6 +1838,7 @@ function renderCompare() {
         const max = Math.max(...values);
         return `<tr><th scope="row">${label}</th>${candidates.map(row => `<td class="${row[key] != null && row[key] === max && candidates.length > 1 ? "comparison-best" : ""}">${row[key] ?? "--"}${key === "confidence_score" ? "%" : ""}</td>`).join("")}</tr>`;
       }).join("")}
+      <tr><th scope="row">Assessment Basis</th>${candidates.map(row => `<td>${assessmentBasis(row)}</td>`).join("")}</tr>
       <tr><th scope="row">Recorded Restaurants</th>${candidates.map(row => `<td>${displayNumber(row.market_profile?.active_restaurants)}</td>`).join("")}</tr>
       <tr><th scope="row">Local Residents</th>${candidates.map(row => `<td>${displayNumber(row.market_profile?.population)}</td>`).join("")}</tr>
       <tr><th scope="row">Nearby Jobs</th>${candidates.map(row => `<td>${displayNumber(row.market_profile?.jobs)}</td>`).join("")}</tr>
@@ -1432,12 +1863,13 @@ function renderLease() {
     candidates = candidates.filter((row) => row.borough === state.preferredArea);
   }
   const listingCount = candidates.filter(row => row.lead_type === "listing").length;
-  const registryCount = candidates.length - listingCount;
-  const filter = `<div class="property-toolbar"><span>${listingCount} Source-Linked Listings · ${registryCount} Storefront Records</span><div class="segmented-control" role="group" aria-label="Property Records"><button type="button" data-property-view="all" aria-pressed="${propertyView === "all"}">All</button><button type="button" data-property-view="listing" aria-pressed="${propertyView === "listing"}">Listings</button>${state.dealType !== "purchase" ? `<button type="button" data-property-view="registry_record" aria-pressed="${propertyView === "registry_record"}">Research Records</button>` : ""}</div></div>`;
+  const syntheticCount = candidates.filter(row => row.lead_type === "synthetic").length;
+  const registryCount = candidates.filter(row => row.lead_type === "registry_record").length;
+  const filter = `<div class="property-toolbar"><span>${listingCount} Sourced Leads · ${syntheticCount} Synthetic Scenarios · ${registryCount} Registry Records</span><div class="segmented-control" role="group" aria-label="Property Records"><button type="button" data-property-view="all" aria-pressed="${propertyView === "all"}">All</button><button type="button" data-property-view="listing" aria-pressed="${propertyView === "listing"}">Sourced</button><button type="button" data-property-view="synthetic" aria-pressed="${propertyView === "synthetic"}">Scenarios</button>${state.dealType !== "purchase" ? `<button type="button" data-property-view="registry_record" aria-pressed="${propertyView === "registry_record"}">Registry</button>` : ""}</div></div>`;
   if (state.dealType === "purchase" && propertyView === "registry_record") propertyView = "all";
   if (propertyView !== "all") candidates = candidates.filter(row => row.lead_type === propertyView);
   if (!candidates.length) {
-    const emptyTitle = state.dealType === "purchase" ? "No Current Purchase Listings" : propertyView === "listing" ? "No Current Lease Listings" : "No Current Property Records Found";
+    const emptyTitle = propertyView === "synthetic" ? "No Scenarios Match This Budget" : propertyView === "listing" ? "No Sourced Leads Match" : "No Property Records Found";
     document.querySelector("#leaseBoard").innerHTML = `
       ${filter}
       <article class="property-empty">
@@ -1446,9 +1878,11 @@ function renderLease() {
       </article>
     `;
     bindPropertyFilters();
+    renderPropertyShortlist();
     return;
   }
-  document.querySelector("#leaseBoard").innerHTML = filter + candidates.map((row) => {
+  const shown = candidates.slice(0, propertyVisible);
+  document.querySelector("#leaseBoard").innerHTML = filter + shown.map((row) => {
     const priceLine = row.price_label || "Unavailable";
     const imageClass = row.image ? "property-image" : "property-image no-image";
     const imageStyle = row.image ? ` style="background-image:url('${escapeHtml(row.image.replaceAll("'", "%27"))}')"` : "";
@@ -1456,12 +1890,13 @@ function renderLease() {
     const sqft = row.sqft ? `${row.sqft.toLocaleString()} Sq Ft` : (row.sqft_label || "Sq Ft Not In Source");
     const contactUrl = row.broker_contact && /^https:\/\/[^\s]+$/i.test(row.broker_contact) ? row.broker_contact : null;
     return `
-      <article class="property-card">
-        <div class="${imageClass}"${imageStyle}>
+      <article data-property-card="${escapeHtml(row.id)}" class="property-card${row.lead_type === "synthetic" ? " synthetic-card" : ""}${row.id === selectedPropertyId ? " is-selected-property" : ""}">
+        ${row.lead_type === "synthetic" ? "" : `<div class="${imageClass}"${imageStyle}>
           <span>${escapeHtml(badge)}</span>
-          ${row.image ? "" : `<strong>Photo Unavailable</strong>`}
-        </div>
+          ${row.image ? "" : "<strong>Photo Unavailable</strong>"}
+        </div>`}
         <div class="property-body">
+          ${row.lead_type === "synthetic" ? '<span class="scenario-badge">Synthetic Scenario</span>' : ""}
           <div class="property-title">
             <div>
               <h3>${escapeHtml(row.title)}</h3>
@@ -1470,32 +1905,57 @@ function renderLease() {
             <div class="property-area-score"><span>Area Score</span><strong class="${scoreClass(row.fit_score)}">${row.fit_score}</strong></div>
           </div>
           <div class="property-specs">
-            <span>${escapeHtml(row.location_name)}</span>
+            <span>${escapeHtml(row.lead_type === "synthetic" ? row.corridor_context.replace(" scenario", "") : row.location_name)}</span>
             ${row.sqft ? `<span>${sqft}</span>` : ""}
+            ${row.lead_type === "synthetic" ? `<span>${escapeHtml(row.condition.replace(" (Simulated)", ""))}</span>` : ""}
           </div>
           ${row.site_evidence?.status === "available" ? `<div class="kv"><span>Approx. 10-Minute Walk</span><strong>${row.site_evidence.recorded_restaurants.toLocaleString()} Restaurants · ${row.site_evidence.nearby_subway_stations} Subway Stations</strong></div>` : ""}
+          <div class="kv"><span>Customer Access</span><strong>${row.customer_access?.index == null ? "Unavailable" : `${row.customer_access.index}/100`}</strong></div>
           ${row.site_evidence?.same_cuisine_restaurants != null ? `<div class="kv"><span>Recorded Same-Cuisine Restaurants</span><strong>${row.site_evidence.same_cuisine_restaurants}</strong></div>` : ""}
-          ${row.site_evidence?.status === "unavailable" ? '<div class="kv"><span>Walking Catchment</span><strong>Unavailable</strong></div>' : ""}
-          <div class="kv"><span>${row.transaction === "purchase" ? "Asking Price" : row.transaction === "lease" ? "Asking Rent" : "Asking Price / Rent"}</span><strong>${escapeHtml(priceLine)}</strong></div>
-          <div class="kv"><span>Status</span><strong>${escapeHtml(row.availability)}</strong></div>
+          ${row.site_evidence?.status === "unavailable" && row.lead_type !== "synthetic" ? '<div class="kv"><span>Walking Catchment</span><strong>Unavailable</strong></div>' : ""}
+          <div class="kv"><span>${row.lead_type === "synthetic" ? "Modeled Price" : row.transaction === "purchase" ? "Asking Price" : row.transaction === "lease" ? "Asking Rent" : "Asking Price / Rent"}</span><strong>${escapeHtml(priceLine)}</strong></div>
+          ${row.lead_type === "synthetic" ? `<div class="kv"><span>${row.transaction === "purchase" ? "Modeled Price / SF" : "Modeled Annual Rent / SF"}</span><strong>${escapeHtml(fmtDollar(row.transaction === "purchase" ? row.asking_price_psf : row.annual_rent_psf))}</strong></div>
+          <div class="property-source-note">Approximate area · Not an available listing</div>
+          <details class="property-details"><summary>Space Details</summary>
+            <div class="kv"><span>Setting</span><strong>${escapeHtml(row.corridor_context)}</strong></div>
+            <div class="kv"><span>Building</span><strong>${escapeHtml(row.building_type)} · ${escapeHtml(row.floor)} Floor</strong></div>
+            <div class="kv"><span>Kitchen</span><strong>${escapeHtml(row.kitchen_status)}</strong></div>
+            <div class="kv"><span>Ventilation</span><strong>${escapeHtml(row.ventilation_status)}</strong></div>
+            <div class="kv"><span>Outdoor Space</span><strong>${escapeHtml(row.outdoor_space_potential)}</strong></div>
+          </details>` : ""}
+          ${row.lead_type === "synthetic" ? "" : `<div class="kv"><span>Status</span><strong>${escapeHtml(row.availability)}</strong></div>`}
           ${row.checked_at ? `<div class="kv"><span>Source Checked</span><strong>${escapeHtml(row.checked_at)}</strong></div>` : ""}
           ${row.broker_name ? `<div class="kv"><span>Broker / Owner</span><strong>${escapeHtml(row.broker_name)}</strong></div>` : ""}
           ${row.broker_contact && !contactUrl ? `<div class="kv"><span>Leasing Contact</span><strong>${escapeHtml(row.broker_contact)}</strong></div>` : ""}
-          <div class="kv"><span>${row.lead_type === "registry_record" ? "Reported Activity" : "Condition"}</span><strong>${escapeHtml(row.condition)}</strong></div>
+          ${row.lead_type === "synthetic" ? "" : `<div class="kv"><span>${row.lead_type === "registry_record" ? "Reported Activity" : "Condition"}</span><strong>${escapeHtml(row.condition)}</strong></div>`}
           ${row.lead_type === "registry_record" ? '<div class="property-source-note">Registry Record · Transaction And Contact Unverified</div>' : ""}
           ${row.source_url ? `<a class="property-link" href="${escapeHtml(row.source_url)}" target="_blank" rel="noopener noreferrer">Source Listing</a>` : ""}
           ${contactUrl ? `<a class="property-link" href="${escapeHtml(contactUrl)}" target="_blank" rel="noopener noreferrer">Contact Leasing Office</a>` : ""}
-          <a class="property-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${row.address}, ${row.borough}, New York`)}" target="_blank" rel="noopener noreferrer">View Address</a>
+          ${row.latitude && row.longitude ? `<button type="button" class="quiet-action" data-property-map="${escapeHtml(row.id)}">Show On Map</button>` : ""}
+          <button type="button" class="quiet-action" data-save-property="${escapeHtml(row.id)}" aria-pressed="${currentPlan().property_ids.includes(row.id)}">${currentPlan().property_ids.includes(row.id) ? "Saved Property" : "Save Property"}</button>
+          ${row.lead_type !== "synthetic" ? `<a class="property-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${row.address}, ${row.borough}, New York`)}" target="_blank" rel="noopener noreferrer">View Address</a>` : ""}
         </div>
       </article>
     `;
-  }).join("");
+  }).join("") + (candidates.length > shown.length ? `<button class="quiet-action property-more" type="button" id="showMoreProperties">Show More · ${candidates.length - shown.length} Remaining</button>` : "");
+  document.querySelector("#showMoreProperties")?.addEventListener("click", () => { propertyVisible += 12; renderLease(); });
+  document.querySelectorAll("[data-property-map]").forEach(button => button.addEventListener("click", () => {
+    const property = (dashboard.properties || []).find(row => row.id === button.dataset.propertyMap);
+    if (!property) return;
+    selectedId = property.location_id; selectedPropertyId = property.id;
+    mapInventory = "properties"; document.querySelector("#mapInventorySelect").value = mapInventory;
+    if (isHexLayer()) setActiveLayer("opportunity");
+    renderAll(); selectView("discover");
+    locationMap.flyTo({center: [Number(property.longitude), Number(property.latitude)], zoom: 15});
+  }));
   bindPropertyFilters();
+  renderPropertyShortlist();
 }
 
 function bindPropertyFilters() {
   document.querySelectorAll("[data-property-view]").forEach(button => button.addEventListener("click", () => {
     propertyView = button.dataset.propertyView;
+    propertyVisible = 12;
     renderLease();
   }));
 }
@@ -1556,13 +2016,16 @@ async function loadCompetition() {
 
 function renderFinance() {
   const finance = dashboard.finance;
-  document.querySelector("#financeScenarioForm").hidden = state.dealType === "purchase";
+  document.querySelector("#financeScenarioForm").hidden = true;
+  document.querySelector("#financeBoard").hidden = state.dealType !== "purchase";
   if (state.dealType === "purchase") {
-    const askingPrices = (dashboard.properties || []).filter(row => row.transaction === "purchase" && row.asking_price).map(row => row.asking_price);
+    const verifiedPrices = (dashboard.properties || []).filter(row => row.transaction === "purchase" && row.lead_type === "listing" && row.asking_price).map(row => row.asking_price);
+    const scenarioPrices = (dashboard.properties || []).filter(row => row.transaction === "purchase" && row.lead_type === "synthetic" && row.asking_price).map(row => row.asking_price);
+    const askingPrices = verifiedPrices.length ? verifiedPrices : scenarioPrices;
     const lowestAskingPrice = askingPrices.length ? fmtPrice(Math.min(...askingPrices)) : "Unavailable";
     document.querySelector("#financeBoard").innerHTML = `
       <article class="finance-cell"><h3>Purchase Budget</h3><strong class="finance-figure">${fmtPrice(state.purchaseBudget)}</strong><span class="finance-basis">User Budget</span></article>
-      <article class="finance-cell"><h3>Lowest Listed Asking Price</h3><strong class="finance-figure">${lowestAskingPrice}</strong><span class="finance-basis">${askingPrices.length ? `${askingPrices.length} Source-Linked Listing${askingPrices.length === 1 ? "" : "s"}` : "No Current Sale Listing"}</span></article>
+      <article class="finance-cell"><h3>${verifiedPrices.length ? "Lowest Listed Asking Price" : "Lowest Modeled Purchase Price"}</h3><strong class="finance-figure">${lowestAskingPrice}</strong><span class="finance-basis">${verifiedPrices.length ? `${verifiedPrices.length} Source-Linked Listing${verifiedPrices.length === 1 ? "" : "s"}` : scenarioPrices.length ? "Synthetic Scenarios · No Verified Sale Offer" : "No Sale Scenario In Budget"}</span></article>
     `;
     return;
   }
@@ -1602,6 +2065,7 @@ function renderFinance() {
 
 function renderReports() {
   const location = selectedLocation();
+  const property = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
   const alternatives = savedIds.filter(id => id !== location.id).map(id => allLocations().find(row => row.id === id)).filter(Boolean);
   document.querySelector("#reportBoard").innerHTML = `
     <div class="report-toolbar"><span>Location Brief</span><button class="primary-action" id="printReport" type="button">Print / Save PDF</button></div>
@@ -1610,19 +2074,23 @@ function renderReports() {
       <h2>${escapeHtml(conceptName())}</h2>
       <p>${profileLabel(state.profile)} · ${escapeHtml(cuisineLabel())} · ${state.priceMode === "tier" ? `${state.priceTier} Price Range` : `$${state.averageCheck} Per Guest`} · ${dealLabel(state.dealType)} · ${state.dealType === "purchase" ? `${fmtPrice(state.purchaseBudget)} Purchase Budget` : `${fmtMoney(state.rentCap)}/Month Budget`}</p>
       <section class="report-recommendation"><div><span class="eyebrow">Selected Location</span><h3>${escapeHtml(location.name)}</h3><p>${escapeHtml(location.recommendation)}</p></div><strong>${location.opportunity}<small>/100</small></strong></section>
+      ${property ? `<h3>Selected Property Scenario</h3><div class="report-factors"><div class="kv"><span>${escapeHtml(property.address)}</span><strong>${escapeHtml(property.price_label)}</strong></div><div class="kv"><span>${property.transaction === "purchase" ? "Purchase" : "Lease"} · ${displayNumber(property.sqft)} Sq Ft</span><strong>${property.lead_type === "synthetic" ? "Synthetic · Approximate Location" : "Source-Reported Lead"}</strong></div></div>` : ""}
       ${alternatives.length ? `<h3>Saved Alternatives</h3><div class="report-factors">${alternatives.map(row => `<div class="kv"><span>${escapeHtml(row.name)}</span><strong>${row.opportunity}/100</strong></div>`).join("")}</div>` : ""}
+      <p>${assessmentBasis(location)} · ${location.ranking_components ? "Experimental Model Ranking" : "Screening Estimate"}</p>
       <h3>Location Factors</h3>
-      <div class="report-factors">${location.score_components.map((item) => `<div class="kv"><span>${escapeHtml(item.label)}</span><strong>${item.score}/100</strong></div>`).join("")}</div>
+      <div class="report-factors">${location.score_components.map((item) => `<div class="kv"><span>${escapeHtml(item.label)}</span><strong>${item.coverage > 0 ? `${item.score}/100` : "Unavailable"}</strong></div>`).join("")}</div>
       <h3>Due Diligence</h3><ul>${location.risk_flags.map((risk) => `<li>${escapeHtml(risk)}</li>`).join("")}</ul>
-      <footer>${location.confidence_score}% Evidence Strength · Preliminary Tract-Level Screening<br>Walkability ${location.walkability ?? "Unavailable"}/100 · Business Draw ${location.business_draw}/100<br>Scores Are Relative Indicators, Not Visit Or Revenue Forecasts.<br>Property Availability, Asking Prices And Lease Terms Require Verification.</footer>
+      <footer>${location.confidence_score}% Evidence Strength · Preliminary Tract-Level Screening<br>Walkability ${location.walkability ?? "Unavailable"}/100 · Customer Access ${location.inverse_walkability ?? "Unavailable"}/100<br>Scores Are Relative Indicators, Not Visit Or Revenue Forecasts.<br>Property Availability, Asking Prices And Lease Terms Require Verification.</footer>
     </article>
   `;
   document.querySelector("#printReport").addEventListener("click", () => window.print());
+  renderPlanReport();
 }
 
 function renderDataLayers() {
   document.querySelector("#layerBoard").innerHTML = `
     <div class="view-heading"><div><span class="eyebrow">Data Register</span><h3>Sources & Coverage</h3></div></div>
+    <div class="assessment-status-strip"><div><span>Location Ranking</span><strong>${dashboard.survival_model?.ranking_mode?.startsWith("survival_") ? "Experimental Survival Ranking" : "Location-Fit Screening"}</strong></div><div><span>Survival Inference</span><strong>${dashboard.survival_model?.status === "available" ? "Experimental Artifact Connected" : "Not Deployed"}</strong></div><div><span>Customer Access</span><strong>${dashboard.customer_access_model?.status === "available" ? "Network-Based Scenario" : "Unavailable"}</strong></div><div><span>Property Inventory</span><strong>${dashboard.property_search?.synthetic_inventory_total ?? "--"} Synthetic Scenarios</strong></div></div>
     <div class="source-table"><div class="source-row source-row--head"><span>Source</span><span>Vintage / Geography</span><span>Coverage</span></div>
     ${dashboard.feeds.map(row => `<div class="source-row"><strong>${row.url ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.name)}</a>` : escapeHtml(row.name)}</strong><span>${escapeHtml(row.vintage)}<small>${escapeHtml(row.grain)}</small></span><span>${escapeHtml(row.coverage)}<small>${escapeHtml(row.purpose)}</small></span></div>`).join("")}</div>
     <div class="source-limitations"><h3>Not Available In This Search</h3><div>${dashboard.meta.unsupported_values.map(value => `<span>${escapeHtml(value)}</span>`).join("")}</div></div>`;
@@ -1660,8 +2128,8 @@ function persistMenu(message = "Saved On This Device") {
 
 async function loadMenuSuggestions() {
   syncSavedMenu();
-  const key = menuKey();
-  if (key === menuCatalogKey && menuCatalog) return renderMenu();
+  const key = `${menuKey()}:${conceptParams()}`;
+  if (key === menuCatalogKey && menuCatalog && menuCatalog.status !== "error") return renderMenu();
   const currentRequest = ++menuRequestId;
   menuCatalogKey = key;
   menuCatalog = null;
@@ -1670,7 +2138,7 @@ async function loadMenuSuggestions() {
     const response = await fetch(`/api/menu/suggestions?${conceptParams()}`);
     if (!response.ok) throw new Error("Menu suggestions unavailable");
     const result = await response.json();
-    if (currentRequest !== menuRequestId || key !== menuKey()) return;
+    if (currentRequest !== menuRequestId || key !== `${menuKey()}:${conceptParams()}`) return;
     menuCatalog = result;
     renderMenu();
   } catch {
@@ -1724,8 +2192,12 @@ function renderMenu() {
     ["Dishes", String(savedMenu.length)],
     ["Average Price", averagePrice == null ? "—" : money(averagePrice)],
     ["Costed Items", `${costed.length} / ${savedMenu.length}`],
-    ["Average Item Margin", averageMargin == null ? "—" : `${Math.round(averageMargin * 100)}%`],
+    ["Ingredient Margin", averageMargin == null ? "—" : `${Math.round(averageMargin * 100)}%`],
   ].map(([name, value]) => `<div class="menu-kpi"><span>${name}</span><strong>${value}</strong></div>`).join("");
+  const unpriced = savedMenu.filter(item => !(Number(item.price) > 0)).length;
+  const underCost = costed.filter(item => Number(item.cost) >= Number(item.price)).length;
+  document.querySelector("#menuReviewStatus").textContent = underCost ? `${underCost} Items At Or Below Ingredient Cost` : unpriced ? `${unpriced} Items Need Prices` : savedMenu.length ? "All Items Priced" : "";
+  document.querySelector("#menuApplyPricing").disabled = !savedMenu.some(item => !(Number(item.price) > 0) && Number(item.cost) > 0);
   document.querySelector(".menu-workspace").hidden = menuView !== "plan";
   document.querySelector("#menuPreview").hidden = menuView !== "preview";
   document.querySelectorAll("[data-menu-view]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.menuView === menuView)));
@@ -1737,19 +2209,94 @@ function renderMenu() {
       <select data-menu-section aria-label="Section For ${escapeHtml(item.name)}">${menuSections.map(option => `<option${option === section ? " selected" : ""}>${option}</option>`).join("")}</select>
       <label class="menu-price"><small>Menu Price</small><span>$</span><input type="number" data-menu-price min="0" max="1000" step="0.01" value="${escapeHtml(item.price ?? "")}" placeholder="0.00" aria-label="Planned Price For ${escapeHtml(item.name)}" /></label>
       <label class="menu-price"><small>Ingredient Cost</small><span>$</span><input type="number" data-menu-cost min="0" max="1000" step="0.01" value="${escapeHtml(item.cost ?? "")}" placeholder="0.00" aria-label="Ingredient Cost Per Portion For ${escapeHtml(item.name)}" /></label>
-      <span class="menu-margin">${Number(item.price) > 0 && item.cost !== "" && item.cost != null ? `${Math.round((Number(item.price) - Number(item.cost)) / Number(item.price) * 100)}% margin` : "—"}</span>
+      <span class="menu-margin" title="Menu price minus ingredient cost; excludes labor, rent and other expenses">${Number(item.price) > 0 && item.cost !== "" && item.cost != null ? `${money(Number(item.price) - Number(item.cost))} / Portion` : "—"}</span>
       <div class="menu-order"><button type="button" data-menu-move="up" aria-label="Move ${escapeHtml(item.name)} Up" title="Move Up">↑</button><button type="button" data-menu-move="down" aria-label="Move ${escapeHtml(item.name)} Down" title="Move Down">↓</button></div>
       <button type="button" class="menu-remove" data-menu-remove title="Remove ${escapeHtml(item.name)}" aria-label="Remove ${escapeHtml(item.name)}">×</button>
       <input class="menu-note" type="text" data-menu-note maxlength="200" value="${escapeHtml(item.note || "")}" placeholder="Description shown on menu" aria-label="Description For ${escapeHtml(item.name)}" />
     </div>`).join("")}</div>`).join("") : '<div class="menu-empty">No Dishes Added Yet.</div>';
   document.querySelector("#menuPreview").innerHTML = `<div class="menu-preview-head"><span>Groundwork Menu</span><h3>${escapeHtml(conceptName())}</h3><p>${escapeHtml(label)}</p></div>${groups.length ? groups.map(([section, items]) => `<section><h4>${section}</h4>${items.map(item => `<div class="menu-preview-item"><div><strong>${escapeHtml(item.name)}</strong>${item.note ? `<p>${escapeHtml(item.note)}</p>` : ""}</div><span>${Number(item.price) > 0 ? money(Number(item.price)) : ""}</span></div>`).join("")}</section>`).join("") : '<div class="menu-empty">Add dishes to preview your menu.</div>'}`;
+  renderMenuPlanning();
 }
 
 function money(value) { return `$${Number(value).toFixed(2)}`; }
 
+function prepareEconomicsLab() {
+  if (!dashboard || activeView !== "finance") return;
+  const key = `groundwork-economics-v1:${menuKey()}:${state.dealType}`;
+  const property = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
+  document.querySelector("#economicsUseProperty").disabled = !property || property.transaction !== "lease" || !(property.asking_rent > 0);
+  if (economicsContext === key) return;
+  economicsContext = key;
+  const defaults = {monthly_rent: state.dealType === "purchase" ? 0 : state.rentCap,
+    monthly_fixed: Number(state.otherFixedCosts) || 12000, operating_days: Number(state.operatingDays) || 26,
+    price: dashboard.meta.concept.average_check, unit_cost: +(dashboard.meta.concept.average_check * .35).toFixed(2),
+    daily_covers:100,capacity:200,elasticity:1.5,congestion_cost:5,profit_target:500};
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(key) || "null"); } catch { /* Use the labeled illustrative defaults. */ }
+  saved = currentPlan().draft && Object.keys(currentPlan().draft).length ? currentPlan().draft : saved;
+  const form = document.querySelector("#economicsLabForm");
+  Object.entries(defaults).forEach(([name,value]) => { form.elements.namedItem(name).value = saved?.[name] ?? value; });
+  calculateEconomics();
+}
+
+async function calculateEconomics() {
+  const form = document.querySelector("#economicsLabForm");
+  if (!form.reportValidity()) return;
+  const request = ++economicsRequestId;
+  const params = new URLSearchParams(new FormData(form));
+  const status = document.querySelector("#economicsStatus");
+  status.textContent = "Calculating Scenario...";
+  try {
+    const response = await fetch(`/api/economics/scenario?${params}`);
+    const result = await response.json();
+    if (request !== economicsRequestId) return;
+    if (!response.ok) throw new Error(result.error || "Scenario unavailable");
+    try {
+      localStorage.setItem(economicsContext, JSON.stringify(Object.fromEntries(params)));
+      const plan = currentPlan(); plan.draft = Object.fromEntries(params); savePlan(plan);
+    } catch { /* Calculation does not require browser storage. */ }
+    status.textContent = "Illustrative Demand Assumptions · Not A Sales Or Profit Forecast";
+    renderEconomicsCharts(result);
+    renderScenarioLibrary();
+  } catch (error) {
+    if (request !== economicsRequestId) return;
+    economicsResult = null;
+    status.textContent = error.message;
+    economicsCharts.forEach(chart => chart.destroy()); economicsCharts = [];
+    document.querySelector("#economicsResults").replaceChildren();
+  }
+}
+
+function renderEconomicsCharts(result) {
+  economicsResult = result;
+  document.querySelector("#economicsResults").hidden = false;
+  economicsCharts.forEach(chart => chart.destroy()); economicsCharts = [];
+  const best = result.modeled_optimum;
+  const kpis = [["Daily Operating Profit", money(result.current_daily_profit)],
+    ["Break-Even Volume", result.break_even_covers == null ? "Not Feasible Within Capacity" : `${result.break_even_covers} Covers / Day`],
+    ["Profit Target Volume", result.target_profit_covers == null ? "Not Feasible Within Capacity" : `${result.target_profit_covers} Covers / Day`],
+    ["Capacity Utilization", `${Math.round(result.capacity_utilization*100)}%`]];
+  document.querySelector("#economicsResults").innerHTML = `<div class="economics-kpis">${kpis.map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join("")}</div>
+    <div class="economics-chart-grid">${[["econRevenue","Revenue & Total Cost","Daily Covers","USD / Day"],["econProfit","Daily Profit & Volume","Daily Covers","USD / Day"],["econMarginal","Demand, Marginal Revenue & Marginal Cost","Daily Covers","USD / Guest"],["econPricing","Price & Modeled Daily Profit","Spend Per Guest ($)","USD / Day"]].map(([id,title])=>`<section class="economics-chart-section"><h4>${title}</h4><div class="economics-chart"><canvas id="${id}" role="img" aria-label="${title}"></canvas></div></section>`).join("")}</div>
+    <div class="economics-optimum"><div><span>Best Modeled Spend</span><strong>${money(best.price)}</strong></div><div><span>Best Modeled Covers</span><strong>${best.covers.toFixed(1)} / Day</strong></div><div><span>Best Modeled Daily Profit</span><strong>${money(best.daily_profit)}</strong></div><div><span>Capacity Constraint</span><strong>${best.capacity_binding ? "Binding" : "Not Binding"}</strong></div></div>
+    <details class="economics-assumptions"><summary>Scenario Assumptions</summary><ul>${result.assumptions.map(value=>`<li>${escapeHtml(value)}</li>`).join("")}</ul><p>At an interior optimum, marginal revenue equals marginal cost. Capacity and zero-volume boundaries are included.</p></details>`;
+  const colors = getComputedStyle(document.documentElement);
+  const text = colors.getPropertyValue("--text").trim() || "#38515a";
+  const line = colors.getPropertyValue("--line").trim() || "#d6e1e8";
+  const series = (name,rows,x,y,color,dash=[])=>({label:name,data:rows.map(row=>({x:row[x],y:row[y]})),borderColor:color,backgroundColor:color,borderWidth:2,pointRadius:0,pointHitRadius:10,borderDash:dash,tension:0});
+  const draw = (id,datasets,xTitle,yTitle) => {
+    economicsCharts.push(new Chart(document.querySelector(`#${id}`),{type:"line",data:{datasets},options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{intersect:false,mode:"nearest"},plugins:{legend:{labels:{color:text,boxWidth:12,font:{size:11}}},tooltip:{callbacks:{label:context=>`${context.dataset.label}: ${money(context.parsed.y)}`}}},scales:{x:{type:"linear",title:{display:true,text:xTitle,color:text},ticks:{color:text,maxTicksLimit:6},grid:{color:line}},y:{title:{display:true,text:yTitle,color:text},ticks:{color:text,maxTicksLimit:6},grid:{color:line}}}}}));
+  };
+  const rows = result.volume_curve;
+  draw("econRevenue",[series("Revenue",rows,"covers","revenue","#15836e"),series("Total Cost",rows,"covers","total_cost","#c44b55")],"Daily Covers","USD / Day");
+  draw("econProfit",[series("Operating Profit",rows,"covers","profit","#246da5"),series("Break-Even",rows.map(row=>({...row,zero:0})),"covers","zero","#717982",[5,4]),series("Profit Target",rows.map(row=>({...row,target:result.inputs.profit_target})),"covers","target","#bb7b17",[5,4])],"Daily Covers","USD / Day");
+  draw("econMarginal",[series("Demand Price",rows,"covers","demand_price","#246da5"),series("Marginal Revenue",rows,"covers","marginal_revenue","#b0609e"),series("Marginal Cost",rows,"covers","marginal_cost","#c44b55")],"Daily Covers","USD / Guest");
+  draw("econPricing",[series("Demand-Adjusted Profit",result.price_curve,"price","profit","#15836e")],"Spend Per Guest ($)","USD / Day");
+}
+
 function exportMenu() {
   if (!savedMenu.length) return;
-  const quote = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const quote = value => `"${String(value ?? "").replace(/^[=+@\-\t\r]/, "'$&").replaceAll('"', '""')}"`;
   const rows = [["section", "dish", "planned_price_usd", "ingredient_cost_usd", "item_margin_percent", "description", "source"],
     ...savedMenu.map(item => [item.section, item.name, item.price || "", item.cost ?? "",
       Number(item.price) > 0 && item.cost !== "" && item.cost != null ? Math.round((Number(item.price) - Number(item.cost)) / Number(item.price) * 100) : "",
@@ -1764,6 +2311,9 @@ function exportMenu() {
 }
 
 function renderPanels() {
+  const section = ["lease", "finance", "menu"].includes(activeView) ? "lease" : ["reports", "layers", "settings"].includes(activeView) ? "reports" : "discover";
+  document.querySelectorAll("[data-section-view]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.sectionView === section)));
+  document.querySelectorAll(".nav-group").forEach(group => group.classList.toggle("has-active-tab", !!group.querySelector(".is-active")));
   document.querySelector(".workspace")?.classList.toggle("is-discover", activeView === "discover");
   document.querySelectorAll("[data-panel]").forEach((panel) => {
     panel.classList.toggle("is-hidden", panel.dataset.panel !== activeView);
@@ -1773,6 +2323,13 @@ function renderPanels() {
 }
 
 function renderAll() {
+  rememberPropertySelection();
+  const modelStatus = document.querySelector("#survivalModelStatus");
+  if (modelStatus) {
+    const model = dashboard.survival_model;
+    modelStatus.hidden = !model || !model.ranking_mode.startsWith("survival_");
+    modelStatus.textContent = model ? (model.ranking_mode === "survival_general_fit" ? "Experimental Survival And General Location Fit" : "Experimental Survival And Cuisine Supply") : "";
+  }
   renderConceptChrome();
   renderLocationSelect();
   renderMetrics();
@@ -1780,6 +2337,7 @@ function renderAll() {
   renderIntel();
   renderRanking();
   renderMarketProfile();
+  renderCustomerAccess();
   renderCompare();
   renderLease();
   renderWhitespace();
@@ -1788,11 +2346,14 @@ function renderAll() {
   renderDataLayers();
   renderPanels();
   renderMenu();
+  if (activeView === "finance") prepareEconomicsLab();
 }
 
 function renderConceptChrome() {
   const name = conceptName();
-  document.querySelector("#workspaceTitle").textContent = activeView === "menu" ? `${name} Menu` : `${name} Location Search`;
+  const titles = {discover: "Location Search", scorecard: "Market Profile", access: "Customer Access", whitespace: "Competition", compare: "Location Comparison", lease: "Property Search", finance: "Operating Economics", menu: "Menu Studio", reports: "Decision Report", layers: "Sources & Coverage", settings: "Workspace Settings"};
+  document.querySelector("#workspaceTitle").textContent = `${name} ${titles[activeView] || "Location Search"}`;
+  document.title = `${titles[activeView] || "Location Search"} | Groundwork NYC`;
   document.querySelector("#activeConceptName").textContent = name;
   document.querySelector("#activeFormat").textContent = `${dealLabel(state.dealType)} · ${profileLabel(state.profile)}`;
   document.querySelector("#activeCuisine").textContent = state.cuisine === "custom"
@@ -1809,6 +2370,22 @@ document.querySelectorAll(".feature-tab").forEach((button) => {
 });
 
 document.querySelector("#menuSearch").addEventListener("input", renderMenuSuggestions);
+function targetMenuPrice(cost, percentage) {
+  const value = Number(cost), target = Number(percentage);
+  if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(target) || target < 10 || target > 70) return null;
+  const price = Math.ceil(value / (target / 100) * 2) / 2;
+  return price <= 1000 ? price : null;
+}
+document.querySelector("#menuApplyPricing").addEventListener("click", () => {
+  const target = document.querySelector("#menuTargetCost");
+  if (!target.reportValidity()) return;
+  let changed = 0;
+  for (const item of savedMenu) {
+    const price = targetMenuPrice(item.cost, target.value);
+    if (!(Number(item.price) > 0) && price != null) { item.price = price.toFixed(2); changed++; }
+  }
+  persistMenu(`${changed} Prices Set From Ingredient Costs`); renderMenu();
+});
 document.querySelector("#menuSectionFilter").addEventListener("change", renderMenuSuggestions);
 document.querySelector("#menuExport").addEventListener("click", exportMenu);
 document.querySelector("#menuPrint").addEventListener("click", () => {
@@ -1863,6 +2440,7 @@ document.querySelector("#menuSaved").addEventListener("click", event => {
   if (!button) return;
   const id = button.closest("[data-menu-id]")?.dataset.menuId;
   savedMenu = savedMenu.filter(item => item.id !== id);
+  const plan = currentPlan(); delete plan.basket[id]; delete plan.menu_details[id]; savePlan(plan);
   persistMenu();
   renderMenu();
 });
@@ -1888,6 +2466,7 @@ document.querySelector("#menuSaved").addEventListener("change", event => {
 
 document.querySelector("#locationSelect").addEventListener("change", event => {
   selectedId = event.target.value;
+  selectedPropertyId = null;
   renderAll();
 });
 
@@ -1966,7 +2545,7 @@ function applyBrief() {
   state.profile = document.querySelector("#briefProfile").value;
   state.preferredArea = document.querySelector("#briefArea").value;
   const budget = Number(document.querySelector("#briefBudget").value || 18000);
-  state.rentCap = Math.max(8000, Math.min(35000, budget));
+  state.rentCap = Math.max(2000, Math.min(100000, budget));
   selectedId = null;
   syncBriefControls();
   persistBrief();
@@ -2090,7 +2669,41 @@ document.querySelector("#refreshButton").addEventListener("click", () => {
 
 document.querySelector("#viewAnalysis").addEventListener("click", () => selectView("scorecard"));
 document.querySelector("#mapLayerSelect").addEventListener("change", event => setActiveLayer(event.target.value));
+document.querySelector("#heatmapMetricSelect").addEventListener("change", event => {
+  const status = document.querySelector("#dashboardStatus");
+  if (status.textContent === "No Recorded Coverage For This Feature And Concept.") status.hidden = true;
+  activeHeatMetric = event.target.value;
+  if (activeLayer === "huff_demand") activeLayer = "opportunity";
+  hexRequestId++; clearHexLayer(); renderMap(); renderRanking();
+  document.querySelector("#mapModeTitle").textContent = activeHeatMetric ? `${heatmapTitles[activeHeatMetric]} Heatmap` : "Location Opportunities";
+});
+document.querySelector("#economicsLabForm").addEventListener("submit", event => { event.preventDefault(); calculateEconomics(); });
+document.querySelector("#economicsLabForm").addEventListener("input", () => {
+  clearTimeout(economicsInputTimer);
+  if (!document.querySelector("#economicsLabForm").checkValidity()) {
+    economicsRequestId++; economicsResult = null;
+    document.querySelector("#economicsResults").hidden = true;
+    document.querySelector("#economicsStatus").textContent = "Enter Valid Scenario Inputs To Update Results.";
+    return;
+  }
+  economicsInputTimer = setTimeout(() => { if (document.querySelector("#economicsLabForm").checkValidity()) calculateEconomics(); }, 450);
+});
+document.querySelector("#economicsUseProperty").addEventListener("click", () => {
+  const property = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
+  if (property?.transaction === "lease" && property.asking_rent > 0) {
+    document.querySelector('#economicsLabForm [name="monthly_rent"]').value = property.asking_rent;
+    calculateEconomics();
+  }
+});
+document.querySelector("#mapInventorySelect").addEventListener("change", event => { mapInventory = event.target.value; renderMap(); renderRanking(); renderMetrics(); });
 document.querySelector("#mapBasemapSelect").addEventListener("change", event => changeMapView(event.target.value));
+document.querySelectorAll("[data-section-view]").forEach(button => button.addEventListener("click", () => selectView(button.dataset.sectionView)));
+document.querySelector("#showRestaurantsToggle").checked = showExistingRestaurants;
+document.querySelector("#showRestaurantsToggle").addEventListener("change", event => {
+  showExistingRestaurants = event.target.checked;
+  localStorage.setItem("groundwork-show-restaurants", String(showExistingRestaurants));
+  syncRestaurantVisibility();
+});
 
 document.querySelector("#savedBriefs").addEventListener("click", event => {
   const open = event.target.closest("[data-open-brief]");
@@ -2126,9 +2739,16 @@ document.querySelectorAll("[data-auth-open]").forEach(button => button.addEventL
   document.querySelector("#welcomeOverlay").classList.add("is-open");
 }));
 document.querySelector("#closeAccessButton")?.addEventListener("click", () => document.querySelector("#welcomeOverlay").classList.remove("is-open"));
-document.querySelectorAll("[data-logout]").forEach(button => button.addEventListener("click", () => document.querySelector("#logoutForm").submit()));
+document.querySelectorAll("[data-logout]").forEach(button => button.addEventListener("click", async () => {
+  button.disabled = true;
+  clearTimeout(workspaceSyncTimer);
+  for (let attempt=0; workspaceSyncing && attempt<30; attempt++) await new Promise(resolve=>setTimeout(resolve,100));
+  if (accountOwner && localStorage.getItem(`groundwork-workspace-dirty:${accountOwner}`)) await syncWorkspace();
+  document.querySelector("#logoutForm").submit();
+}));
 setTheme(dashboardThemeChoice, false);
 updateConceptImage(state.cuisine);
 loadConceptImages();
 initializeWorkspace();
+initializePlanningControls();
 setActiveLayer(activeLayer);

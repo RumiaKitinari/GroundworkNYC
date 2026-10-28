@@ -22,9 +22,15 @@ from financials import operating_scenario
 from hex_demand import concept_surface, surface_weights
 from menu_catalog import suggestions as menu_suggestions
 from rent_benchmarks import load_rent_benchmarks
+from generate_synthetic_properties import load_published_inventory
+from survival_inference import DEFAULT_CONFIG, attach_model, model_state
+from customer_access_inference import DEFAULT_ACCESS_CONFIG, attach_access, access_engine
+from evidence_policy import catalog as evidence_catalog, property_policy, attach_runtime_policy
 
 
 app = Flask(__name__)
+app.config["SURVIVAL_CONFIG"] = str(DEFAULT_CONFIG)
+app.config["CUSTOMER_ACCESS_CONFIG"] = str(DEFAULT_ACCESS_CONFIG)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INSTANCE_DIR = PROJECT_ROOT / "instance"
@@ -52,11 +58,13 @@ WORKSPACE_BRIEF_FIELDS = {
     "averageCheck", "priceMode", "priceTier", "dietary", "description",
     "purchaseBudget", "otherFixedCosts", "variableCostPct", "operatingDays",
     "serviceStyle", "audience", "daypart",
+    "sortBy",
 }
 
 
 def valid_workspace(payload):
-    if not isinstance(payload, dict) or set(payload) != {"active_brief", "briefs", "shortlists", "menus"}:
+    required = {"active_brief", "briefs", "shortlists", "menus"}
+    if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - required - {"plans", "profile"}:
         return False
     if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 500_000:
         return False
@@ -97,10 +105,16 @@ def valid_workspace(payload):
                     or not isinstance(item.get("note", ""), str)
                     or any(not isinstance(item.get(field, ""), (str, int, float)) or isinstance(item.get(field, ""), bool)
                            for field in ("price", "cost"))
+                    or any(isinstance(item.get(field), float) and not math.isfinite(item[field]) for field in ("price", "cost"))
                     or any(len(str(item.get(field, ""))) > limit for field, limit in
                            (("price", 20), ("cost", 20), ("note", 200)))):
                 return False
-    return True
+    from workspace_schema import valid_plans
+    profile = payload.get("profile", {})
+    if (not isinstance(profile, dict) or set(profile) - {"display_name", "company"}
+            or any(not isinstance(value, str) or len(value) > 100 for value in profile.values())):
+        return False
+    return valid_plans(payload.get("plans", {}))
 
 
 def csrf_token():
@@ -119,6 +133,7 @@ CURRENT_DATA_LINK = PROJECT_ROOT / "data" / "integrated" / "current"
 OSM_TILES_PATH = PROJECT_ROOT / "data" / "osm" / "NewYork-mbtiles-shortbread" / "NewYork.mbtiles"
 OSM_WALK_NETWORK_PATH = PROJECT_ROOT / "data" / "osm" / "nyc_walk_network.sqlite"
 LISTINGS_PATH = PROJECT_ROOT / "data" / "listings" / "verified_properties.csv"
+SYNTHETIC_PROPERTIES_PATH = PROJECT_ROOT / "data" / "listings" / "synthetic_properties.csv"
 CONCEPT_IMAGE_DIR = Path(app.static_folder) / "images" / "concepts"
 PRIVATE_CONCEPT_IMAGE_DIR = PROJECT_ROOT / "data" / "concept_images"
 SUBWAY_HOURLY_DIR = PROJECT_ROOT / "data" / "subway"
@@ -340,14 +355,9 @@ def subway_daypart_profiles() -> dict:
             for station, dates in days.items() if dates}
 
 
-def integrated_directory() -> Path:
-    configured = os.environ.get("GROUNDWORK_DATA_DIR")
-    directory = Path(configured) if configured else CURRENT_DATA_LINK if CURRENT_DATA_LINK.is_dir() else BASELINE_DATA_DIR
-    return directory.resolve()
-
-
 def integrated_package() -> dict:
-    return _load_integrated_package(integrated_directory())
+    directory = CURRENT_DATA_LINK if CURRENT_DATA_LINK.is_dir() else BASELINE_DATA_DIR
+    return _load_integrated_package(directory.resolve())
 
 
 @lru_cache(maxsize=2)
@@ -361,7 +371,6 @@ def _load_integrated_package(directory: Path) -> dict:
         if as_bool(row.get("eligible_for_location_screening"))
         and row.get("centroid_latitude")
         and row.get("centroid_longitude")
-        and row.get("borough") != "Staten Island"
     ]
     numeric_columns = [
         "population_density_per_sq_mile",
@@ -418,7 +427,7 @@ def _load_integrated_package(directory: Path) -> dict:
         "subway_vintage": next((row["vintage"] for row in sources if row.get("source") == "MTA ridership"), "Nearest station · one complete week"),
         "readiness": read_csv(directory / "feature_readiness.csv"),
         "data_release": directory.name,
-        "data_path": str(directory.relative_to(PROJECT_ROOT)) if directory.is_relative_to(PROJECT_ROOT) else directory.name,
+        "data_path": str(directory.relative_to(PROJECT_ROOT)),
         "screening_model": ScreeningModel(eligible_rows, restaurants),
         "bounds": {
             "lat_min": min(latitudes),
@@ -427,6 +436,44 @@ def _load_integrated_package(directory: Path) -> dict:
             "lon_max": max(longitudes),
         },
     }
+
+
+@lru_cache(maxsize=2)
+def _restaurant_map_data(directory: Path) -> dict:
+    features = []
+    seen = set()
+    excluded = {"inactive": 0, "missing_coordinates": 0, "outside_nyc_bounds": 0,
+                "missing_identifier": 0, "duplicate_identifier": 0}
+    for row in read_csv(directory / "entities" / "current_restaurants.csv"):
+        if not as_bool(row.get("active_establishment")):
+            excluded["inactive"] += 1
+            continue
+        identifier = (row.get("camis") or "").strip()
+        if not identifier:
+            excluded["missing_identifier"] += 1
+            continue
+        try:
+            latitude, longitude = float(row.get("latitude") or ""), float(row.get("longitude") or "")
+        except ValueError:
+            excluded["missing_coordinates"] += 1
+            continue
+        if not math.isfinite(latitude) or not math.isfinite(longitude):
+            excluded["missing_coordinates"] += 1
+            continue
+        if not 40.43 <= latitude <= 40.97 or not -74.32 <= longitude <= -73.65:
+            excluded["outside_nyc_bounds"] += 1
+            continue
+        if identifier in seen:
+            excluded["duplicate_identifier"] += 1
+            continue
+        seen.add(identifier)
+        street = " ".join(part for part in ((row.get("building") or "").strip(), (row.get("street") or "").strip()) if part)
+        address = ", ".join(part for part in (street, (row.get("boro") or "").strip(), (row.get("zipcode") or "").strip()) if part)
+        features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [longitude, latitude]},
+                         "properties": {"id": identifier, "name": (row.get("dba") or "").strip(),
+                                        "cuisine": (row.get("cuisine_description") or "").strip(), "address": address}})
+    return {"type": "FeatureCollection", "features": features,
+            "meta": {"mapped": len(features), "excluded": excluded, "data_release": directory.name}}
 
 
 def concept_competition_column(profile: str) -> str:
@@ -486,6 +533,7 @@ def real_location_from_tract(row: dict, profile: str, rent_cap: int, package: di
         "x": x,
         "y": y,
         "opportunity": opportunity,
+        "assessment_policy": assessment["assessment_policy"],
         "walkability": assessment["walkability"],
         "business_draw": assessment["business_draw"],
         "business_draw_coverage": assessment["business_draw_coverage"],
@@ -818,6 +866,7 @@ def tuned_locations(profile: str, rent_cap: int, borough: str = "", concept: Con
     if borough:
         rows = [row for row in rows if row.get("borough") == borough]
     locations = [real_location_from_tract(row, profile, rent_cap, package, concept or Concept()) for row in rows]
+    locations = [row for row in locations if row["assessment_policy"]["recommendation_eligible"]]
     ranked = sorted(locations, key=lambda row: row["opportunity"], reverse=True)
     return ranked[:limit] if limit is not None else ranked
 
@@ -865,7 +914,7 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, pu
                 "sqft": as_float(listing.get("sqft")) or 0, "sqft_label": listing.get("sqft") or "Size Pending",
                 "frontage": listing.get("frontage") or "Frontage Pending", "condition": listing.get("condition") or "Condition Pending",
                 "availability": listing.get("availability") or "Status Unverified",
-                "image": (public_url(listing.get("image_url")) or "") if as_bool(listing.get("photo_display_permission")) else "",
+                "image": (public_url(listing.get("image_url")) or "") if as_bool(listing.get("photo_display_permission")) and listing.get("image_rights_reference") else "",
                 "image_label": "Property Listing", "location_name": location["name"], "location_score": location["opportunity"],
                 "confidence_score": location["confidence_score"], "monthly_basis": rent_cap, "monthly_basis_label": f"{round(rent_cap / 1000)}k Target",
                 "fit_score": location["opportunity"], "ranking_basis": "Area Score; Listing Within Budget", "notes": listing.get("notes") or "Confirm Listing Details With Source.",
@@ -873,9 +922,55 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, pu
                 "broker_name": listing.get("broker_name") or None, "broker_contact": listing.get("broker_contact") or None,
                 "source_url": source_url, "checked_at": listing.get("checked_at"),
             })
+    for scenario in load_published_inventory(SYNTHETIC_PROPERTIES_PATH):
+        location = location_lookup.get(scenario["geoid"])
+        transaction = scenario["transaction"]
+        if not location or deal_type not in {transaction, "either"}:
+            continue
+        sqft = int(scenario["available_sqft"])
+        if profile == "fine_dining" and sqft < 900 or profile == "bar" and scenario["floor"] != "Ground":
+            continue
+        rent = float(scenario["monthly_rent"]) if transaction == "lease" else None
+        price = int(scenario["asking_price"]) if transaction == "purchase" else None
+        if rent is not None and rent > rent_cap or price is not None and price > purchase_budget:
+            continue
+        ready = scenario["ventilation_status"].startswith("Existing") and scenario["former_food_use"] == "true"
+        format_fit = 88 if ready else 74 if profile in {"coffee", "bakery", "counter_service", "takeout_delivery"} else 62
+        if scenario["floor"] != "Ground":
+            format_fit -= 15
+        budget = rent_cap if rent is not None else purchase_budget
+        fraction = (rent if rent is not None else price) / budget
+        property_fit = round(.70 * location["opportunity"] + .23 * format_fit + .07 * (100 - 35 * fraction))
+        properties.append({
+            "id": scenario["property_id"], "location_id": location["id"], "geoid": location["geoid"],
+            "title": f"{scenario['floor']}-Floor {scenario['building_type']}", "address": scenario["location_label"],
+            "borough": location["borough"], "neighborhood": scenario["neighborhood"], "transaction": transaction,
+            "transaction_label": "Synthetic Lease Scenario" if transaction == "lease" else "Synthetic Purchase Scenario",
+            "lead_type": "synthetic", "source_type": "synthetic_demonstration",
+            "asking_rent": rent, "asking_price": price,
+            "price_label": f"${rent:,.0f}/Month" if rent is not None else f"${price:,.0f}",
+            "annual_rent_psf": float(scenario["annual_rent_psf"]) if rent is not None else None,
+            "asking_price_psf": int(scenario["asking_price_psf"]) if price is not None else None,
+            "sqft": sqft, "sqft_label": str(sqft), "frontage": f"{scenario['frontage_ft']} ft (Simulated)",
+            "condition": scenario["condition"] + " (Simulated)",
+            "availability": "Scenario Only; Not A Verified Listing", "image": "", "image_label": "Synthetic Scenario",
+            "location_name": location["name"], "location_score": location["opportunity"],
+            "confidence_score": location["confidence_score"], "monthly_basis": rent_cap,
+            "monthly_basis_label": f"{round(rent_cap / 1000)}k Target",
+            "fit_score": location["opportunity"], "property_match_score": property_fit,
+            "ranking_basis": "Area Score, Modeled Space Fit And Budget; Not An Availability Prediction",
+            "notes": "Synthetic demonstration scenario. Confirm real premises, use, utilities, lease terms and availability independently.",
+            "latitude": scenario["latitude"], "longitude": scenario["longitude"],
+            "location_precision": "tract_approximate", "corridor_context": scenario["corridor_context"],
+            "building_type": scenario["building_type"], "floor": scenario["floor"],
+            "ground_floor": scenario["ground_floor"] == "true", "kitchen_status": scenario["kitchen_status"],
+            "ventilation_status": scenario["ventilation_status"],
+            "outdoor_space_potential": scenario["outdoor_space_potential"],
+            "step_free_entry": scenario["step_free_entry"], "broker_name": None,
+            "broker_contact": None, "source_url": None, "checked_at": None,
+        })
     if deal_type == "purchase":
-        candidates = sorted(properties, key=lambda row: row["fit_score"], reverse=True)[:12]
-        return add_site_evidence(candidates, package, concept)
+        return add_site_evidence(select_property_candidates(properties), package, concept)
     seen_bbls = set()
     storefronts = sorted(
         package["storefronts"],
@@ -897,12 +992,13 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, pu
         seen_bbls.add(bbl)
         address = title_case(listing.get("property_street_address_or") or "Storefront Address Not In Source")
         reported_activity = title_case(listing.get("primary_business_activity") or "Not In Source")
+        reporting_year = listing.get("reporting_year") or "an earlier year"
         properties.append(
             {
                 "id": bbl,
                 "location_id": location["id"],
                 "geoid": listing.get("geoid"),
-                "title": "Reported Vacant Storefront",
+                "title": "Historical Vacancy Record",
                 "address": address,
                 "borough": location["borough"],
                 "transaction": "unknown",
@@ -915,7 +1011,7 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, pu
                 "sqft_label": "Size Not In Source",
                 "frontage": "Frontage Pending",
                 "condition": reported_activity,
-                "availability": "Reported Vacant; Lease Status Unverified",
+                "availability": f"Reported Vacant In {reporting_year}; Current Status Unverified",
                 "image": "",
                 "image_label": "Storefront Registry",
                 "location_name": location["name"],
@@ -923,23 +1019,40 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, pu
                 "confidence_score": location["confidence_score"],
                 "monthly_basis": rent_cap,
                 "monthly_basis_label": f"{round(rent_cap / 1000)}k Target",
-                "fit_score": location["opportunity"], "ranking_basis": "Area Score; Registry Vacancy Filing",
-                "notes": "Matched From The NYC Storefront Registry. Asking Rent, Sale Price, Listing Photo, And Confirmed Deal Status Are Not Included In The Uploaded Source.",
+                "fit_score": location["opportunity"], "ranking_basis": "Area Score; Historical Registry Vacancy Filing",
+                "notes": f"DOF {reporting_year} registry filing, not a current listing. Asking rent, sale price, listing photo, and present availability are unverified.",
                 "broker_name": None, "broker_contact": None, "source_url": None, "checked_at": None,
                 "latitude": listing.get("latitude"),
                 "longitude": listing.get("longitude"),
                 "zip_code": listing.get("zip_code") or listing.get("postcode"),
             }
         )
-    candidates = sorted(properties, key=lambda row: (row["lead_type"] == "listing", row["fit_score"]), reverse=True)[:12]
-    return add_site_evidence(candidates, package, concept)
+    return add_site_evidence(select_property_candidates(properties), package, concept)
+
+
+def select_property_candidates(properties: list[dict]) -> list[dict]:
+    selected = []
+    caps = {"listing": 8, "registry_record": 8}
+    counts = defaultdict(int)
+    for row in sorted(properties, key=lambda item: (
+            item.get("property_match_score", item["fit_score"]),
+            {"listing": 3, "synthetic": 2, "registry_record": 1}.get(item["lead_type"], 0)), reverse=True):
+        kind = row["lead_type"]
+        if kind in caps and counts[kind] >= caps[kind]:
+            continue
+        selected.append(row)
+        counts[kind] += 1
+    return selected
 
 
 def add_site_evidence(properties: list[dict], package: dict, concept: Concept | None = None) -> list[dict]:
     network = package.get("walking_network")
-    if network is None:
-        return properties
     for property_row in properties:
+        if property_row.get("source_type") == "synthetic_demonstration":
+            property_row["site_evidence"] = {"status": "unavailable", "reason": "Approximate tract location, not a verified property site."}
+            continue
+        if network is None:
+            continue
         latitude, longitude = as_float(property_row.get("latitude")), as_float(property_row.get("longitude"))
         if latitude and longitude:
             property_row["site_evidence"] = network.site_evidence(
@@ -989,6 +1102,12 @@ def data_feeds() -> list[dict]:
                           "grain": "Source-Reported Individual Storefronts", "purpose": "Public Lease Offers; Availability Requires Confirmation",
                           "coverage": f"{len(fresh_rows)} Manually Checked Restaurant-Ready " + ("Opportunity" if len(fresh_rows) == 1 else "Opportunities"),
                           "url": "https://www.nyc.gov/site/nycha/business/store-leasing-available-properties.page"})
+    scenarios = load_published_inventory(SYNTHETIC_PROPERTIES_PATH)
+    if scenarios:
+        feeds.append({"name": "Groundwork Synthetic Property Scenarios", "vintage": "2026 Calibration",
+                      "grain": "Approximate Census Tract; Not A Real Premises",
+                      "purpose": "Demonstration Only; Prices And Availability Not Verified",
+                      "coverage": f"{len(scenarios):,} Simulated Lease And Purchase Scenarios", "url": None})
     return feeds
 
 
@@ -1126,6 +1245,8 @@ def account_workspace():
         if not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 0:
             return jsonify({"error": "Invalid workspace revision."}), 400
         with closing(account_db()) as connection, connection:
+            # Lock before checking the revision so concurrent tabs cannot both overwrite it.
+            connection.execute("BEGIN IMMEDIATE")
             current = connection.execute("SELECT revision FROM account_workspaces WHERE account_id=?", (account_id,)).fetchone()
             revision = current[0] if current else 0
             if revision != expected_revision:
@@ -1240,6 +1361,14 @@ def menu_suggestions_api():
                     "review_method": "No dish ratings are inferred from restaurant ratings."})
 
 
+@lru_cache(maxsize=2)
+def supported_site_geography(path, signature):
+    from shapely.geometry import shape
+    from shapely.strtree import STRtree
+    geometry = json.loads(Path(path).read_text())
+    return STRtree([shape(feature["geometry"]) for feature in geometry["features"]])
+
+
 @app.post("/api/sites/analyze")
 def analyze_site_api():
     values = request.get_json(silent=True)
@@ -1253,6 +1382,14 @@ def analyze_site_api():
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     package = integrated_package()
+    geography = PROJECT_ROOT / package["data_path"] / "geography/nyc_2020_census_tracts.geojson"
+    try:
+        from shapely.geometry import Point
+        tree = supported_site_geography(str(geography),geography.stat().st_mtime_ns)
+        if not len(tree.query(Point(longitude,latitude),predicate="intersects")):
+            return jsonify({"error":"Choose a location within supported NYC tract boundaries.","status":"outside_supported_geography"}),400
+    except (OSError,ValueError,KeyError):
+        return jsonify({"error":"Location boundaries are currently unavailable.","status":"geography_unavailable"}),503
     evidence = package["walking_network"].site_evidence(
         latitude, longitude, package["restaurants"], package["subway_stations"])
     if evidence["status"] == "available":
@@ -1281,6 +1418,12 @@ def osm_tile(z: int, x: int, y: int):
     return response
 
 
+@app.get("/api/map/restaurants")
+def map_restaurants():
+    directory = CURRENT_DATA_LINK if CURRENT_DATA_LINK.is_dir() else BASELINE_DATA_DIR
+    return jsonify(_restaurant_map_data(directory.resolve()))
+
+
 @app.route("/api/dashboard")
 def dashboard():
     try:
@@ -1288,8 +1431,8 @@ def dashboard():
         concept = Concept(**resolution["concept"])
         rent_cap = int(request.args.get("rent_cap", "18000"))
         purchase_budget = int(request.args.get("purchase_budget", "3000000"))
-        if not 8000 <= rent_cap <= 35000:
-            raise ValueError("Monthly budget must be between $8,000 and $35,000.")
+        if not 2000 <= rent_cap <= 100000:
+            raise ValueError("Monthly budget must be between $2,000 and $100,000.")
         if not 100000 <= purchase_budget <= 50000000:
             raise ValueError("Purchase budget must be between $100,000 and $50 million.")
         deal_type = request.args.get("deal_type", "lease")
@@ -1301,11 +1444,29 @@ def dashboard():
     concept_name = (request.args.get("concept_name", "Restaurant Concept") or "Restaurant Concept").strip()[:80]
     profile = resolution["profile"]
     borough = request.args.get("borough", "")
-    if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx"}:
+    if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx", "Staten Island"}:
         borough = ""
     ranked_locations = tuned_locations(profile, rent_cap, borough, concept, limit=None)
     if not ranked_locations:
-        return jsonify({"locations": [], "error": "No eligible tracts match this borough."})
+        return jsonify({"locations": [], "properties": [], "error": "No locations have sufficient evidence within the selected area.",
+                        "decision_status": "insufficient_location_evidence", "constraints_relaxed": False,
+                        "evidence_policy": evidence_catalog()})
+    ranked_locations, survival_status = attach_model(
+        ranked_locations, [row for row in integrated_package()["tracts"]
+                           if not borough or row.get("borough") == borough],
+        concept.cuisine, app.config["SURVIVAL_CONFIG"])
+    access_status = attach_access(ranked_locations, [], concept, app.config["CUSTOMER_ACCESS_CONFIG"])
+    for row in ranked_locations:
+        attach_runtime_policy(row)
+    sort_by = request.args.get("sort_by", "opportunity")
+    if sort_by not in {"opportunity", "inverse_walkability"}:
+        return jsonify({"error": "Choose a supported location ranking."}), 400
+    if sort_by == "inverse_walkability":
+        if access_status["status"] != "available":
+            return jsonify({"error": "Customer-access rankings are currently unavailable."}), 503
+        ranked_locations.sort(key=lambda row: (row["inverse_walkability"] is not None,
+                                               row["inverse_walkability"] or 0), reverse=True)
+        access_status["ranking_changed"] = True
     locations = ranked_locations[:24]
     best = locations[0]
     requested_ids = list(dict.fromkeys(
@@ -1320,29 +1481,52 @@ def dashboard():
             if row["geoid"] in missing_ids:
                 ranked_lookup[row["geoid"]] = real_location_from_tract(row, profile, rent_cap, package, concept)
     saved_locations = [ranked_lookup[value] for value in requested_ids if value in ranked_lookup]
+    attach_access(saved_locations, [], concept, app.config["CUSTOMER_ACCESS_CONFIG"])
+    for row in saved_locations:
+        attach_runtime_policy(row)
     avg_confidence = round(sum(row["confidence_score"] for row in locations) / len(locations))
     finance["purchase_budget"] = purchase_budget
     finance["average_check"] = concept.average_check
     properties = matching_properties(ranked_locations, deal_type, rent_cap, purchase_budget, concept, profile)
+    attach_access([], properties, concept, app.config["CUSTOMER_ACCESS_CONFIG"])
+    if sort_by == "inverse_walkability":
+        properties.sort(key=lambda row: (row.get("customer_access", {}).get("index") is not None,
+                                        row.get("customer_access", {}).get("index") or 0), reverse=True)
+    for item in properties:
+        item["assessment_policy"] = property_policy(item, deal_type, rent_cap, purchase_budget)
+    property_location_ids = {item["location_id"] for item in properties}
+    property_locations = [row for row in ranked_locations if row["id"] in property_location_ids]
     rent_data = load_rent_benchmarks(PROJECT_ROOT / "data")
     rent_by_geoid = rent_data.get("by_geoid", {})
     return jsonify(
         {
             "locations": locations,
             "saved_locations": saved_locations,
+            "property_locations": property_locations,
             "selected": best["id"],
             "feeds": data_feeds(),
             "whitespace": market_gap_rows(locations),
             "vendor_windows": VENDOR_WINDOWS,
             "properties": properties,
+            "property_search": {"status": "matches_available" if properties else "no_matching_inventory",
+                                "constraints_relaxed": False, "synthetic_matches": sum(item.get("lead_type")=="synthetic" for item in properties),
+                                "synthetic_inventory_total": len(load_published_inventory(SYNTHETIC_PROPERTIES_PATH)),
+                                "synthetic_results_truncated": False,
+                                "sort_basis": "property_customer_access" if sort_by == "inverse_walkability" else "area_space_and_budget_fit",
+                                "verified_live_listing_count": 0},
             "data_layers": DATA_LAYERS,
             "reports": REPORTS,
             "scoring": {
+                "evidence_policy": evidence_catalog(),
                 "weights": PROFILE_WEIGHTS.get(profile, PROFILE_WEIGHTS["restaurant"]),
                 "signals": {component["key"]: {"label": component["label"], "coverage": component["coverage"], "description": component["description"]} for component in best["score_components"]},
                 "avg_confidence": avg_confidence,
-                "method": "Weighted Location-Fit Score Across Demand, Customer Fit, Access, Market Gap, Competition Balance, And Commercial Suitability",
+                "method": survival_status.get("ranking_method") or ("60% Survival Percentile + 40% H3 Cuisine Gap" if survival_status["ranking_mode"] == "survival_cuisine_gap" else "Weighted Location-Fit Score Across Demand, Customer Fit, Access, Market Gap, Competition Balance, And Commercial Suitability"),
+                "ranking_mode": survival_status["ranking_mode"],
+                "ranking_weights": survival_status.get("ranking_weights") or ({"survival": .6, "cuisine_gap": .4} if survival_status["ranking_mode"] == "survival_cuisine_gap" else PROFILE_WEIGHTS.get(profile, PROFILE_WEIGHTS["restaurant"])),
             },
+            "survival_model": survival_status,
+            "customer_access_model": access_status,
             "finance": finance,
             "rent_benchmarks": {
                 "status": rent_data["status"], "reporting_year": rent_data.get("reporting_year"),
@@ -1356,13 +1540,14 @@ def dashboard():
                 "concept_name": concept_name,
                 "concept": concept.public(),
                 "concept_resolution": resolution,
-                "model_version": MODEL_VERSION,
-                "assessment_type": "Uncalibrated Screening Index",
+                "model_version": survival_status["model_version"] if survival_status["ranking_mode"].startswith("survival_") else MODEL_VERSION,
+                "assessment_type": survival_status["assessment_type"] if survival_status["ranking_mode"].startswith("survival_") else "Uncalibrated Screening Index",
                 "scope": "NYC Restaurant And Bar Site Selection",
                 "architecture": "Flask API Using Integrated NYC Tract, Storefront, Mobility, Competition, Demographic, And Land-Use Features",
                 "api_contract": "Locations, Properties, Feeds, Data Quality, Reports, Finance",
                 "deal_type": deal_type,
                 "borough": borough or "All NYC",
+                "sort_by": sort_by,
                 "primary_dataset": f"{integrated_package()['data_path']}/master_tract_features.csv",
                 "data_release": integrated_package()["data_release"],
                 "unsupported_values": unsupported_values(properties),
@@ -1371,12 +1556,47 @@ def dashboard():
     )
 
 
+@app.get("/api/assessment-policy")
+def assessment_policy_api():
+    return jsonify(evidence_catalog())
+
+
+@app.get("/api/models/survival")
+def survival_model_status():
+    _, status = model_state(app.config["SURVIVAL_CONFIG"])
+    return jsonify(status)
+
+
+@app.get("/api/customer-access")
+def customer_access_details():
+    geoid = request.args.get("geoid", "")
+    if len(geoid) != 11 or not geoid.isdigit():
+        return jsonify({"error": "Choose a valid census tract."}), 400
+    try:
+        concept = Concept.from_args(request.args)
+        engine, status = access_engine(app.config["CUSTOMER_ACCESS_CONFIG"])
+        if engine is None:
+            return jsonify({"status": status["status"], "origins": []}), 503
+        assessment = engine.assessment("tract_run", geoid, concept)
+        if assessment["status"] == "not_in_snapshot":
+            return jsonify({"error": "Location is not in the accessibility snapshot."}), 404
+        return jsonify({"assessment": assessment, "origins": engine.origins(geoid, concept)})
+    except (ValueError, KeyError, TypeError) as error:
+        return jsonify({"error": str(error)}), 400
+    except (OSError, ImportError):
+        return jsonify({"status": "unavailable", "origins": []}), 503
+
+
 @lru_cache(maxsize=16)
-def cached_hex_surface(directory: Path, concept: Concept, profile: str, borough: str, cell_resolution: int):
+def cached_hex_surface(directory: Path, concept: Concept, profile: str, borough: str, cell_resolution: int, metric: str = "concept_demand"):
     package = _load_integrated_package(directory)
+    if metric == "inverse_walkability":
+        access_rows = [{"geoid": row["geoid"]} for row in package["tracts"]]
+        attach_access(access_rows, [], concept, app.config["CUSTOMER_ACCESS_CONFIG"])
+        package = {**package, "customer_access_scores": {row["geoid"]: row.get("customer_access", {}) for row in access_rows}}
     return concept_surface(package, directory, concept, profile,
                            PROFILE_WEIGHTS.get(profile, PROFILE_WEIGHTS["restaurant"]), borough,
-                           cell_resolution=cell_resolution)
+                           cell_resolution=cell_resolution, metric=metric)
 
 
 @app.get("/api/hex-demand")
@@ -1386,26 +1606,53 @@ def hex_demand():
         if level not in {"sector", "cell", "fine"}:
             raise ValueError("Choose sector, cell or fine detail.")
         borough = request.args.get("borough", "")
-        if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx"}:
+        if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx", "Staten Island"}:
             raise ValueError("Choose a supported borough.")
         resolution = resolve_concept(request.args)
         concept = Concept(**resolution["concept"])
+        from hex_demand import HEAT_METRICS
+        metric = request.args.get("metric", "concept_demand")
+        if metric not in HEAT_METRICS:
+            raise ValueError("Choose a supported heatmap metric.")
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     package = integrated_package()
-    directory = integrated_directory()
+    directory = PROJECT_ROOT / package["data_path"]
     cell_resolution = 9 if level == "fine" else 8
-    surface = cached_hex_surface(directory, concept, resolution["profile"], borough, cell_resolution)
+    surface = cached_hex_surface(directory, concept, resolution["profile"], borough, cell_resolution, metric)
     return jsonify({"type": "FeatureCollection", "features": surface["sector" if level == "sector" else "cell"], "meta": {
         "level": level, "resolution": 7 if level == "sector" else cell_resolution,
+        "metric": metric,
+        "status": "available" if surface["sector" if level == "sector" else "cell"] else "no_feature_coverage",
         "data_release": package["data_release"], "concept": resolution["concept"],
-        "assessment_type": "Concept-specific screening index, not measured visits or a revenue forecast",
-        "basis": "Concept-specific demand, customer fit, access, market opportunity and competition balance; format-specific weights and cell-center transit access",
-        "signal_weights": surface_weights(PROFILE_WEIGHTS.get(resolution["profile"], PROFILE_WEIGHTS["restaurant"])),
+        "assessment_type": "Area-Level EPA Walkability Index" if metric == "walkability" else "Uncalibrated Customer-Access Scenario" if metric == "inverse_walkability" else "Feature screening index, not measured visits or a revenue forecast",
+        "basis": "Area-weighted feature screening; not a storefront measurement or demand forecast" if metric != "concept_demand" else "Concept-specific demand, customer fit, access, market opportunity and competition balance; format-specific weights and cell-center transit access",
+        "signal_weights": {metric: 1.} if metric != "concept_demand" else surface_weights(PROFILE_WEIGHTS.get(resolution["profile"], PROFILE_WEIGHTS["restaurant"])),
         "field_sources": resolution["field_sources"],
         "not_scored": ["Lease or purchase choice", "Rent and purchase budgets", "Unclassified free-text details"] +
                       (["Dietary customer demand for this identity"] if concept.dietary in {"halal", "kosher", "gluten_free"} else []),
     }})
+
+
+@app.get("/api/geography/nyc-boundary")
+def nyc_map_boundary():
+    from map_geography import city_partition
+    try:
+        package = integrated_package()
+        path = (PROJECT_ROOT / package["data_path"] / "geography/nyc_2020_census_tracts.geojson").resolve()
+        result = city_partition(str(path))
+        return jsonify({**result, "meta": {**result["meta"], "data_release": package["data_release"]}})
+    except (OSError, ValueError):
+        return jsonify({"error": "NYC boundary is temporarily unavailable."}), 503
+
+
+@app.get("/api/economics/scenario")
+def economics_scenario():
+    from economics import scenario
+    try:
+        return jsonify(scenario(request.args))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.get("/api/evaluation")
@@ -1423,7 +1670,9 @@ def evaluate_model():
     try:
         result = run_evaluation(integrated_package(), PROJECT_ROOT / "data",
                                 cuisine=payload.get("cuisine", "korean"),
-                                target=payload.get("target", "market_presence"), cutoff=payload.get("cutoff"))
+                                target=payload.get("target", "market_presence"), cutoff=payload.get("cutoff"),
+                                feature_set=payload.get("feature_set", "full"),
+                                validation_mode=payload.get("validation_mode", "temporal_spatial"))
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     except ImportError:

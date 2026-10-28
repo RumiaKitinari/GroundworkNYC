@@ -177,6 +177,7 @@ def build_huff(url, snapshot, boundary_path, vintages, weights=None, radius=3):
 
 def export_screening(url, snapshot, arguments):
     from .api import concept_key, legacy_module
+    from .provenance import screening_provenance
 
     legacy = legacy_module()
     key, canonical = concept_key(arguments)
@@ -207,6 +208,7 @@ def export_screening(url, snapshot, arguments):
             "concept": canonical,
             "assessment_type": "Uncalibrated Screening Index",
             "query_key": key,
+            **screening_provenance(),
         },
     )
     return len(features)

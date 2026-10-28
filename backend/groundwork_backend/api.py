@@ -46,7 +46,7 @@ def concept_key(arguments):
 
     resolved = resolve_concept(arguments)
     borough = arguments.get("borough", "")
-    if borough not in {"", "Manhattan", "Brooklyn", "Queens", "Bronx"}:
+    if borough not in {"", "Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"}:
         raise ValueError("Choose a supported borough.")
     canonical = {"concept": resolved["concept"], "profile": resolved["profile"], "borough": borough}
     return sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()[:20], canonical
@@ -123,6 +123,11 @@ def create_app(settings=None, store=None, cache=None, include_legacy=True):
             raise HTTPException(422, str(exc)) from exc
         layer = "screening_" + key
         current = metadata(layer=layer)
+        if include_legacy:
+            from .provenance import screening_is_current
+            release = (ROOT / "data/integrated/current").resolve().name
+            if not screening_is_current(current["metadata"], release):
+                raise HTTPException(409, "Screening tiles are outdated. Use the current screening GeoJSON API.")
         resolutions = {row["resolution"] for row in current["layers"] if row["layer"] == layer}
         if not resolutions:
             raise HTTPException(
@@ -131,6 +136,7 @@ def create_app(settings=None, store=None, cache=None, include_legacy=True):
         base = f"/api/v1/tiles/{current['snapshot']}/{layer}"
         return {
             "snapshot": current["snapshot"],
+            "data_release": current["metadata"].get("data_release"),
             "assessment_type": "Uncalibrated Screening Index",
             "source_layer": "demand",
             "tiles": {str(r): f"{base}/{r}/{{z}}/{{x}}/{{y}}.mvt" for r in sorted(resolutions)},
@@ -221,7 +227,24 @@ def create_app(settings=None, store=None, cache=None, include_legacy=True):
 
         @legacy.app.context_processor
         def spatial_context():
-            return {"spatial_backend_enabled": bool(settings.database_url)}
+            import os
+
+            return {
+                "spatial_backend_enabled": bool(settings.database_url),
+                "real_data_preview": os.getenv("GROUNDWORK_PREVIEW") == "1",
+            }
+
+        import os
+
+        if os.getenv("GROUNDWORK_PREVIEW") == "1" and not settings.production:
+
+            @legacy.app.get("/demo")
+            def open_preview():
+                from flask import redirect, session
+
+                if session.get("access") != "account":
+                    session["access"] = "guest"
+                return redirect("/?demo=1")
 
         legacy.app.config["SESSION_COOKIE_SECURE"] = settings.production
         legacy.app.config["MAX_CONTENT_LENGTH"] = 1_000_000

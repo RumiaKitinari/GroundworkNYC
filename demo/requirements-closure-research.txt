@@ -1,0 +1,2 @@
+# Optional public Parquet research tooling; not needed by the dashboard.
+duckdb==1.5.6

@@ -181,6 +181,10 @@ def main():
     if args.integrated_dir.exists() and any(resolution in {8, 9} for resolution in args.resolutions):
         report["live_grid_coverage"] = live_grid_coverage(args.integrated_dir,
                                                           [resolution for resolution in args.resolutions if resolution in {8, 9}])
+        report["integrated_inputs_sha256"] = {
+            "master": file_sha256(args.integrated_dir / "master_tract_features.csv"),
+            "geography": file_sha256(args.integrated_dir / "geography/nyc_2020_census_tracts.geojson"),
+        }
     output = json.dumps(report, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

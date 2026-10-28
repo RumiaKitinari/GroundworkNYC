@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261008-ui" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261008-ui" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261027-access" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261027-access" />
   </head>
   <body>
     <div class="app-frame">
@@ -63,7 +63,7 @@
               <span>Rent Ceiling</span>
               <strong id="rentLabel">$18k</strong>
             </div>
-            <input id="rentRange" type="range" min="8" max="35" value="18" />
+            <input id="rentRange" type="range" min="2" max="100" value="18" />
           </div>
           <div class="purchase-target" id="purchaseTarget" hidden>Purchase Target <strong id="purchaseTargetValue">$3M</strong></div>
           <button class="brief-edit" id="briefEditButton" type="button">Edit Search Brief</button>
@@ -117,6 +117,7 @@
           </div>
         </header>
 
+        <div class="mobile-section-nav segmented-control" role="group" aria-label="Workspace Section"><button type="button" data-section-view="discover" aria-pressed="true">Explore</button><button type="button" data-section-view="lease" aria-pressed="false">Plan</button><button type="button" data-section-view="reports" aria-pressed="false">Workspace</button></div>
         <nav class="feature-tabs" aria-label="Groundwork Feature Modules">
           <div class="nav-group" aria-label="Explore"><span class="nav-group-label">Explore</span>
           <button class="feature-tab is-active" data-view="discover" type="button">
@@ -124,6 +125,9 @@
           </button>
           <button class="feature-tab" data-view="scorecard" type="button">
             <strong>Market Profile</strong>
+          </button>
+          <button class="feature-tab" data-view="access" type="button">
+            <strong>Customer Access</strong>
           </button>
           <button class="feature-tab" data-view="whitespace" type="button">
             <strong>Competition</strong>
@@ -157,6 +161,7 @@
         </nav>
 
         <div class="dashboard-status" id="dashboardStatus" role="status" hidden></div>
+        <div class="model-status" id="survivalModelStatus" role="status" hidden></div>
         <section class="metric-ribbon" id="metricRibbon" aria-label="Dashboard Metrics"></section>
 
         <section class="command-grid">
@@ -166,6 +171,9 @@
                 <h2 id="mapModeTitle">NYC Score Surface</h2>
               </div>
               <div class="module-tabs">
+                <select id="mapInventorySelect" aria-label="Map Inventory"><option value="properties">Property Scenarios</option><option value="areas">Recommended Areas</option></select>
+                <select id="heatmapMetricSelect" aria-label="Heatmap Feature"><option value="">Heatmap Off</option><option value="concept_demand">Concept Demand</option><option value="location_score">Location Fit</option><option value="demand">Area Demand</option><option value="customer_fit">Customer Fit</option><option value="access">Accessibility</option><option value="inverse_walkability">Customer Access (Network)</option><option value="walkability">Walkability</option><option value="competition_balance">Competition Balance</option><option value="market_gap">Cuisine Supply</option><option value="economics">Commercial Fit</option></select>
+                <label class="restaurant-toggle" hidden><input id="showRestaurantsToggle" type="checkbox" /> Existing Restaurants</label>
                 <select id="mapBasemapSelect" aria-label="Map View">
                   <option value="streets">Streets</option>
                   <option value="aerial">Aerial</option>
@@ -174,12 +182,13 @@
                 <select id="mapLayerSelect" aria-label="Map Layer">
                   <option value="opportunity">Location Score</option>
                   <option value="walkability">Walkability</option>
-                  <option value="business_draw">Business Draw</option>
+                  <option value="inverse_walkability">Customer Access</option>
+                  <option value="business_draw">Business Fit</option>
                   <option value="activity">Local Demand</option>
-                  <option value="whitespace">Cuisine Opportunity</option>
+                  <option value="whitespace">Cuisine Supply</option>
                   <option value="cost">Commercial Fit</option>
                   <option value="concept_demand">Concept Demand Index</option>
-                  {% if spatial_backend_enabled %}<option value="huff_demand" disabled>Huff Market Gaps (Unavailable)</option>{% endif %}
+                  {% if spatial_backend_enabled|default(false) %}<option value="huff_demand" disabled>Huff Market Gaps (Unavailable)</option>{% endif %}
                 </select>
               </div>
             </div>
@@ -196,6 +205,7 @@
               <div class="score-orb" id="scoreOrb"><span id="selectedScore">--</span></div>
             </div>
             <div class="walkability-pair" id="walkabilityPair"></div>
+            <div id="selectedPropertySummary" class="selected-property-summary" hidden></div>
             <div class="bar-stack" id="barStack"></div>
             <div class="driver-list">
               <div class="module-title-row">
@@ -237,6 +247,11 @@
             <div class="compare-board" id="compareBoard"></div>
           </div>
 
+          <div class="table-module is-hidden" data-panel="access">
+            <div class="module-head compact"><h2>Customer Access</h2><span class="access-basis-label">Inverse Walkability</span></div>
+            <div id="customerAccessBoard" aria-live="polite"></div>
+          </div>
+
           <div class="table-module is-hidden" data-panel="lease">
             <div class="module-head compact">
               <div>
@@ -268,6 +283,24 @@
               <button class="primary-action" type="submit">Update Scenario</button>
             </form>
             <div class="finance-board" id="financeBoard"></div>
+            <section class="planning-section" aria-labelledby="scenarioLibraryHeading"><h3 id="scenarioLibraryHeading">Saved Scenarios</h3><form id="saveScenarioForm" class="planning-toolbar"><label>Scenario Name<input id="scenarioName" maxlength="60" value="Expected" list="scenarioNames" required /></label><datalist id="scenarioNames"><option value="Conservative"><option value="Expected"><option value="Optimistic"></datalist><button type="submit" class="quiet-action">Save Scenario</button><button id="economicsUseBasket" type="button" class="quiet-action">Use Menu Basket</button></form><div id="scenarioLibrary" aria-live="polite"></div><div class="economics-chart" id="scenarioComparisonWrap" hidden><canvas id="scenarioComparison" role="img" aria-label="Saved Scenario Daily Profit Comparison"></canvas></div></section>
+            <section class="economics-lab" aria-labelledby="economicsLabHeading">
+              <div class="view-heading"><div><span class="eyebrow">Scenario Workspace</span><h3 id="economicsLabHeading">Daily Profit & Pricing</h3></div><span class="card-status">User-Assumed Demand</span></div>
+              <form id="economicsLabForm" class="economics-inputs">
+                <label class="control-field"><span>Monthly Rent / Occupancy ($)</span><input name="monthly_rent" type="number" min="0" max="1000000" step="any" required /></label>
+                <label class="control-field"><span>Other Monthly Fixed Costs ($)</span><input name="monthly_fixed" type="number" min="0" max="2000000" step="any" required /></label>
+                <label class="control-field"><span>Operating Days / Month</span><input name="operating_days" type="number" min="1" max="31" step="1" required /></label>
+                <label class="control-field"><span>Spend Per Guest ($)</span><input name="price" type="number" min="1" max="1000" step="any" required /></label>
+                <label class="control-field"><span>Variable Cost Per Guest ($)</span><input name="unit_cost" type="number" min="0" max="1000" step="any" required /></label>
+                <label class="control-field"><span>Expected Daily Covers</span><input name="daily_covers" type="number" min="1" max="5000" step="1" required /></label>
+                <label class="control-field"><span>Daily Capacity</span><input name="capacity" type="number" min="1" max="5000" step="1" required /></label>
+                <label class="control-field" title="Absolute price elasticity at the entered price and volume. This is an assumption, not fitted customer demand."><span>Assumed Price Elasticity</span><input name="elasticity" type="number" min="0.1" max="10" step="0.1" required /></label>
+                <label class="control-field" title="Additional marginal cost per guest at full capacity, such as overtime or congestion."><span>Capacity Cost Premium ($)</span><input name="congestion_cost" type="number" min="0" max="1000" step="any" required /></label>
+                <label class="control-field"><span>Daily Profit Target ($)</span><input name="profit_target" type="number" min="0" max="100000" step="any" required /></label>
+                <div class="economics-actions"><button class="primary-action" type="submit">Calculate Scenario</button><button class="quiet-action" id="economicsUseProperty" type="button">Use Selected Property Rent</button></div>
+              </form>
+              <div id="economicsStatus" role="status"></div><div id="economicsResults"></div>
+            </section>
           </div>
 
           <div class="table-module is-hidden" data-panel="menu">
@@ -276,6 +309,8 @@
               <div class="menu-heading-actions"><button class="quiet-action" id="menuPrint" type="button" disabled>Print Menu</button><button class="quiet-action" id="menuExport" type="button" disabled>Export CSV</button></div>
             </div>
             <div class="menu-kpis" id="menuKpis" aria-label="Menu planning summary"></div>
+            <section id="menuPlanning" class="planning-section" aria-label="Menu Composition And Guest Basket"></section>
+            <div class="menu-pricing-toolbar"><label title="Price is calculated from your ingredient cost and target percentage, rounded up to $0.50. Other operating costs are excluded.">Target Ingredient Cost <input id="menuTargetCost" type="number" min="10" max="70" step="1" value="30" aria-label="Target Ingredient Cost Percentage" required />%</label><button type="button" class="quiet-action" id="menuApplyPricing">Price Unpriced Items</button><span id="menuReviewStatus" role="status"></span></div>
             <div class="menu-view-switch segmented-control" role="group" aria-label="Menu view"><button type="button" data-menu-view="plan" aria-pressed="true">Plan</button><button type="button" data-menu-view="preview" aria-pressed="false">Preview</button></div>
             <div class="menu-workspace">
               <section class="menu-discovery" aria-labelledby="menuIdeasHeading">
@@ -508,7 +543,7 @@
             </label>
             <label class="control-field" id="monthlyBudgetField">
               <span>Monthly Budget Target</span>
-              <input id="briefBudget" type="number" min="8000" max="35000" step="1000" value="18000" />
+              <input id="briefBudget" type="number" min="2000" max="100000" step="1000" value="18000" />
             </label>
             <label class="control-field" id="purchaseBudgetField" hidden>
               <span>Purchase Budget ($)</span>
@@ -522,6 +557,7 @@
                 <option value="Queens">Queens</option>
                 <option value="Manhattan">Manhattan</option>
                 <option value="Bronx">Bronx</option>
+                <option value="Staten Island">Staten Island</option>
               </select>
             </label>
           </div>
@@ -542,8 +578,10 @@
     </section>
 
     <form id="logoutForm" method="post" action="{{ url_for('auth_action', action='logout') }}" hidden><input type="hidden" name="csrf_token" value="{{ csrf }}" /></form>
-    <script>window.GROUNDWORK_MENU_OWNER = {{ (email or 'guest')|tojson }}; window.GROUNDWORK_ACCESS = {{ access|tojson }}; window.GROUNDWORK_CSRF = {{ csrf|tojson }};</script>
+    <script>window.GROUNDWORK_MENU_OWNER = {{ (email or 'guest')|tojson }}; window.GROUNDWORK_ACCESS = {{ access|tojson }}; window.GROUNDWORK_CSRF = {{ csrf|tojson }}; window.GROUNDWORK_SPATIAL_BACKEND = {{ (spatial_backend_enabled|default(false))|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261020-spatial"></script>
+    <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/planning.js') }}?v=20261028"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261028-workspace"></script>
   </body>
 </html>

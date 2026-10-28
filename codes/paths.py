@@ -1,28 +1,46 @@
 r"""
 Project folders. Every script imports these, so paths live in one place.
 
-    E:\440 CAPSTONE\codes     all .py files (this one included)
-    E:\440 CAPSTONE\data      raw inputs you downloaded
-    E:\440 CAPSTONE\outputs   everything the scripts write
-
-To use a different drive or folder, set the CAPSTONE_ROOT environment
-variable instead of editing this file.
+By default, use this repository's data folder and keep generated research
+outputs in data/output/atharv_model (excluded from Git). The integrated
+release remains read-only. CAPSTONE_ROOT preserves the original flat
+data/outputs layout; CAPSTONE_OUTPUTS overrides the output directory.
 """
 import os
 from pathlib import Path
 
-ROOT = Path(os.environ.get("CAPSTONE_ROOT", r"E:\440 CAPSTONE"))
+ROOT = Path(os.environ.get("CAPSTONE_ROOT", Path(__file__).resolve().parents[1])).expanduser()
 DATA = ROOT / "data"
-OUTPUTS = ROOT / "outputs"
+OUTPUTS = Path(os.environ.get(
+    "CAPSTONE_OUTPUTS", ROOT / "outputs" if "CAPSTONE_ROOT" in os.environ
+    else DATA / "output" / "atharv_model"
+)).expanduser()
 MODEL = OUTPUTS / "model"
 RECOMMENDATIONS = OUTPUTS / "recommendations"
 
 
 def find(name):
-    """Look for a file in outputs first (things the scripts made), then data."""
+    """Keep flat-layout inputs compatible, then use the local integrated package."""
+    path = Path(name).expanduser()
+    if path.is_absolute() or path.exists():
+        return path
     for folder in (OUTPUTS, DATA):
         if (folder / name).exists():
             return folder / name
+    integrated = DATA / "integrated" / "current"
+    inputs = {
+        "master_tract_features.csv": integrated / "master_tract_features.csv",
+        "current_restaurants.csv": integrated / "entities" / "current_restaurants.csv",
+        "synthetic_properties.csv": DATA / "listings" / "synthetic_properties.csv",
+    }
+    if name in inputs and inputs[name].exists():
+        return inputs[name]
+    if name == "restaurants_raw.parquet":
+        archives = sorted((DATA / "raw_sources" / "nyc_cuisine_atlas").glob("*/restaurants_raw.parquet"))
+        if len(archives) > 1:
+            raise ValueError("Multiple cuisine-atlas snapshots exist; pass an explicit input path.")
+        if archives:
+            return archives[0]
     return DATA / name
 
 

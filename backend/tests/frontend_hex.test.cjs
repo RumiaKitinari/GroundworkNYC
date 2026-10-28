@@ -8,8 +8,8 @@ const functions = dashboard.slice(dashboard.indexOf('function clearHexLayer()'),
 
 function environment(fetch, layer = 'concept_demand') {
   const sources = new Map(), layers = new Map(), status = {hidden: true};
-  const context = vm.createContext({URL, URLSearchParams, Map, fetch,
-    window: {location: {origin: 'https://groundwork.example'}},
+  const context = vm.createContext({URL, URLSearchParams, Map, fetch, installNycBoundary: () => {},
+    window: {location: {origin: 'https://groundwork.example'}, GROUNDWORK_SPATIAL_BACKEND: true},
     document: {querySelector: () => status},
     locationMap: {
       getStyle: () => ({layers: []}), getZoom: () => 12,
@@ -21,11 +21,11 @@ function environment(fetch, layer = 'concept_demand') {
     dashboard: {meta: {data_release: 'test_release'}},
     conceptParams: () => new URLSearchParams({cuisine: 'korean'}),
   });
-  vm.runInContext(`let activeLayer = ${JSON.stringify(layer)}; let activeBasemap = 'aerial'; let hoveredHexId = null; let hexRequestId = 0; const hexCache = new Map(); ${functions}`, context);
+  vm.runInContext(`let activeLayer = ${JSON.stringify(layer)}; let activeHeatMetric = ''; let activeBasemap = 'aerial'; let hoveredHexId = null; let hexRequestId = 0; const hexCache = new Map(); ${functions}`, context);
   return {context, sources, layers, status};
 }
 
-const manifest = {source_layer: 'demand', tiles: {'8': '/api/v1/tiles/release/huff/8/{z}/{x}/{y}.mvt'}};
+const manifest = {data_release: 'test_release', source_layer: 'demand', tiles: {'8': '/api/v1/tiles/release/huff/8/{z}/{x}/{y}.mvt'}};
 
 test('published concept uses vector tiles with the correct MVT source layer', async () => {
   const calls = [];
@@ -45,6 +45,64 @@ test('missing precomputed concept retains the existing GeoJSON map contract', as
   assert.equal(calls.length, 2);
   assert.equal(env.sources.get('concept-hexes').type, 'geojson');
   assert.equal(env.sources.get('concept-hexes').data, geojson);
+});
+
+test('outdated concept tiles fall back to the current GeoJSON surface', async () => {
+  const calls = [];
+  const geojson = {type: 'FeatureCollection', features: []};
+  const env = environment(async url => {
+    calls.push(url);
+    return {ok: true, json: async () => url.includes('/api/hex-demand?') ? geojson : {...manifest, data_release: 'old_release'}};
+  });
+  await vm.runInContext('showHexLayer()', env.context);
+  assert.equal(calls.length, 2);
+  assert.equal(env.sources.get('concept-hexes').type, 'geojson');
+});
+
+test('provenance rejection falls back to current GeoJSON', async () => {
+  const calls = [];
+  const env = environment(async url => {
+    calls.push(url);
+    return {ok: url.includes('/api/hex-demand?'), status: url.includes('/api/hex-demand?') ? 200 : 409,
+      json: async () => ({type: 'FeatureCollection', features: []})};
+  });
+  await vm.runInContext('showHexLayer()', env.context);
+  assert.equal(calls.length, 2);
+  assert.equal(env.sources.get('concept-hexes').type, 'geojson');
+});
+
+test('a feature with no coverage reports absence rather than a colored zero', async () => {
+  const env = environment(async url => ({ok: url.includes('/api/hex-demand?'), json: async () => ({type:'FeatureCollection',features:[],meta:{status:'no_feature_coverage'}})}));
+  await vm.runInContext('showHexLayer()', env.context);
+  assert.equal(env.status.hidden, false);
+  assert.match(env.status.textContent, /No Recorded Coverage/);
+  assert.equal(env.sources.get('concept-hexes').data.features.length, 0);
+});
+
+test('assessment basis distinguishes limited evidence without inventing cuisine fit', () => {
+  const basis = dashboard.slice(dashboard.indexOf('function assessmentBasis('), dashboard.indexOf('function renderIntel('));
+  const context = vm.createContext({});
+  vm.runInContext(basis, context);
+  for (const [mode, expected] of [
+    ['cuisine_supply_supported', 'Cuisine-Supported Fit'],
+    ['pooled_cuisine_supply', 'Limited Cuisine Evidence'],
+    ['related_supply_context_only', 'General Location Fit'],
+    ['general_concept_suitability', 'General Location Fit'],
+  ]) {
+    assert.equal(vm.runInContext(`assessmentBasis({assessment_policy:{cuisine_mode:${JSON.stringify(mode)}}})`, context), expected);
+  }
+  assert.equal(vm.runInContext('assessmentBasis({assessment_policy:{recommendation_eligible:false}})', context), 'Insufficient Evidence');
+});
+
+test('cost-based menu pricing validates targets and rounds up without inventing costs', () => {
+  const source = dashboard.slice(dashboard.indexOf('function targetMenuPrice('), dashboard.indexOf('document.querySelector("#menuApplyPricing").addEventListener'));
+  const context = vm.createContext({});
+  vm.runInContext(source, context);
+  assert.equal(vm.runInContext('targetMenuPrice(4,30)', context), 13.5);
+  assert.equal(vm.runInContext('targetMenuPrice(12,30)', context), 40);
+  for (const expression of ['targetMenuPrice("",30)', 'targetMenuPrice(-1,30)', 'targetMenuPrice(10,0)', 'targetMenuPrice(10,NaN)', 'targetMenuPrice(1000,10)']) {
+    assert.equal(vm.runInContext(expression, context), null);
+  }
 });
 
 test('unavailable Huff scenario reports absence without showing screening results as Huff', async () => {

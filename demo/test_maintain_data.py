@@ -10,6 +10,12 @@ import maintain_data as maintenance
 
 
 class DataMaintenanceTests(unittest.TestCase):
+    def test_default_schedule_uses_keyless_bulk_acs_provider(self):
+        sources = maintenance.due_sources(date(2026, 10, 20), {})
+        self.assertIn("acs_context", sources)
+        self.assertNotIn("acs_demographics", sources)
+        self.assertNotIn("acs_income", sources)
+
     def test_source_checks_follow_daily_weekly_and_monthly_periods(self):
         today = date(2026, 10, 6)
         state = {"sources": {
@@ -54,8 +60,8 @@ class DataMaintenanceTests(unittest.TestCase):
                 patch.object(maintenance, "pending_integrations", return_value=[]), \
                 patch.object(maintenance, "training_inventory", return_value={"structural_issues": []}), \
                 patch.object(maintenance, "run") as rebuild:
-            report = maintenance.check_and_refresh(date(2026, 10, 6), selected=["lodes"])
-            self.assertEqual(report["raw_only_changes"], ["lodes"])
+            report = maintenance.check_and_refresh(date(2026, 10, 6), selected=["mobile_food_vending"])
+            self.assertEqual(report["raw_only_changes"], ["mobile_food_vending"])
             self.assertIsNone(report["published_release"])
             rebuild.assert_not_called()
 
@@ -77,6 +83,40 @@ class DataMaintenanceTests(unittest.TestCase):
             self.assertIn("score_audit", report["blocked"])
             rebuild.assert_called_once()
             self.assertFalse(rebuild.call_args.kwargs["publish"])
+
+    def test_restaurant_download_refreshes_private_permit_tracking(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(maintenance, "DATA", Path(folder)), \
+                patch.object(maintenance, "STATE", Path(folder) / "state.json"), \
+                patch.object(maintenance, "INVENTORY", Path(folder) / "inventory.json"), \
+                patch.object(maintenance, "RUNS", Path(folder) / "runs"), \
+                patch.object(maintenance, "resolve", return_value={"version": "2026-10-17"}), \
+                patch.object(maintenance, "download_source", return_value="downloaded"), \
+                patch.object(maintenance, "refresh_permit_presence", return_value={
+                    "status": "collecting_history", "latest_record_date": "2026-10-16",
+                    "review_leads": 55, "one_year_training_ready": False}) as track, \
+                patch.object(maintenance, "pending_integrations", return_value=[]), \
+                patch.object(maintenance, "training_inventory", return_value={"structural_issues": []}):
+            report = maintenance.check_and_refresh(date(2026, 10, 17), selected=["restaurants"])
+            track.assert_called_once_with()
+            self.assertEqual(report["permit_presence"]["review_leads"], 55)
+
+    def test_invalid_restaurant_snapshot_blocks_publication(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(maintenance, "DATA", Path(folder)), \
+                patch.object(maintenance, "STATE", Path(folder) / "state.json"), \
+                patch.object(maintenance, "INVENTORY", Path(folder) / "inventory.json"), \
+                patch.object(maintenance, "RUNS", Path(folder) / "runs"), \
+                patch.object(maintenance, "resolve", return_value={"version": "2026-10-17"}), \
+                patch.object(maintenance, "download_source", return_value="downloaded"), \
+                patch.object(maintenance, "refresh_permit_presence", side_effect=ValueError("Incomplete export")), \
+                patch.object(maintenance, "pending_integrations", return_value=["restaurants"]), \
+                patch.object(maintenance, "training_inventory", return_value={"structural_issues": []}), \
+                patch.object(maintenance, "run") as publish:
+            report = maintenance.check_and_refresh(date(2026, 10, 17), selected=["restaurants"])
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("Incomplete export", report["failed"]["permit_presence"])
+            publish.assert_not_called()
 
 
 if __name__ == "__main__":

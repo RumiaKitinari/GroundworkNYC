@@ -5,14 +5,18 @@ Input : restaurants_raw.parquet  (from github.com/CharlesFainLehman/nyc-cuisine-
 Output: restaurant_lifespans.csv  one row per restaurant (CAMIS)
 
 Columns
-  open_date     first pre-permit inspection (true opening), else first inspection seen
+  open_date     first pre-permit inspection proxy, else first inspection seen (not verified opening)
   open_known    True if open_date comes from a pre-permit inspection
   closed        True if the restaurant is missing from the latest snapshot
   close_date    midpoint between the last snapshot listing it and the next snapshot
   close_window_days  width of that gap (how uncertain close_date is)
   years         open_date -> close_date (or -> latest snapshot if still open)
   clean_cohort  True if opened after 2020-11-06, when snapshots became frequent.
-                Use only these rows for survival estimates (see notes).
+                Legacy research filter, NOT evidence of valid survival labels.
+
+This summary is retained for archive review. It cannot establish when all
+attributes were available, or whether disappearance means permanent closure.
+train_survival.py requires a separate dated baseline and outcome ledger.
 """
 import sys
 import numpy as np
@@ -42,7 +46,8 @@ def main(src, dst):
             "open_date", "open_known", "closed", "close_date", "close_window_days",
             "years", "clean_cohort", "first_snapshot", "last_snapshot"]
     r[cols].to_csv(dst, index=False)
-    print(f"{len(r):,} restaurants, {r.closed.sum():,} closed, "
+    print("Archive review only: inferred starts and disappearances are not verified survival outcomes.")
+    print(f"{len(r):,} restaurants, {r.closed.sum():,} absent from latest snapshot, "
           f"{r.clean_cohort.sum():,} in clean cohort (latest snapshot {latest.date()})")
 
 if __name__ == "__main__":

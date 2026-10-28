@@ -203,12 +203,8 @@ def access_features(origins, candidates, distances, concept, config):
     return result
 
 
-def score_cached_run(directory, concept, candidates, prediction_date):
-    """Score a concept against a pinned full inventory, then select eligible rows.
-
-    No recomputation of percentiles after filters and no current-to-historical
-    feature substitution. Cache hashes, inventory coordinates and dates must match.
-    """
+def load_access_bundle(directory, prediction_date):
+    """Load identified, checksummed routes for prospective feature experiments."""
     from datetime import date
     directory = Path(directory)
     manifest = json.loads((directory / "manifest.json").read_text())
@@ -228,7 +224,16 @@ def score_cached_run(directory, concept, candidates, prediction_date):
         if (saved["geoids"].tolist() != origins.geoid.tolist()
                 or saved["property_ids"].tolist() != inventory.property_id.tolist()):
             raise ValueError("Route matrix identifier order mismatch")
-        result = access_features(origins, inventory, saved["distances"], concept, manifest["config"])
+        distances = saved["distances"].copy()
+    if distances.shape != (len(inventory), len(origins)) or (distances < 0).any():
+        raise ValueError("Invalid cached route matrix")
+    return origins, inventory, distances, manifest
+
+
+def score_cached_run(directory, concept, candidates, prediction_date):
+    """Score the pinned full inventory before selecting rows; never backdate."""
+    origins, inventory, distances, manifest = load_access_bundle(directory, prediction_date)
+    result = access_features(origins, inventory, distances, concept, manifest["config"])
     requested = candidates.copy()
     requested["property_id"] = requested.property_id.astype(str)
     if requested.property_id.duplicated().any():

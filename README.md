@@ -1,30 +1,47 @@
 # GroundworkNYC
 
-The Flask dashboard remains in `demo/`. The optional [FastAPI spatial backend](backend/README.md)
-mounts that dashboard at `/` and adds PostGIS vector tiles with Redis caching.
-It does not replace the existing routes or publish an unvalidated survival model.
-Private integrated data, accounts, and model artifacts stay outside Git.
-Run the backend locally using the instructions in `backend/README.md`.
+## Week 10: Otis Branch
 
-## Jas — frontend and UI changes
+**Atharv: start with [Week 10 Changes and Briefing Notes](WEEK_10_README.md).**
+It explains the new model experiments, feature engineering, data checks,
+infrastructure and every dashboard section, with implementation links and
+explicit remaining limitations. This branch also includes earlier local-only
+work; the document distinguishes that work from the October 27-28 results.
 
-- Added Log in, Sign up, and Continue as guest.
-- Redesigned the restaurant brief while keeping the photo.
-- Made Restaurant Idea, Cuisine, and Price Range required.
-- Added restaurant idea suggestions and optional concept-description suggestions.
-- Removed the duplicate Format control and separate per-guest pricing control.
-- Improved brief layout, scrolling, validation, and saved values.
-- Polished the dashboard layout, navigation, search, and location selection.
-- Added System theme, NYC map bounds, Reset to NYC, and 3D.
-- Corrected Aerial/3D separation, Edit Brief theme/readability, and an optional walking-graph dependency issue.
-- Documented the frontend architecture, map modes, APIs, and dataset in `demo/FRONTEND_ARCHITECTURE.md`.
-- Added CSV-backed existing-restaurant dots with clustering and name, cuisine, and address popups.
-- Kept restaurant dots, their toggle, and their legend in 3D Buildings only; recommendation markers stay visible in every map mode, and the toggle choice is remembered.
+Branch: `otis-week-10`. This is a review/handoff branch; it does not replace
+`main`. Private datasets, native models, individual predictions, secrets and
+account databases are not included.
 
-## Changes to merge into main
+The Flask dashboard runs through Joseph's FastAPI/PostGIS backend using
+`.venv/bin/python run_local.py` at `http://127.0.0.1:5001`.
+It preserves the Flask routes, uses PostGIS for published spatial layers and Redis
+for tile caching, and retains the existing SQLite account/workspace store.
+Private datasets and synthetic property scenarios remain outside Git.
 
-- Port the `ui-concept-polish` 3D-only restaurant overlay into main's newer dashboard: the map API, clustered blue dots, detail popups, and 3D-only toggle and legend. Keep recommendation selection in every mode.
-- Selectively review remaining UI-branch differences against main: duplicate Format removal, conditional local Streets availability, tighter NYC bounds and position-preserving map switches, Edit Brief presentation, and the optional walking-graph fallback. Main already has a dashboard, System theme, Aerial, and 3D.
+Install the combined local runtime with
+`.venv/bin/python -m pip install -r backend/requirements-dashboard.txt` and keep
+the private `.env` configuration. Run `.venv/bin/python run_local.py --check`
+to verify services before startup. See [`backend/`](backend/README.md) for
+infrastructure setup. Survival predictions still require a validated artifact.
+
+## Frontend Lineage And Current Status
+
+This branch preserves Jas's dashboard design, login/guest entry, restaurant
+brief, top navigation, themes and separate 3D map concept. It integrates the
+newer local property, menu, economics, account persistence and backend work
+into that design instead of maintaining two competing frontends.
+
+The UI currently uses Flask templates, vanilla JavaScript, MapLibre GL and
+locally bundled Chart.js. It is not a React migration. Streets uses local OSM
+vector tiles, Aerial uses online imagery, and 3D uses a separate OpenFreeMap
+style with interactive buildings/POIs. Recommendation markers remain visible
+in every mode; existing-restaurant overlays remain optional and 3D-only.
+Map interactions are local-app features, not a claim that imagery and 3D tiles
+are fully offline.
+
+See [Frontend Architecture](demo/FRONTEND_ARCHITECTURE.md),
+[Dashboard Integration](demo/DASHBOARD_INTEGRATION_20261028.md), and
+[Connected Account Workspace](demo/CONNECTED_WORKSPACE.md).
 
 ## Data Folder
 

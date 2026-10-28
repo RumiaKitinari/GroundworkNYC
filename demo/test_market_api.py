@@ -29,6 +29,38 @@ class MarketApiTests(unittest.TestCase):
         self.assertEqual(response.json["neighborhood_same_cuisine_count"], 2)
         self.assertEqual(response.json["restaurants"][0]["name"], "Korean Kitchen")
 
+    def test_evaluation_api_passes_historical_feature_set(self):
+        with patch.object(app, "integrated_package", return_value={}), \
+                patch.object(app, "run_evaluation", return_value={"status": "needs_verified_outcomes"}) as run, \
+                app.app.test_client() as client:
+            response = client.post("/api/evaluation/run", json={"target": "continued_operation",
+                "feature_set": "historical_core", "cutoff": "2025-06-01"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(run.call_args.kwargs["feature_set"], "historical_core")
+        self.assertEqual(run.call_args.kwargs["validation_mode"], "temporal_spatial")
+
+    def test_restaurant_map_deduplicates_and_bounds_points(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            entities = directory / "entities"
+            entities.mkdir()
+            with (entities / "current_restaurants.csv").open("w", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=["camis", "active_establishment", "latitude", "longitude",
+                                                           "dba", "building", "street", "boro", "zipcode", "cuisine_description"])
+                writer.writeheader()
+                writer.writerow({"camis": "1", "active_establishment": "True", "latitude": "40.7", "longitude": "-73.9",
+                                 "dba": "Korean Kitchen", "building": "12", "street": "Main St", "boro": "Queens",
+                                 "zipcode": "11101", "cuisine_description": "Korean"})
+                writer.writerow({"camis": "1", "active_establishment": "True", "latitude": "40.7", "longitude": "-73.9"})
+                writer.writerow({"camis": "2", "active_establishment": "False", "latitude": "40.7", "longitude": "-73.9"})
+                writer.writerow({"camis": "3", "active_establishment": "True", "latitude": "0", "longitude": "0"})
+            with patch.object(app, "CURRENT_DATA_LINK", directory), app.app.test_client() as client:
+                response = client.get("/api/map/restaurants")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json["meta"]["mapped"], 1)
+            self.assertEqual(response.json["meta"]["excluded"]["duplicate_identifier"], 1)
+            self.assertEqual(response.json["features"][0]["properties"]["address"], "12 Main St, Queens, 11101")
+
     def test_invalid_location_and_cuisine_are_rejected(self):
         with patch.object(app, "integrated_package", return_value=self.package), app.app.test_client() as client:
             self.assertEqual(client.get("/api/locations/not-a-geoid/competition").status_code, 400)

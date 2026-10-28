@@ -1,0 +1,12 @@
+{
+  "concept_name": "Modern Bistro",
+  "profile": "restaurant",
+  "borough": "",
+  "cuisine": "any",
+  "price_mode": "tier",
+  "price_tier": "$$",
+  "dietary": "none",
+  "service_style": "casual",
+  "audience": "residents",
+  "daypart": "all_day"
+}

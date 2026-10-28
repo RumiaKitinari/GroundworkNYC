@@ -1,0 +1,18 @@
+{
+  "schema": "archive-aft-research-plan-v1",
+  "target": "Archive-disappearance interval proxy, not independently verified permanent closure",
+  "validation": "Five GroupKFold NTA holdouts; retrospective current-context analysis, not point-in-time deployment validation",
+  "folds": 5,
+  "rounds": 200,
+  "seed": 440,
+  "horizon_years": 3.0,
+  "feature_sets": ["legacy_50", "corrected_context_plus_restaurant"],
+  "ablations": ["residents", "employment", "built_environment", "mobility"],
+  "reference_revision": "40e0c0dfab1aedeff631fe38d244eaeb9283e20f",
+  "reference_run": "Original trainer with its original fold-based early stopping; report separately from fixed-round comparisons",
+  "ranking_weights": {"baseline_survival_proxy": 0.6, "baseline_cuisine_gap": 0.4, "experimental_component_weights": [0.1, 0.2]},
+  "synthetic_properties_used_for_training": false,
+  "current_network_access_used_as_historical_training_predictor": false,
+  "production_deployment_allowed": false,
+  "test_reuse_policy": "These results consume the declared holdouts. Do not optimize against them and describe a later rerun as an untouched final test."
+}

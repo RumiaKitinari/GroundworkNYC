@@ -1,8 +1,9 @@
 r"""
-Shared feature preparation for the restaurant survival model.
+Feature preparation for the restaurant research workflows.
 
-Used by both train_survival.py and recommend.py so training and scoring
-always see exactly the same columns.
+Historical AFT training and scoring use build_historical_features ONLY.
+The older current-context helpers below are retained for legacy analysis,
+not for training or scoring the temporal model.
 
 Design decisions
   - Cuisine is NOT a feature. The survival model scores how well a location
@@ -12,6 +13,9 @@ Design decisions
     excluded: they only describe survivors and would leak the answer.
 """
 import warnings
+import sys
+from datetime import date
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -20,6 +24,69 @@ warnings.filterwarnings("ignore", message="Mean of empty slice")
 
 EARTH_R_M = 6_371_000
 COMPETITION_RADIUS_M = 400
+
+# Reuse the independently maintained provenance checks instead of accepting
+# a current master CSV relabeled with an earlier observation year.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "demo"))
+from prepare_historical_cohort import read_snapshots, select_snapshot
+from evaluation import HISTORICAL_CORE_FEATURES
+
+TEMPORAL_SCHEMA = "historical-aft-v1"
+HISTORICAL_FEATURES = tuple(HISTORICAL_CORE_FEATURES)
+
+
+def load_historical_snapshots(manifests, data_dir, as_of):
+    """Combine explicitly pinned manifests; reject ambiguous same-date vintages."""
+    snapshots = {feature: [] for feature in HISTORICAL_FEATURES}
+    analysis_date = date.fromisoformat(str(as_of))
+    for manifest in manifests:
+        loaded = read_snapshots(manifest, data_dir, HISTORICAL_FEATURES)
+        for feature, entries in loaded.items():
+            snapshots[feature].extend(item for item in entries if item["available"] <= analysis_date)
+    for feature, entries in snapshots.items():
+        seen, unique = {}, []
+        for item in entries:
+            key = item["available"], item["observed"]
+            if key in seen:
+                if seen[key]["values"] != item["values"]:
+                    raise ValueError(f"Conflicting same-date snapshots for {feature}")
+                continue
+            seen[key] = item
+            unique.append(item)
+        snapshots[feature] = sorted(unique, key=lambda x: (x["available"], x["observed"]),
+                                    reverse=True)
+    return snapshots
+
+
+def build_historical_features(baselines, snapshots):
+    """Point-in-time core features and per-value provenance, without imputation.
+
+    Input has string GEOID and open_date (prediction date). No name, chain,
+    current tract attributes, future events, labels, or cohort-wide statistics
+    are consulted. Missing historical values stay NaN, never recorded zero.
+    A fixed log1p transformation is shared with prospective scoring.
+    """
+    vectors, audit = [], []
+    for row in baselines.to_dict("records"):
+        day = date.fromisoformat(str(row["open_date"])[:10])
+        geoid = str(row["geoid"])
+        if len(geoid) != 11 or not geoid.isdigit():
+            raise ValueError("Historical features require an explicit 11-digit GEOID")
+        values = {}
+        for feature in HISTORICAL_FEATURES:
+            item = select_snapshot(snapshots[feature], geoid, day)
+            values[feature] = np.log1p(float(item["values"][geoid])) if item else np.nan
+            audit.append({"camis": str(row.get("camis", row.get("property_id", ""))),
+                          "geoid": geoid, "prediction_date": day.isoformat(), "feature": feature,
+                          "observed_through": item["observed"].isoformat() if item else "",
+                          "available_on": item["available"].isoformat() if item else "",
+                          "path": item["path"] if item else "",
+                          "sha256": item["sha256"] if item else "",
+                          "source_url": item["source_url"] if item else "",
+                          "raw_value": item["values"][geoid] if item else "",
+                          "status": "historical_observation" if item else "unavailable"})
+        vectors.append(values)
+    return pd.DataFrame(vectors, index=baselines.index, columns=HISTORICAL_FEATURES), audit
 
 # --------------------------------------------------------------------------
 # Tract features

@@ -1,5 +1,35 @@
 # Groundwork NYC Flask Frontend Prototype
 
+See [Connected Account Workspace](CONNECTED_WORKSPACE.md) for property shortlists,
+saved economic scenarios, menu baskets and private database persistence.
+
+The October 20 completion release contains 2,327 tracts and 249 documented master
+columns. `acs_context` downloads thirteen full national ACS 2024 detailed tables
+and extracts every NYC tract, retaining estimates and margins. This bulk route
+does not require a Census API key. Normal maintenance uses it for population,
+age, income, commuting, education, nativity, poverty, households, tenure, and
+residential rent, unemployment, and average household size. Direct Census API download options still require a key.
+
+Additional repeatable sources are `lodes_rac`, `subway_entrances`, and
+`taxi_zone_geometry`. Weekly MTA rebuilds also produce nearest-station time
+shares. ZIP Business Patterns food-service rows remain at ZIP/NAICS grain;
+TLC intersections retain both area fractions; separate `rideshare_*` fields
+provide explicitly estimated uniform-area allocations, not observed tract trips.
+The completion transform adds 400-meter subway time shares, EPA intersection
+and transit measures, labeled rent/income context estimates, property-ZIP and
+partial exact-address SLA context, and twelve neighboring-tract measures.
+`events_historical`, `business_patterns_2015`, and `sla_active_context` are
+repeatable publisher-checked sources. See `CURRENT_MASTER_COMPLETION.md` for
+the precise remaining limits and how to export the team handoff.
+All new sources participate in the existing monthly publisher checks, except
+weekly MTA activity. A future ACS year requires a versioned field-schema update.
+
+```bash
+.venv/bin/python demo/download_sources.py --source acs_context --source lodes_rac --source subway_entrances --source taxi_zone_geometry
+.venv/bin/python demo/refresh_integrated.py --source acs_context --source lodes_rac --source subway_entrances --source taxi_zone_geometry --source business_patterns --source mta_subway --publish
+.venv/bin/python demo/maintain_data.py --audit
+```
+
 This is the Flask dashboard demo for the DS 440 capstone. The backend reads the active integrated Groundwork release at `../data/integrated/current/` when present, or the baseline at `../data/integrated/restaurant_bar_location_data_ready/`. It uses `master_tract_features.csv` as the primary source for NYC restaurant and bar location scoring.
 
 ## Data Setup
@@ -54,11 +84,19 @@ This does not provide general listing coverage or confirm that the space remains
 available. Broker/owner snapshots can be added with `demo/import_partner_listings.py`
 once display rights are documented. No third-party listing scraper is configured.
 
+For a broader dashboard demonstration, run
+`.venv/bin/python demo/generate_synthetic_properties.py` after placing the
+integrated data. This generates 1,000 [explicitly synthetic lease and purchase
+scenarios](SYNTHETIC_PROPERTIES.md) in `data/listings/`, separate from real
+source-linked leads. These scenarios are not verified available properties or
+survival-model training data.
+
 ## Repeatable Source Downloads
 
-`download_sources.py` covers all 15 source families in the integrated package's
-`source_catalog.csv`, plus the 2020 tract boundary file, the optional mobile
-food vending violations source, and NYC storefront rent statistics. It checks the publisher for a current vintage, downloads
+`download_sources.py` covers the registered source families, including ACS bulk
+tables, LODES residence-area jobs, subway entrances, TLC zone geometry, the
+2020 tract boundary file, optional mobile food vending violations, and
+storefront rent statistics. It checks the publisher for a current vintage, downloads
 into a new revision under `data/raw_sources/<source>/`, records URLs, timestamps,
 file sizes and SHA-256 hashes, and skips unchanged versions. Incomplete or
 invalid downloads are not published. It never overwrites cleaned or integrated
@@ -84,11 +122,12 @@ row counts, and publisher update timestamps. MTA downloads the latest complete
 published week at station-hour grain. Large public files may be subject to
 publisher throttling; failed sources are reported individually for retry.
 
-The Census now requires an API key for ACS data queries. Obtain one from the
+Direct Census API queries require a key. Obtain one from the
 [Census Data API](https://api.census.gov/data/key_signup.html), set
-`CENSUS_API_KEY` in your local environment, and rerun the ACS sources. The key
+`CENSUS_API_KEY` in your local environment to use the optional API sources. The key
 is used in requests but never written to the download manifest. `--check`
-still discovers the latest published ACS vintage without a key.
+still discovers the latest published ACS vintage without a key. The default
+`acs_context` bulk source downloads and integrates ACS without API credentials.
 
 Keep `data/raw_sources/` outside GitHub along with the other private data.
 
@@ -147,9 +186,10 @@ name-and-distance match against active inspection records. That match is QA
 only; OSM competition and inspection cuisine inventory remain separate.
 Install `pip install -r demo/requirements-data.txt` for the OSM and TLC
 transforms; the EPA spatial crosswalk also requires GDAL's `ogr2ogr`. The
-downloader covers more sources than this rebuild does. ACS, LODES, and
-pedestrian counts retain their baseline tract features until dedicated
-automatic transforms are added. ZIP business-pattern counts are not tract
+downloader covers more sources than this rebuild does. Full LODES workplace
+blocks and DOT pedestrian monitors now have automatic tract transforms. ACS
+estimates retain baseline values until a keyed full-source download and tract
+transform are available. ZIP business-pattern counts are not tract
 measurements and remain separate. Citi Bike latest-month columns
 are separate from the retained August 2026 columns. PLUTO code 11 counts
 vacant land; code 10 is parking and is excluded. Storefront filings are
@@ -180,9 +220,9 @@ passes. `data/update_state.json` records check periods, `data/update_runs/`
 records each run, and `data/training_inventory.json` lists the full raw files,
 integrated revisions, reference-only samples, and remaining training gaps.
 `--audit` never contacts publishers; `--check-only` downloads but does not
-publish. `--source NAME` and `--force` support targeted retries. The Census
-ACS downloader needs `CENSUS_API_KEY`; without it, the run reports that source
-as blocked and retains the existing ACS tract estimates.
+publish. `--source NAME` and `--force` support targeted retries. Normal maintenance
+uses `acs_context` for both core ACS and additional context; optional direct
+API sources can still be selected explicitly with a Census key.
 
 Only the 2020-tract feature matrix belongs in `master_tract_features.csv`.
 Full trip, parcel, POI, ZIP, and citywide-day files remain in clearly named
@@ -284,7 +324,22 @@ scores. After an integrated refresh is published, the station-week totals in
 that release become the primary transit input for dashboard scoring. The four
 2025 weeks remain a separate daypart research view.
 
-Run it from this folder:
+For the combined local dashboard, run from the repository root:
+
+```bash
+.venv/bin/python -m pip install -r backend/requirements-dashboard.txt
+.venv/bin/python run_local.py --check
+.venv/bin/python run_local.py
+```
+
+This uses the private `.env`, existing PostGIS and Redis services, and the same
+account/workspace files. It does not migrate or delete saved user work. See
+`backend/README.md` to start the infrastructure. The combined service uses port
+5001 by default and exposes `/docs`, `/health/ready` and spatial tile APIs on
+the same origin as the dashboard. Keep the current model environment and install
+`codes/requirements-temporal.txt` when using the optional survival tools.
+
+For standalone Flask-only development without spatial storage, run from this folder:
 
 ```bash
 python3 -m venv .venv
@@ -311,8 +366,9 @@ for the provenance and missing-data audit.
 ## Concept Scoring
 
 The brief supports cuisine, average spend per guest, service style, customer
-focus and trading period. Walkability describes the area; Business Draw is a
-concept-specific screening index. Neither is a visit or revenue forecast.
+focus and trading period. Walkability describes the area; Business Fit is a
+concept-specific screening index. Customer Access (inverse walkability) is a
+separate network-derived walking-access assessment. None is a visit or revenue forecast.
 The Budget tab calculates required sales and covers only after the user enters
 other fixed costs, variable costs, and operating days. It excludes unentered
 costs, taxes, and debt service; no default profit or survival forecast is shown.
@@ -326,3 +382,30 @@ See [EVALUATION.md](EVALUATION.md) for the runnable cuisine-presence benchmark,
 historical continued-operation model, and non-lease validation methods. Install
 `requirements-evaluation.txt` to use the optional ML tooling. Generated reports
 stay under `data/evaluation/` and must not be uploaded with demo source.
+
+## Customer Access Dashboard
+
+The Customer Access tab and map layer use the prepared local OSM walking matrix,
+ACS residents and resident income, and LODES workplace jobs. Changing dining style,
+spend, audience or service hours recomputes the assessment from cached routes;
+HTTP requests do not rebuild the walking graph. Access ranking is opt-in and
+does not change the underlying location scores. Origin areas and coverage are
+available through `/api/customer-access?geoid=<11-digit-tract-id>`.
+
+After preparing a property feature bundle with `codes/engineer_customer_access.py`,
+prepare the dashboard's separate tract-centroid bundle:
+
+```bash
+.venv/bin/python demo/prepare_dashboard_access.py \
+  --property-run data/output/feature_engineering/20261027_v3 \
+  --output data/output/customer_access_dashboard/20261027_v1
+```
+
+Use a new output directory for each run. This publishes the local pointer at
+`data/output/customer_access_dashboard/dashboard_access.json`. Keep the pinned
+source files, manifests and routing matrices in place; missing or altered inputs
+disable the assessment instead of substituting estimated distances. Scores for
+synthetic properties use their own coordinates, not their containing tract's score.
+Unprepared real property listings show access as unavailable. These are
+uncalibrated present-day opportunity indices, not observed visits, survival
+probabilities, transit catchments or historical training features.

@@ -2,3 +2,5 @@ Flask==3.0.3
 networkx==3.7
 h3==4.5.0
 shapely==2.1.2
+pyproj>=3.7,<4
+pyshp>=2.3,<4

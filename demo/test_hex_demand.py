@@ -48,6 +48,7 @@ class HexDemandTests(unittest.TestCase):
                      "centroid_longitude": str(part.representative_point().x),
                      "nearest_subway_distance_miles": "0.1", "signal": value}
                     for geoid, part, value in zip(geoids, (left, right), (20, 80))]
+            rows[0]["borough"] = "Staten Island"
             with (root / "master_tract_features.csv").open("w", newline="") as stream:
                 writer = csv.DictWriter(stream, fieldnames=[key for key in rows[0] if key != "signal"])
                 writer.writeheader()
@@ -67,7 +68,15 @@ class HexDemandTests(unittest.TestCase):
             values = {feature["properties"]["id"]: feature["properties"]["score"] for feature in ordinary["cell"]}
             changed = {feature["properties"]["id"]: feature["properties"]["score"] for feature in korean["cell"]}
             self.assertEqual(values[cell], 50)
+            island = concept_surface(package, root, Concept(cuisine="italian"), "restaurant", RESTAURANT_WEIGHTS, "Staten Island")
+            self.assertTrue(island["cell"])
+            self.assertTrue(all(item["properties"]["borough"] == "Staten Island" for item in island["cell"]))
             self.assertEqual(changed[cell], 60)
+            demand_only = concept_surface(package, root, Concept(cuisine="italian"), "restaurant", RESTAURANT_WEIGHTS, "", metric="demand")
+            self.assertEqual(next(item["properties"]["score"] for item in demand_only["cell"] if item["properties"]["id"] == cell), 50)
+            self.assertEqual(demand_only["cell"][0]["properties"]["metric"], "demand")
+            with self.assertRaises(ValueError):
+                concept_surface(package, root, Concept(), "restaurant", RESTAURANT_WEIGHTS, metric="not_a_signal")
             self.assertTrue(all(feature["properties"]["coverage"] == 80 for feature in ordinary["cell"]))
             parent = h3.cell_to_parent(cell, SECTOR_RESOLUTION)
             sector = next(feature for feature in ordinary["sector"] if feature["properties"]["id"] == parent)
