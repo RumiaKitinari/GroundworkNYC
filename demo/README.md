@@ -339,3 +339,24 @@ See [EVALUATION.md](EVALUATION.md) for the runnable cuisine-presence benchmark,
 historical continued-operation model, and non-lease validation methods. Install
 `requirements-evaluation.txt` to use the optional ML tooling. Generated reports
 stay under `data/evaluation/` and must not be uploaded with demo source.
+
+## Baseline reliability and optional survival inference
+
+Python 3.11 is verified locally; Python 3.12 uses the conditional NetworkX
+version in requirements.txt. Standalone Flask needs no PostGIS, Redis, pandas
+or XGBoost. Keep using the root quickstart above.
+
+The map boundary uses `geography/nyc_2020_census_tracts.geojson` from
+`integrated_directory()`, including a `GROUNDWORK_DATA_DIR` override. City-mask
+simplification is display-only. All five boroughs are supported. The optional
+spatial backend rejects screening tiles whose release or scoring-code hash is
+stale; the dashboard falls back to current GeoJSON. Re-export screening layers
+after changing their data or scoring code.
+
+Workspace revision checks and writes use one SQLite write transaction to
+prevent concurrent tabs from silently overwriting a saved revision. Existing
+account/workspace files remain private under instance/.
+
+[Optional survival inference](SURVIVAL_DASHBOARD.md) is connected separately
+from screening rankings. No compatible trained bundle is installed, and no
+survival probability is invented from an existing location score.

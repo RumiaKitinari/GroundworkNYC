@@ -226,3 +226,23 @@ def test_huff_manifest_returns_pinned_vector_urls(client):
     assert data["snapshot"] == "release_1"
     assert data["source_layer"] == "demand"
     assert data["tiles"]["8"] == "/api/v1/tiles/release_1/huff/8/{z}/{x}/{y}.mvt"
+
+
+def test_screening_provenance_rejects_stale_tiles_with_shared_data_override(monkeypatch, tmp_path):
+    from groundwork_backend.provenance import screening_provenance
+    monkeypatch.setenv('GROUNDWORK_DATA_DIR', str(tmp_path))
+
+    class ScreeningStore(FakeStore):
+        provenance = {'data_release': tmp_path.name, **screening_provenance()}
+
+        def metadata(self, snapshot=None, layer=None):
+            return {'snapshot': 'checked', 'metadata': self.provenance,
+                    'layers': [{'layer': layer, 'resolution': 8}]}
+
+    store = ScreeningStore()
+    with TestClient(create_app(Settings(), store, include_legacy=True)) as client:
+        response = client.get('/api/v1/spatial/resolve?cuisine=korean')
+        assert response.status_code == 200
+        assert response.json()['data_release'] == tmp_path.name
+        store.provenance = {**store.provenance, 'screening_code_sha256': 'stale'}
+        assert client.get('/api/v1/spatial/resolve?cuisine=korean').status_code == 409

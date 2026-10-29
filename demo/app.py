@@ -24,7 +24,10 @@ from menu_catalog import suggestions as menu_suggestions
 from rent_benchmarks import load_rent_benchmarks
 
 
+from survival_inference import DEFAULT_CONFIG, attach_predictions, model_state
+
 app = Flask(__name__)
+app.config["SURVIVAL_CONFIG"] = os.environ.get("GROUNDWORK_SURVIVAL_CONFIG", str(DEFAULT_CONFIG))
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INSTANCE_DIR = PROJECT_ROOT / "instance"
@@ -415,7 +418,6 @@ def _load_integrated_package(directory: Path) -> dict:
         if as_bool(row.get("eligible_for_location_screening"))
         and row.get("centroid_latitude")
         and row.get("centroid_longitude")
-        and row.get("borough") != "Staten Island"
     ]
     numeric_columns = [
         "population_density_per_sq_mile",
@@ -1236,6 +1238,8 @@ def account_workspace():
         if not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 0:
             return jsonify({"error": "Invalid workspace revision."}), 400
         with closing(account_db()) as connection, connection:
+            # Serialize the revision check and write across tabs and processes.
+            connection.execute("BEGIN IMMEDIATE")
             current = connection.execute("SELECT revision FROM account_workspaces WHERE account_id=?", (account_id,)).fetchone()
             revision = current[0] if current else 0
             if revision != expected_revision:
@@ -1578,7 +1582,7 @@ def dashboard():
     concept_name = (request.args.get("concept_name", "Restaurant Concept") or "Restaurant Concept").strip()[:80]
     profile = resolution["profile"]
     borough = request.args.get("borough", "")
-    if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx"}:
+    if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx", "Staten Island"}:
         borough = ""
     ranked_locations = tuned_locations(profile, rent_cap, borough, concept, limit=None)
     if not ranked_locations:
@@ -1597,6 +1601,7 @@ def dashboard():
             if row["geoid"] in missing_ids:
                 ranked_lookup[row["geoid"]] = real_location_from_tract(row, profile, rent_cap, package, concept)
     saved_locations = [ranked_lookup[value] for value in requested_ids if value in ranked_lookup]
+    survival_status = attach_predictions(locations + saved_locations, app.config["SURVIVAL_CONFIG"])
     avg_confidence = round(sum(row["confidence_score"] for row in locations) / len(locations))
     finance["purchase_budget"] = purchase_budget
     finance["average_check"] = concept.average_check
@@ -1605,6 +1610,7 @@ def dashboard():
     rent_by_geoid = rent_data.get("by_geoid", {})
     return jsonify(
         {
+            "survival_model": survival_status,
             "locations": locations,
             "saved_locations": saved_locations,
             "selected": best["id"],
@@ -1664,7 +1670,7 @@ def hex_demand():
         if level not in {"sector", "cell", "fine"}:
             raise ValueError("Choose sector, cell or fine detail.")
         borough = request.args.get("borough", "")
-        if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx"}:
+        if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx", "Staten Island"}:
             raise ValueError("Choose a supported borough.")
         resolution = resolve_concept(request.args)
         concept = Concept(**resolution["concept"])
@@ -1707,6 +1713,24 @@ def evaluate_model():
     except ImportError:
         return jsonify({"error": "Install demo/requirements-evaluation.txt to run evaluation."}), 503
     return jsonify(result)
+
+
+@app.get("/api/models/survival")
+def survival_model_status():
+    _, status = model_state(app.config["SURVIVAL_CONFIG"])
+    return jsonify(status)
+
+
+@app.get("/api/geography/nyc-boundary")
+def nyc_map_boundary():
+    from map_geography import city_partition
+    try:
+        directory = integrated_directory()
+        path = directory / "geography/nyc_2020_census_tracts.geojson"
+        result = city_partition(str(path), (path.stat().st_mtime_ns, path.stat().st_size))
+        return jsonify({**result, "meta": {**result["meta"], "data_release": directory.name}})
+    except (OSError, ValueError):
+        return jsonify({"error": "NYC boundary is temporarily unavailable."}), 503
 
 
 if __name__ == "__main__":

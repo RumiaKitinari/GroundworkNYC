@@ -32,7 +32,9 @@ The private integrated package is required for dashboard results. Selection
 order is `GROUNDWORK_DATA_DIR`, `data/integrated/current/`, then
 `data/integrated/restaurant_bar_location_data_ready/`. All explorer readers
 follow that selection; keep the full `features/` and `entities/` directories.
-The concept-demand map also requires the tract GeoJSON under `geography/`.
+The concept-demand map and city boundary require the complete tract GeoJSON
+under `geography/`. All five boroughs are supported. Missing boundary data
+returns 503 without blocking the dashboard.
 
 Local MBTiles enable Streets. Aerial and 3D use online providers. The walking
 network and verified property sources are optional. This checkout has no
@@ -43,7 +45,11 @@ lease availability.
 
 Flask runs without PostGIS or Redis. The optional FastAPI wrapper serves the
 same dashboard on port 8000; follow [backend/README.md](backend/README.md).
-Published spatial snapshots and a trained survival model are not supplied.
+Published spatial snapshots and compatible trained survival artifacts are absent from this checkout.
+The optional survival connection reports its status at `/api/models/survival`;
+Market Profile shows an unavailable estimate until an audited bundle is supplied.
+See [the survival setup](demo/SURVIVAL_DASHBOARD.md). Shared Drive research
+artifacts have not been checked for compatibility.
 Keep private data, account databases, signing keys, virtual environments,
 checkpoints and generated caches outside commits.
 

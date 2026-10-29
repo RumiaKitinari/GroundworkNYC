@@ -1264,6 +1264,7 @@ function renderMap() {
       if (isHexLayer()) showHexLayer();
     });
     locationMap.on("idle", () => {
+      installNycBoundary();
       if (activeBasemap === "buildings3d" && !locationMap.getSource("existing-restaurants")) installRestaurantLayers(++restaurantStyleRevision);
       if (isHexLayer() && !locationMap.getLayer("concept-hex-fill")) showHexLayer();
       if (activeBasemap === "buildings3d" && locationMap.getLayer("nyc-buildings-3d") && locationMap.isSourceLoaded("openmaptiles")) setMapViewStatus("");
@@ -1278,6 +1279,7 @@ function renderMap() {
       }
     });
     locationMap.on("style.load", () => {
+      installNycBoundary();
       if (isHexLayer()) showHexLayer();
     });
     locationMap.on("error", event => {
@@ -1878,6 +1880,11 @@ function renderMarketProfile() {
   const measure = (label, value, basis) => `<div class="market-measure"><span>${label}</span><strong>${value}</strong><small>${basis}</small></div>`;
   const evidence = location.concept_evidence;
   const count = value => value === null ? "Unavailable" : Number(value).toLocaleString("en-US");
+  const survival = location.survival;
+  const survivalValue = survival?.status === "available" ? `${(100 * survival.probability).toFixed(1)}%` : "Unavailable";
+  const survivalBasis = survival?.status === "available"
+    ? `Experimental three-year estimate · ${Math.round(100 * survival.feature_coverage)}% feature coverage · ${escapeHtml(survival.model_version)}. Screening ranking is separate.`
+    : `${escapeHtml(dashboard.survival_model?.label || "Survival model unavailable")}. Screening scores are not survival predictions.`;
   const risks = location.risk_flags.map((risk) => `<li>${titleCase(risk)}</li>`).join("");
   const components = location.score_components.map((component) => {
     const noCuisineEvidence = component.key === "market_gap" && component.coverage === 0;
@@ -1929,6 +1936,7 @@ function renderMarketProfile() {
     <section class="transit-profile" id="transitActivityProfile" aria-label="Transit and activity profile"></section>
     <section class="competition-explorer" id="competitionExplorer" aria-label="Competition explorer"></section>
     <div class="market-group"><h3>Commercial Context</h3><div class="market-measures">
+      ${measure("Estimated Three-Year Survival", survivalValue, survivalBasis)}
       ${measure("Recorded Restaurants", displayNumber(profile.active_restaurants), "DOHMH tract records")}
       ${measure("Reported Vacant Storefronts", displayNumber(profile.reported_vacant_storefronts), "Registry filings; availability unverified")}
 
@@ -3106,3 +3114,41 @@ updateConceptImage(state.cuisine);
 loadConceptImages();
 initializeWorkspace();
 setActiveLayer(activeLayer);
+
+let nycBoundaryData = null;
+let nycBoundaryPending = false;
+let nycBoundaryRetryAfter = 0;
+
+function installNycBoundary() {
+  if (!locationMap?.getStyle()) return;
+  if (!nycBoundaryData) {
+    if (nycBoundaryPending || Date.now() < nycBoundaryRetryAfter) return;
+    nycBoundaryPending = true;
+    fetch("/api/geography/nyc-boundary").then(response => {
+      if (!response.ok) throw new Error("Boundary unavailable");
+      return response.json();
+    }).then(data => {
+      if (data.type !== "FeatureCollection" || data.features?.length !== 3) throw new Error("Invalid city boundary");
+      nycBoundaryData = data;
+      installNycBoundary();
+    }).catch(() => { nycBoundaryRetryAfter = Date.now() + 60000; })
+      .finally(() => { nycBoundaryPending = false; });
+    return;
+  }
+  if (!locationMap.isStyleLoaded()) return;
+  const ids = ["nyc-context-mask", "nyc-boundary-halo", "nyc-boundary-line"];
+  if (!locationMap.getSource("nyc-city-partition")) {
+    locationMap.addSource("nyc-city-partition", {type:"geojson",data:nycBoundaryData});
+    locationMap.addLayer({id:ids[0],type:"fill",source:"nyc-city-partition",filter:["==",["get","kind"],"outside"],paint:{"fill-color":"#102030","fill-opacity":.27}});
+    locationMap.addLayer({id:ids[1],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#ffffff","line-opacity":.92,"line-width":["interpolate",["linear"],["zoom"],9,5,14,7]}});
+    locationMap.addLayer({id:ids[2],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#2764d8","line-opacity":1,"line-width":["interpolate",["linear"],["zoom"],9,2.4,14,3.2]}});
+  }
+  const opacity = activeBasemap === "aerial" ? .38 : currentTheme === "dark" ? .4 : .23;
+  if (locationMap.getPaintProperty(ids[0],"fill-opacity") !== opacity) locationMap.setPaintProperty(ids[0],"fill-opacity",opacity);
+  // Keep the city partition above heatmaps, but below every interactive marker and label.
+  const foreground = ["restaurant-clusters", "restaurant-points",
+    "restaurant-cluster-count"].filter(id=>locationMap.getLayer(id));
+  const ordered = [...ids, ...foreground];
+  const last = locationMap.getStyle().layers.slice(-ordered.length).map(layer=>layer.id);
+  if (ordered.some((id,index)=>last[index] !== id)) ordered.forEach(id=>locationMap.moveLayer(id));
+}
