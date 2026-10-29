@@ -107,10 +107,9 @@ class WalkingNetwork:
 
     @lru_cache(maxsize=64)
     def catchment(self, latitude, longitude, minutes=10):
-        import networkx as nx
-
         if not self.path.is_file():
             return None
+        import networkx as nx
         latitude, longitude = float(latitude), float(longitude)
         radius = minutes * 80
         lat_range = (radius + 350) / METERS_PER_DEGREE_LAT

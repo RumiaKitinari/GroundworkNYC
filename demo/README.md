@@ -1,6 +1,6 @@
 # Groundwork NYC Flask Frontend Prototype
 
-This is the Flask dashboard demo for the DS 440 capstone. The backend reads the active integrated Groundwork release at `../data/integrated/current/` when present, or the baseline at `../data/integrated/restaurant_bar_location_data_ready/`. It uses `master_tract_features.csv` as the primary source for NYC restaurant and bar location scoring.
+This is the Flask dashboard demo for the DS 440 capstone. The backend reads the active integrated Groundwork release at `../data/integrated/current/` when present, or the baseline at `../data/integrated/restaurant_bar_location_data_ready/`. `GROUNDWORK_DATA_DIR` overrides both paths. The dashboard and explorer readers use the same active directory. It uses `master_tract_features.csv` as the primary source for NYC restaurant and bar location scoring.
 
 ## Data Setup
 
@@ -48,8 +48,11 @@ If the download arrives as a zip file, unzip it so the folder itself is named `r
 
 The current demo supports tract-level location recommendations, score explanations, source coverage, and Storefront Registry property leads. Exact asking rent, sale price, listing photos, confirmed lease or purchase availability, review sentiment, and mobile-phone foot traffic are not included in the uploaded data package.
 
-One manually checked [NYCHA public leasing opportunity](PROPERTY_DATA.md) now
-supplies a source-reported asking rent and size for a restaurant-equipped space.
+An optional [NYCHA public leasing opportunity](PROPERTY_DATA.md) CSV can
+supply source-reported asking rent and size for a restaurant-equipped space.
+That CSV and the optional rent benchmark snapshot are absent in this checkout;
+listing and rent context remain unavailable until installed. The two existing
+market API tests requiring these private files fail for that reason.
 This does not provide general listing coverage or confirm that the space remains
 available. Broker/owner snapshots can be added with `demo/import_partner_listings.py`
 once display rights are documented. No third-party listing scraper is configured.
@@ -194,8 +197,8 @@ snapshots are still missing.
 
 Restaurant briefs include 50 cuisine and specialty categories, plus fusion and
 custom concepts. Typing an idea such as "Korean Bistro" offers cuisine and
-format suggestions. Pricing can be entered as a $-$$$$ range or an exact
-average spend per guest. The brief also accepts dietary identity and a free-text
+format suggestions. The brief uses a $-$$$$ price range with a documented
+average-spend assumption; the API also accepts an exact spend. The brief also accepts dietary identity and a free-text
 description. Appearance can be switched between light and dark in Settings.
 Lease, purchase, and combined searches have separate budgets and listing filters. See
 [PROPERTY_DATA.md](PROPERTY_DATA.md) for the optional listing CSV contract.
@@ -213,10 +216,10 @@ dish ratings or orders; see [MENU_DATA.md](MENU_DATA.md) for the catalog and
 optional rights-cleared review-evidence schema.
 
 The Streets map is served locally from the New York OpenStreetMap MBTiles extract.
-Streets can be panned through the NYC metro area and zoomed out to a regional
-view; Aerial keeps a tighter NYC-area envelope. The 3D view combines online
-Esri imagery and OpenFreeMap height-bearing building geometry with local OSM
-street labels and named points of interest. Buildings, streets and named POIs
+Map modes retain NYC bounds and the camera position. The 3D view uses online
+OpenFreeMap vector streets and height-bearing building geometry. Aerial uses
+Esri imagery separately. Existing restaurant dots, their toggle and legend
+appear only in 3D Buildings. Buildings, streets and named POIs
 can be hovered or clicked for available details; location markers retain their
 score and property popups. The 3D mode requires an internet connection and
 returns to Aerial if its building tiles are unavailable. Its rendered building
@@ -284,16 +287,26 @@ scores. After an integrated refresh is published, the station-week totals in
 that release become the primary transit input for dashboard scoring. The four
 2025 weeks remain a separate daypart research view.
 
-Run it from this folder:
+Run from the repository root with Python 3.11 or 3.12:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python app.py
+.venv/bin/python -m pip install -r demo/requirements.txt
+.venv/bin/python -m flask --app demo/app.py run --host 127.0.0.1 --port 5001 --no-reload
 ```
 
-Then visit `http://localhost:5001`.
+Then visit `http://localhost:5001`. No frontend build step is required.
+Flask does not require PostGIS or Redis. For the optional combined FastAPI
+service on port 8000, see [backend/README.md](../backend/README.md).
+
+Keep the full integrated package: the resident/worker explorer reads
+`features/tract_demographics_income.csv` and `features/tract_workers.csv`;
+transit reads the subway, Citi Bike, pedestrian and taxi feature/entity tables.
+Refreshed monthly data takes precedence over baseline columns when present.
+The storefront and competition explorers read the active release's registry
+and restaurant entities. Missing required files return 503; the optional
+walking graph and listing sources remain explicitly unavailable.
+
 
 The entry screen supports guest access and local demo accounts. Guest work is
 saved on that device. Signed-in briefs, saved concepts, comparison lists and
@@ -326,3 +339,26 @@ See [EVALUATION.md](EVALUATION.md) for the runnable cuisine-presence benchmark,
 historical continued-operation model, and non-lease validation methods. Install
 `requirements-evaluation.txt` to use the optional ML tooling. Generated reports
 stay under `data/evaluation/` and must not be uploaded with demo source.
+
+## Baseline reliability and optional survival inference
+
+Python 3.11 is verified locally; Python 3.12 uses the conditional NetworkX
+version in requirements.txt. Standalone Flask needs no PostGIS, Redis, pandas
+or XGBoost. Keep using the root quickstart above.
+
+The map boundary uses `geography/nyc_2020_census_tracts.geojson` from
+`integrated_directory()`, including a `GROUNDWORK_DATA_DIR` override. City-mask
+simplification is display-only. All five boroughs are supported. The optional
+spatial backend rejects screening tiles whose release or scoring-code hash is
+stale; the dashboard falls back to current GeoJSON. Re-export screening layers
+after changing their data or scoring code.
+
+Workspace revision checks and writes use one SQLite write transaction to
+prevent concurrent tabs from silently overwriting a saved revision. Existing
+account/workspace files remain private under instance/.
+
+[Optional survival inference](SURVIVAL_DASHBOARD.md) is connected separately
+from screening rankings. A locally generated Atharv tract export now supplies real estimates; see
+[the demo/reproduction guide](ATHARV_DEMO.md). It uses the archive-based model
+contract from `ADM6112-complete-v1`, distinct from Otis's dated-model contract.
+Artifacts stay local, and screening scores remain separately labeled.

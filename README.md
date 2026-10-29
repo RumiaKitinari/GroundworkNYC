@@ -6,25 +6,53 @@ It does not replace the existing routes or publish an unvalidated survival model
 Private integrated data, accounts, and model artifacts stay outside Git.
 Run the backend locally using the instructions in `backend/README.md`.
 
-## Jas — frontend and UI changes
+## Run the dashboard
 
-- Added Log in, Sign up, and Continue as guest.
-- Redesigned the restaurant brief while keeping the photo.
-- Made Restaurant Idea, Cuisine, and Price Range required.
-- Added restaurant idea suggestions and optional concept-description suggestions.
-- Removed the duplicate Format control and separate per-guest pricing control.
-- Improved brief layout, scrolling, validation, and saved values.
-- Polished the dashboard layout, navigation, search, and location selection.
-- Added System theme, NYC map bounds, Reset to NYC, and 3D.
-- Corrected Aerial/3D separation, Edit Brief theme/readability, and an optional walking-graph dependency issue.
-- Documented the frontend architecture, map modes, APIs, and dataset in `demo/FRONTEND_ARCHITECTURE.md`.
-- Added CSV-backed existing-restaurant dots with clustering and name, cuisine, and address popups.
-- Kept restaurant dots, their toggle, and their legend in 3D Buildings only; recommendation markers stay visible in every map mode, and the toggle choice is remembered.
+From the repository root, using Python 3.11 or 3.12:
 
-## Changes to merge into main
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r demo/requirements.txt
+.venv/bin/python -m flask --app demo/app.py run --host 127.0.0.1 --port 5001 --no-reload
+```
 
-- Port the `ui-concept-polish` 3D-only restaurant overlay into main's newer dashboard: the map API, clustered blue dots, detail popups, and 3D-only toggle and legend. Keep recommendation selection in every mode.
-- Selectively review remaining UI-branch differences against main: duplicate Format removal, conditional local Streets availability, tighter NYC bounds and position-preserving map switches, Edit Brief presentation, and the optional walking-graph fallback. Main already has a dashboard, System theme, Aerial, and 3D.
+Open http://localhost:5001. The root `requirements.txt` belongs to the older
+Django/data-tool setup; use `demo/requirements.txt` for this dashboard.
+
+The dashboard, resident/worker and transit profiles, competition explorer,
+storefront research, 3D restaurant overlay, saved workspaces and menu tools
+are combined in `demo/`. Read [the app README](demo/README.md) for setup and
+[the architecture note](demo/FRONTEND_ARCHITECTURE.md) for the API boundaries.
+The legacy Django/MongoDB starter was removed from main. The team's `codes/`
+model pipeline remains separate; its instructions are in `Readme/README.md`.
+
+## Local data and optional services
+
+The private integrated package is required for dashboard results. Selection
+order is `GROUNDWORK_DATA_DIR`, `data/integrated/current/`, then
+`data/integrated/restaurant_bar_location_data_ready/`. All explorer readers
+follow that selection; keep the full `features/` and `entities/` directories.
+The concept-demand map and city boundary require the complete tract GeoJSON
+under `geography/`. All five boroughs are supported. Missing boundary data
+returns 503 without blocking the dashboard.
+
+Local MBTiles enable Streets. Aerial and 3D use online providers. The walking
+network and verified property sources are optional. This checkout has no
+optional rent benchmark snapshot or public leasing CSV: those views show
+unavailable data, and the two existing tests requiring those files cannot pass
+until the sources are supplied. Storefront filings do not establish current
+lease availability.
+
+Flask runs without PostGIS or Redis. The optional FastAPI wrapper serves the
+same dashboard on port 8000; follow [backend/README.md](backend/README.md).
+A real local Atharv model run now supplies the dashboard's three-year tract
+estimates via its generated CSV. See [demo steps and reproduction](demo/ATHARV_DEMO.md).
+These archive-based research estimates are separate from screening rankings.
+Artifacts and the private activation pointer are ignored; a fresh clone must
+restore or regenerate them. Otis's dated-model contract remains a separate
+optional path in [the survival setup](demo/SURVIVAL_DASHBOARD.md).
+Keep private data, account databases, signing keys, virtual environments,
+checkpoints and generated caches outside commits.
 
 ## Data Folder
 

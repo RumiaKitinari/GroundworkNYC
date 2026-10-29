@@ -3,28 +3,54 @@ let selectedId = null;
 let activeLayer = "opportunity";
 let activeView = "discover";
 let requestId = 0;
+let profileComparisonId = "";
+let profileRenderId = 0;
+let profileAreasPromise = null;
+const profileCache = new Map();
+const profileResolved = new Map();
+let profileAreasResolved = null;
+const profileExpanded = {resident_age: true, job_age: true, job_earnings: true, job_industry: false};
+const transitCache = new Map();
+const transitExpanded = {subway: false, bike: false, pedestrian: false, taxi: false};
+let transitRenderId = 0;
+const competitionCache = new Map();
+const competitionResolved = new Map();
+let competitionRenderId = 0;
+let competitionBreakdownOpen = true;
+let competitionComparisonOpen = true;
+let competitionFilter = "all";
+let competitionQuery = "";
+let competitionVisible = 10;
+let competitionContext = "";
+let storefrontPromise = null;
+let storefrontData = null;
+let storefrontArea = "all";
+let storefrontVacancy = "all";
+let storefrontQuery = "";
+let storefrontVisible = 12;
+let propertyTab = "research";
 let locationMap = null;
 let mapMarkers = [];
 let mapPopup = null;
+let restaurantPopup = null;
+let restaurantDataPromise = null;
+let restaurantStyleRevision = 0;
+let showExistingRestaurants = true;
 let mapDataset = "";
 let mapViewRequestId = 0;
-let hovered3DFeatureId = "";
-let pinned3DFeature = false;
-let activeBasemap = "streets";
-const mapLimits = {
-  streets: {bounds: [[-74.55, 40.43], [-73.37, 41.02]], minZoom: 10},
-  aerial: {bounds: [[-74.20, 40.49], [-73.60, 41.00]], minZoom: 9.7},
-  buildings3d: {bounds: [[-74.20, 40.49], [-73.60, 41.00]], minZoom: 9.7},
-};
+let activeBasemap = window.GROUNDWORK_HAS_STREET_TILES ? "streets" : "aerial";
+// The inner box includes all five boroughs; the outer box leaves room at the edges.
+const NYC_VIEW_BOUNDS = [[-74.27, 40.48], [-73.70, 40.92]];
+const NYC_LIMIT_BOUNDS = [[-74.32, 40.43], [-73.65, 40.97]];
 const systemTheme = matchMedia("(prefers-color-scheme: dark)");
 let dashboardThemeChoice = ["light", "dark"].includes(localStorage.getItem("groundwork-theme")) ? localStorage.getItem("groundwork-theme") : "system";
 let currentTheme = dashboardThemeChoice === "system" ? (systemTheme.matches ? "dark" : "light") : dashboardThemeChoice;
+let hovered3DFeatureId = "";
+let pinned3DFeature = false;
 let savedIds = [];
 let savedKey = "";
-const competitionCache = new Map();
 const catchmentCache = new Map();
 let competitionRequest = 0;
-let propertyView = "all";
 const hexCache = new Map();
 let hexRequestId = 0;
 let hoveredHexId = null;
@@ -46,6 +72,8 @@ async function buildingMapStyle() {
       !style.layers?.some(layer => layer.source === "openmaptiles" && layer["source-layer"] === "building")) {
     throw new Error("3D building geometry unavailable");
   }
+  // Keep this view vector-only even if the provider adds a raster layer later.
+  style.glyphs ||= `${window.location.origin}/static/fonts/{fontstack}/{range}.pbf`;
   style.layers = style.layers.filter(layer => layer.type !== "raster");
   Object.keys(style.sources).forEach(id => {if (style.sources[id].type === "raster") delete style.sources[id];});
   const firstLabel = style.layers.findIndex(layer => layer.type === "symbol");
@@ -112,7 +140,48 @@ function selectView(view) {
     button.setAttribute("aria-current", button.dataset.view === view ? "page" : "false");
   });
   renderPanels();
+  if (view === "scorecard" && dashboard) {
+    renderResidentWorkerProfile();
+    renderTransitActivity();
+    renderCompetitionExplorer();
+  }
+  if (view === "lease" && dashboard) {
+    syncPropertyTabs();
+    if (propertyTab === "research") renderStorefrontExplorer();
+  }
   if (view === "menu") loadMenuSuggestions();
+  persistDashboardView();
+}
+
+function syncPropertyTabs() {
+  const labels = {lease: "Lease Listings", purchase: "Purchase Listings", either: "Lease & Purchase Listings"};
+  document.querySelector("#propertyTabListings").textContent = labels[state.dealType] || labels.lease;
+  document.querySelectorAll("[data-property-tab]").forEach(button => {
+    const selected = button.dataset.propertyTab === propertyTab;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelector("#propertyPanelResearch").hidden = propertyTab !== "research";
+  document.querySelector("#propertyPanelListings").hidden = propertyTab !== "listings";
+}
+
+function selectPropertyTab(tab, focus = false) {
+  if (tab !== "research" && tab !== "listings") return;
+  propertyTab = tab;
+  syncPropertyTabs();
+  if (propertyTab === "research" && dashboard) renderStorefrontExplorer();
+  persistDashboardView();
+  if (focus) document.querySelector(`[data-property-tab="${tab}"]`).focus();
+}
+
+function persistDashboardView() {
+  if (!dashboard || !selectedId) return;
+  sessionStorage.setItem("groundwork-dashboard-view", JSON.stringify({
+    activeView, selectedId, comparisonId: profileComparisonId,
+    profileExpanded, transitExpanded, competitionBreakdownOpen, competitionComparisonOpen,
+    competitionContext, competitionFilter, competitionQuery, competitionVisible,
+    storefrontArea, storefrontVacancy, storefrontQuery, storefrontVisible, propertyTab,
+  }));
 }
 
 function shortlistKey() {
@@ -132,6 +201,8 @@ function restoreBrief() {
     briefFields.forEach(key => {
       if (typeof saved[key] === typeof state[key]) state[key] = saved[key];
     });
+    hasSubmittedBrief = hasExplicitCuisine(state.cuisine);
+    legacyCuisineRequired = !hasSubmittedBrief;
     return true;
   } catch {
     return false;
@@ -139,6 +210,7 @@ function restoreBrief() {
 }
 
 function persistBrief() {
+  if (!hasSubmittedBrief) return;
   const brief = Object.fromEntries(briefFields.map(key => [key, state[key]]));
   const previous = localStorage.getItem(BRIEF_STORAGE_KEY);
   localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(brief));
@@ -451,7 +523,12 @@ async function initializeWorkspace() {
     }
   } else workspaceStatus("Saved on this device");
   const hasSavedBrief = restoreBrief();
-  if (hasSavedBrief) closeBrief();
+  if (hasSavedBrief && hasSubmittedBrief) closeBrief();
+  if (legacyCuisineRequired) {
+    document.querySelector("#cuisineError").hidden = false;
+    document.querySelector("#briefSkip").hidden = true;
+    document.querySelector("#briefOverlay").classList.add("is-open");
+  }
   renderSavedBriefs();
   updateConceptImage(state.cuisine);
   syncBriefControls();
@@ -562,14 +639,6 @@ function syncTransactionFields() {
   document.querySelector("#purchaseTargetValue").textContent = fmtPrice(state.purchaseBudget);
 }
 
-function syncPriceModeControls() {
-  document.querySelector("#briefTierField").hidden = state.priceMode !== "tier";
-  document.querySelector("#briefExactPriceField").hidden = state.priceMode !== "exact";
-  document.querySelector("#briefAverageCheck").required = state.priceMode === "exact";
-  document.querySelectorAll("[data-price-mode]").forEach(button => {
-    button.setAttribute("aria-pressed", String(button.dataset.priceMode === state.priceMode));
-  });
-}
 
 function scoreClass(value) {
   if (value >= 82) return "score-good";
@@ -675,7 +744,7 @@ function conceptSuggestionsFor(query) {
 }
 
 function closeConceptSuggestions() {
-  document.querySelectorAll("#conceptInput, #briefConceptName, #searchInput").forEach(input => {
+  document.querySelectorAll("#conceptInput, #searchInput").forEach(input => {
     const list = document.querySelector(`#${input.getAttribute("aria-controls")}`);
     list.hidden = true;
     list.replaceChildren();
@@ -699,9 +768,7 @@ function chooseConceptSuggestion(item, input, preserveName = false) {
   }
   if (input.id === "briefConceptName") {
     if (!preserveName) input.value = item.title;
-    document.querySelector("#briefCuisine").value = item.cuisine;
     document.querySelector("#briefDietary").value = item.dietary;
-    document.querySelector("#briefProfile").value = item.profile;
     document.querySelector("#briefServiceStyle").value = defaultServiceStyle(item.profile);
     updateConceptImage(item.cuisine);
   } else {
@@ -799,7 +866,17 @@ async function loadDashboard() {
     hexCache.clear();
     hexRequestId++;
     clearHexLayer();
-    competitionCache.clear();
+    profileRenderId++; transitRenderId++; competitionRenderId++; competitionRequest++;
+    profileAreasPromise = null; profileAreasResolved = null;
+    profileCache.clear(); profileResolved.clear(); transitCache.clear();
+    competitionCache.clear(); competitionResolved.clear();
+    storefrontPromise = null; storefrontData = null;
+    restaurantDataPromise = null;
+    restaurantStyleRevision++;
+    if (locationMap?.getSource("existing-restaurants")) {
+      RESTAURANT_LAYERS.forEach(id => {if (locationMap.getLayer(id)) locationMap.removeLayer(id);});
+      locationMap.removeSource("existing-restaurants");
+    }
     catchmentCache.clear();
     persistBrief();
     document.querySelector(".workspace").classList.remove("has-no-results");
@@ -814,6 +891,10 @@ async function loadDashboard() {
   } catch (error) {
     if (currentRequest === requestId) {
       status.textContent = "Unable To Update Locations. Select Refresh To Retry.";
+      if (activeView === "lease") {
+        document.querySelector("#leaseBoard").innerHTML = '<article class="property-listings-empty property-listings-error" role="alert"><div><h3>Listings could not load</h3><p>The dashboard request failed. Retry to check the listing source again.</p><button type="button" class="quiet-action">Retry</button></div></article>';
+        document.querySelector("#leaseBoard button").addEventListener("click", loadDashboard);
+      }
     }
   } finally {
     if (currentRequest === requestId) document.querySelector(".workspace").setAttribute("aria-busy", "false");
@@ -868,15 +949,151 @@ function toggleExpandedMap(force) {
   button.setAttribute("aria-label", expanded ? "Close Expanded Map" : "Expand Map");
   button.title = expanded ? "Close Expanded Map" : "Expand Map";
   button.textContent = expanded ? "×" : "⛶";
-  requestAnimationFrame(() => locationMap?.resize());
+  requestAnimationFrame(() => {locationMap?.resize(); updateNycConstraints();});
+}
+
+function updateNycConstraints() {
+  if (!locationMap) return;
+  const fit = locationMap.cameraForBounds(NYC_VIEW_BOUNDS, {padding: 0});
+  const minimumZoom = Math.max(8.5, Math.min(11.4, (fit?.zoom ?? 9.6) - 0.15));
+  locationMap.setMaxBounds(NYC_LIMIT_BOUNDS);
+  locationMap.setMinZoom(minimumZoom);
 }
 
 function resetToNYC() {
   if (!locationMap) return;
-  locationMap.fitBounds([[-74.23, 40.49], [-73.70, 40.91]], {
-    padding: 30, maxZoom: 11.5, duration: 300, bearing: 0, pitch: 0,
-  });
+  locationMap.resize();
+  updateNycConstraints();
+  const stage = document.querySelector("#mapStage");
+  const padding = Math.max(12, Math.min(30, Math.round(Math.min(stage.clientWidth, stage.clientHeight) * .04)));
+  locationMap.fitBounds(NYC_VIEW_BOUNDS, {padding, maxZoom: 11.5, duration: 300, bearing: 0, pitch: 0});
 }
+
+
+function fallbackToAerial(message) {
+  if (!locationMap || activeBasemap !== "buildings3d") return;
+  activeBasemap = "aerial";
+  document.querySelector("#mapBasemapSelect").value = "aerial";
+  syncRestaurantVisibility();
+  locationMap.setStyle(mapStyle("aerial"));
+  locationMap.easeTo({pitch: 0, bearing: 0, duration: 250});
+  updateNycConstraints();
+  setMapViewStatus(message, true);
+}
+
+const RESTAURANT_LAYERS = ["restaurant-clusters", "restaurant-cluster-count", "restaurant-points"];
+
+function syncRestaurantVisibility() {
+  const in3D = activeBasemap === "buildings3d";
+  document.querySelector(".restaurant-toggle").hidden = !in3D;
+  const legendEntry = document.querySelector(".legend-restaurant-entry");
+  if (legendEntry) legendEntry.hidden = !in3D;
+  if (!locationMap) return;
+  const visible = in3D && showExistingRestaurants;
+  RESTAURANT_LAYERS.forEach(id => {
+    if (locationMap.getLayer(id)) locationMap.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+  });
+  if (!visible) {
+    restaurantPopup?.remove();
+    restaurantPopup = null;
+  }
+}
+
+function restaurantData() {
+  if (!restaurantDataPromise) {
+    restaurantDataPromise = fetch("/api/map/restaurants")
+      .then(response => {if (!response.ok) throw new Error("Restaurant map data unavailable"); return response.json();})
+      .catch(error => {restaurantDataPromise = null; throw error;});
+  }
+  return restaurantDataPromise;
+}
+
+async function installRestaurantLayers(revision) {
+  try {
+    const data = await restaurantData();
+    if (!locationMap || activeBasemap !== "buildings3d" || revision !== restaurantStyleRevision || locationMap.getSource("existing-restaurants")) return;
+    locationMap.addSource("existing-restaurants", {type: "geojson", data, cluster: true, clusterRadius: 45, clusterMaxZoom: 13});
+    locationMap.addLayer({id: "restaurant-clusters", type: "circle", source: "existing-restaurants", filter: ["has", "point_count"],
+      paint: {"circle-color": "#1662c2", "circle-radius": ["step", ["get", "point_count"], 12, 100, 16, 1000, 21],
+        "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5, "circle-opacity": 0.9}});
+    locationMap.addLayer({id: "restaurant-cluster-count", type: "symbol", source: "existing-restaurants", filter: ["has", "point_count"],
+      layout: {"text-field": ["get", "point_count_abbreviated"], "text-font": ["Open Sans Regular"], "text-size": 11},
+      paint: {"text-color": "#ffffff"}});
+    locationMap.addLayer({id: "restaurant-points", type: "circle", source: "existing-restaurants", filter: ["!", ["has", "point_count"]],
+      paint: {"circle-color": "#2487df", "circle-radius": 3.5, "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 0.8, "circle-opacity": 0.85}});
+    syncRestaurantVisibility();
+  } catch (error) {
+    setMapViewStatus("Existing restaurant dots could not load.", true);
+  }
+}
+
+function restaurantAtPoint(point) {
+  if (activeBasemap !== "buildings3d" || !showExistingRestaurants || !locationMap?.getLayer("restaurant-points")) return null;
+  return locationMap.queryRenderedFeatures(point, {layers: ["restaurant-points", "restaurant-clusters"]})[0] || null;
+}
+
+async function handleRestaurantClick(event) {
+  const feature = restaurantAtPoint(event.point);
+  if (!feature) return;
+  if (feature.properties.cluster) {
+    const source = locationMap.getSource("existing-restaurants");
+    try {
+      const zoom = await source.getClusterExpansionZoom(feature.properties.cluster_id);
+      if (activeBasemap === "buildings3d" && showExistingRestaurants && source === locationMap.getSource("existing-restaurants")) {
+        locationMap.easeTo({center: feature.geometry.coordinates, zoom, duration: 400});
+      }
+    } catch (_) {} // A background switch can remove the source while the zoom request is pending.
+    return;
+  }
+  mapPopup?.remove();
+  restaurantPopup?.remove();
+  const details = document.createElement("div");
+  details.className = "map-restaurant-detail";
+  details.innerHTML = `<strong>${escapeHtml(feature.properties.name || "Name unavailable")}</strong>
+    <div><span>Cuisine</span><b>${escapeHtml(feature.properties.cuisine || "Unavailable")}</b></div>
+    <div><span>Address</span><b>${escapeHtml(feature.properties.address || "Unavailable")}</b></div>`;
+  restaurantPopup = new maplibregl.Popup({closeButton: true, closeOnClick: true, offset: 10, maxWidth: "290px"})
+    .setLngLat(feature.geometry.coordinates).setDOMContent(details).addTo(locationMap);
+}
+
+async function changeMapView(next) {
+  const request = ++mapViewRequestId;
+  if (!locationMap || !["streets", "aerial", "buildings3d"].includes(next)) return;
+  if (next === activeBasemap) {setMapViewStatus(""); return;}
+  let style;
+  if (next === "buildings3d") {
+    setMapViewStatus("Loading 3D street map…");
+    try {
+      style = await buildingMapStyle();
+    } catch (_) {
+      if (request !== mapViewRequestId) return;
+      document.querySelector("#mapBasemapSelect").value = activeBasemap;
+      setMapViewStatus("3D street map is unavailable. Aerial remains active.", true);
+      return;
+    }
+  }
+  if (request !== mapViewRequestId) return;
+  try {
+    activeBasemap = next;
+    pinned3DFeature = false;
+    hovered3DFeatureId = "";
+    mapPopup?.remove();
+    syncRestaurantVisibility();
+    locationMap.setStyle(style || mapStyle(next));
+    updateNycConstraints();
+    if (next === "buildings3d") {
+      setMapViewStatus("Loading 3D buildings…");
+      locationMap.easeTo({pitch: 52, bearing: -18, duration: 450});
+    } else {
+      locationMap.easeTo({pitch: 0, bearing: 0, duration: 300});
+      setMapViewStatus("");
+    }
+  } catch (_) {
+    fallbackToAerial("3D building view could not load. Aerial remains active.");
+  }
+}
+
 
 function clearHexLayer() {
   hoveredHexId = null;
@@ -972,6 +1189,7 @@ function hexAtPoint(point) {
 
 function setMapViewStatus(message, isError = false) {
   const status = document.querySelector("#mapViewStatus");
+  if (!status) return;
   status.textContent = message;
   status.hidden = !message;
   status.classList.toggle("is-error", isError);
@@ -983,49 +1201,6 @@ function collapseMapAttribution() {
   if (!attribution.open && !attribution.classList.contains("maplibregl-compact-show")) return;
   attribution.open = false;
   attribution.classList.remove("maplibregl-compact-show");
-}
-
-function fallbackToAerial(message) {
-  if (!locationMap || activeBasemap !== "buildings3d") return;
-  activeBasemap = "aerial";
-  document.querySelector("#mapBasemapSelect").value = "aerial";
-  locationMap.setStyle(mapStyle("aerial"));
-  applyMapLimits("aerial");
-  locationMap.easeTo({pitch: 0, bearing: 0, duration: 250});
-  setMapViewStatus(message, true);
-}
-
-async function changeMapView(next) {
-  const request = ++mapViewRequestId;
-  if (!locationMap || !["streets", "aerial", "buildings3d"].includes(next)) return;
-  if (next === activeBasemap) return;
-  let style;
-  if (next === "buildings3d") {
-    setMapViewStatus("Loading 3D street map...");
-    try {
-      style = await buildingMapStyle();
-    } catch {
-      if (request !== mapViewRequestId) return;
-      document.querySelector("#mapBasemapSelect").value = activeBasemap;
-      setMapViewStatus("3D street map is unavailable. Aerial and Streets are still available.", true);
-      return;
-    }
-  }
-  if (request !== mapViewRequestId) return;
-  activeBasemap = next;
-  pinned3DFeature = false;
-  hovered3DFeatureId = "";
-  mapPopup?.remove();
-  locationMap.setStyle(style || mapStyle(next));
-  applyMapLimits(next);
-  if (next === "buildings3d") {
-    const location = selectedLocation();
-    locationMap.easeTo({center: [location.longitude, location.latitude], zoom: Math.max(locationMap.getZoom(), 15.4), pitch: 54, bearing: -18, duration: 550});
-    setMapViewStatus("Loading 3D buildings...");
-  } else {
-    locationMap.easeTo({pitch: 0, bearing: 0, duration: 300});
-    setMapViewStatus("");
-  }
 }
 
 function featureAtPoint(point) {
@@ -1074,16 +1249,9 @@ function show3DFeature(feature, lngLat, pinned = false) {
 
 function renderMap() {
   if (!locationMap) {
-    locationMap = new maplibregl.Map({container: "mapStage", style: mapStyle(activeBasemap), center: [-73.96, 40.73], zoom: 11, minZoom: mapLimits[activeBasemap].minZoom, maxZoom: 19, maxBounds: mapLimits[activeBasemap].bounds, attributionControl: false});
+    locationMap = new maplibregl.Map({container: "mapStage", style: mapStyle(activeBasemap), center: [-73.96, 40.73], zoom: 11, maxZoom: 19, maxBounds: NYC_LIMIT_BOUNDS, renderWorldCopies: false, attributionControl: false});
     locationMap.addControl(new maplibregl.NavigationControl({showCompass: true}), "top-left");
     locationMap.addControl(new maplibregl.AttributionControl({compact: true}), "bottom-right");
-    const resetButton = document.createElement("button");
-    resetButton.type = "button";
-    resetButton.id = "resetNycButton";
-    resetButton.className = "map-reset-button";
-    resetButton.textContent = "Reset to NYC";
-    resetButton.addEventListener("click", resetToNYC);
-    document.querySelector("#mapStage").append(resetButton);
     const attribution = document.querySelector("#mapStage .maplibregl-ctrl-attrib");
     attribution.querySelector("summary").addEventListener("click", () => {
       attribution.dataset.userOpened = attribution.open ? "false" : "true";
@@ -1096,6 +1264,8 @@ function renderMap() {
       if (isHexLayer()) showHexLayer();
     });
     locationMap.on("idle", () => {
+      installNycBoundary();
+      if (activeBasemap === "buildings3d" && !locationMap.getSource("existing-restaurants")) installRestaurantLayers(++restaurantStyleRevision);
       if (isHexLayer() && !locationMap.getLayer("concept-hex-fill")) showHexLayer();
       if (activeBasemap === "buildings3d" && locationMap.getLayer("nyc-buildings-3d") && locationMap.isSourceLoaded("openmaptiles")) setMapViewStatus("");
       collapseMapAttribution();
@@ -1109,6 +1279,7 @@ function renderMap() {
       }
     });
     locationMap.on("style.load", () => {
+      installNycBoundary();
       if (isHexLayer()) showHexLayer();
     });
     locationMap.on("error", event => {
@@ -1164,11 +1335,14 @@ function renderMap() {
       show3DFeature(feature, event.lngLat);
     });
     locationMap.on("click", event => {
-      if (activeBasemap !== "buildings3d" || isHexLayer()) return;
+      if (activeBasemap !== "buildings3d" || isHexLayer() || restaurantAtPoint(event.point)) return;
       const feature = featureAtPoint(event.point);
       if (feature) show3DFeature(feature, event.lngLat, true);
       else mapPopup?.remove();
     });
+    updateNycConstraints();
+    locationMap.on("resize", updateNycConstraints);
+    locationMap.on("click", handleRestaurantClick);
     const expand = document.createElement("button");
     expand.id = "expandMapButton";
     expand.className = "map-expand-button";
@@ -1178,9 +1352,22 @@ function renderMap() {
     expand.setAttribute("aria-label", "Expand Map");
     expand.addEventListener("click", () => toggleExpandedMap());
     document.querySelector("#mapStage").append(expand);
+    const reset = document.createElement("button");
+    reset.id = "resetNycButton";
+    reset.className = "map-reset-button";
+    reset.type = "button";
+    reset.textContent = "Reset to NYC";
+    reset.addEventListener("click", resetToNYC);
+    document.querySelector("#mapStage").append(reset);
+    const viewStatus = document.createElement("div");
+    viewStatus.id = "mapViewStatus";
+    viewStatus.className = "map-view-status";
+    viewStatus.setAttribute("role", "status");
+    viewStatus.hidden = true;
+    document.querySelector("#mapStage").append(viewStatus);
     const legend = document.createElement("div");
     legend.className = "map-legend";
-    legend.innerHTML = '<span>0</span><i></i><span>100</span>';
+    legend.innerHTML = '<div><b class="legend-recommendation-dot"></b><span>Recommended area</span><span>0</span><i></i><span>100</span></div><div class="legend-restaurant-entry" hidden><b class="legend-restaurant-dot"></b><span>Existing restaurant</span></div>';
     document.querySelector("#mapStage").append(legend);
   }
   mapPopup?.remove();
@@ -1220,7 +1407,8 @@ function renderMap() {
     element.addEventListener("focus", showDetail);
     element.addEventListener("mouseleave", () => mapPopup?.remove());
     element.addEventListener("blur", () => mapPopup?.remove());
-    element.addEventListener("click", () => {
+    element.addEventListener("click", event => {
+      event.stopPropagation();
       selectedId = location.id;
       renderAll();
       revealSelectedRanking();
@@ -1284,7 +1472,7 @@ function renderRanking() {
         <span class="${scoreClass(row.opportunity)}">${row.opportunity}</span>
         <span>${row.business_draw}</span>
         <span>${row.walkability ?? "--"}</span>
-        <span>${row.score_components.find((item) => item.key === "market_gap").score}</span>
+        <span>${cuisineOpportunityDisplay(row)}</span>
         <span>${row.score_components.find((item) => item.key === "economics").score}</span>
         <button class="save-row" type="button" data-save-id="${row.id}" aria-label="${savedIds.includes(row.id) ? "Remove" : "Save"} ${escapeHtml(row.name)} ${savedIds.includes(row.id) ? "from" : "to"} comparison" aria-pressed="${savedIds.includes(row.id)}">${savedIds.includes(row.id) ? "Saved" : "Save"}</button>
       </div>
@@ -1309,6 +1497,368 @@ function renderRanking() {
   table.scrollLeft = previousLeft;
 }
 
+const PROFILE_INDUSTRIES = [
+  ["jobs_agriculture_forestry_fishing_hunting", "Agriculture, Forestry & Fishing"],
+  ["jobs_mining_quarrying_oil_gas", "Mining, Quarrying & Oil and Gas"],
+  ["jobs_utilities", "Utilities"], ["jobs_construction", "Construction"],
+  ["jobs_manufacturing", "Manufacturing"], ["jobs_wholesale_trade", "Wholesale Trade"],
+  ["jobs_retail_trade", "Retail Trade"], ["jobs_transportation_warehousing", "Transportation & Warehousing"],
+  ["jobs_information", "Information"], ["jobs_finance_insurance", "Finance & Insurance"],
+  ["jobs_real_estate_rental_leasing", "Real Estate & Leasing"],
+  ["jobs_professional_scientific_technical", "Professional, Scientific & Technical"],
+  ["jobs_management", "Management"], ["jobs_admin_support_waste_management", "Administrative Support & Waste Management"],
+  ["jobs_educational_services", "Education"], ["jobs_health_care_social_assistance", "Health Care & Social Assistance"],
+  ["jobs_arts_entertainment_recreation", "Arts, Entertainment & Recreation"],
+  ["jobs_accommodation_food_services", "Accommodation & Food Services"],
+  ["jobs_other_services", "Other Services"], ["jobs_public_administration", "Public Administration"],
+];
+
+function profileAreas() {
+  if (!profileAreasPromise) {
+    profileAreasPromise = fetch("/api/areas")
+      .then(response => {if (!response.ok) throw new Error("Area list unavailable"); return response.json();})
+      .then(result => {profileAreasResolved = result.areas; return result.areas;})
+      .catch(error => {profileAreasPromise = null; throw error;});
+  }
+  return profileAreasPromise;
+}
+
+function areaProfile(geoid) {
+  if (!profileCache.has(geoid)) {
+    const request = fetch(`/api/areas/${encodeURIComponent(geoid)}/profile`)
+      .then(response => {if (!response.ok) throw new Error("Area profile unavailable"); return response.json();})
+      .then(result => {profileResolved.set(geoid, result); return result;})
+      .catch(error => {profileCache.delete(geoid); throw error;});
+    profileCache.set(geoid, request);
+  }
+  return profileCache.get(geoid);
+}
+
+function profileNumber(value, currency = false) {
+  if (value === null || value === undefined) return "Unavailable";
+  return currency ? fmtDollar(value) : Number(value).toLocaleString("en-US");
+}
+
+function profileMetric(title, source, first, second, currency = false, income = false) {
+  const value = profile => profileNumber(profile?.market_profile?.[first], currency);
+  const margin = profile => income && profile?.market_profile?.[first] != null
+    ? `<small>${profile.market_profile.income_margin_of_error == null ? "Margin of error unavailable" : `±${fmtDollar(profile.market_profile.income_margin_of_error)} margin of error`}</small>` : "";
+  return `<article class="rw-metric"><h4>${title}</h4><p>${source}</p>
+    <div class="rw-metric-value"><span>${escapeHtml(first === "jobs" ? "Selected workplace" : "Selected area")}</span><strong>${value(second[0])}</strong>${margin(second[0])}</div>
+    ${second[1] ? `<div class="rw-metric-value"><span>Comparison area</span><strong>${value(second[1])}</strong>${margin(second[1])}</div>` : ""}
+  </article>`;
+}
+
+function profileBreakdown(title, source, group, fields, first, second, open = true) {
+  const read = (profile, key) => profileNumber(profile?.market_profile?.[group]?.[key]);
+  return `<details class="rw-breakdown" data-profile-group="${group}" ${profileExpanded[group] ?? open ? "open" : ""}><summary>${title}<small>${source}</small></summary>
+    <div class="rw-table-scroll"><table><thead><tr><th scope="col">Measure</th><th scope="col">Selected area</th>${second ? "<th scope=\"col\">Comparison area</th>" : ""}</tr></thead>
+    <tbody>${fields.map(([key, label]) => `<tr><th scope="row">${label}</th><td data-label="Selected area">${read(first, key)}</td>${second ? `<td data-label="Comparison area">${read(second, key)}</td>` : ""}</tr>`).join("")}</tbody></table></div>
+  </details>`;
+}
+
+function cuisineOpportunityDisplay(location) {
+  const component = location.score_components.find(item => item.key === "market_gap");
+  return component?.coverage > 0 ? component.score : "Unavailable";
+}
+
+function cuisineOpportunityExplanation(location) {
+  if (!location.concept_evidence?.cuisine || location.concept_evidence.cuisine === "any") {
+    return "Choose a cuisine in Edit Brief to assess opportunity.";
+  }
+  if (location.concept_evidence.positioning === "Cuisine Not Separately Classified") {
+    return "This cuisine is not separately classified in restaurant records.";
+  }
+  return "Supporting cuisine evidence is unavailable for this tract.";
+}
+
+async function renderResidentWorkerProfile() {
+  const target = document.querySelector("#residentWorkerProfile");
+  if (!target || !dashboard || activeView !== "scorecard") return;
+  const geoid = selectedLocation().id;
+  if (profileComparisonId === geoid) profileComparisonId = "";
+  const comparison = profileComparisonId;
+  const renderId = ++profileRenderId;
+  if (!(profileAreasResolved && profileResolved.has(geoid) && (!comparison || profileResolved.has(comparison))))
+    target.innerHTML = '<div class="rw-loading" role="status">Loading resident and worker records…</div>';
+  try {
+    const [areas, first, second] = await Promise.all([
+      profileAreas(), areaProfile(geoid), comparison ? areaProfile(comparison) : Promise.resolve(null),
+    ]);
+    if (renderId !== profileRenderId || activeView !== "scorecard" || selectedLocation().id !== geoid) return;
+    const options = [...areas].sort((a, b) => a.borough.localeCompare(b.borough) || a.name.localeCompare(b.name));
+    target.innerHTML = `<div class="rw-heading"><div><h3>Resident and Worker Profile</h3><p>Recorded residents and workplace jobs are separate measures, not customer or revenue predictions.</p></div>
+      <label for="rwCompareArea">Compare with another tract<select id="rwCompareArea"><option value="">Select a second area</option>
+        ${options.filter(row => row.geoid !== geoid).map(row => `<option value="${row.geoid}" ${row.geoid === comparison ? "selected" : ""}>${escapeHtml(row.borough)} · ${escapeHtml(row.name)}</option>`).join("")}
+      </select></label></div>
+      <div class="rw-area-names"><div><span>Selected area</span><strong>${escapeHtml(first.name)}</strong><small>${escapeHtml(first.borough)} · 2020 census tract</small></div>
+      ${second ? `<div><span>Comparison area</span><strong>${escapeHtml(second.name)}</strong><small>${escapeHtml(second.borough)} · 2020 census tract</small></div>` : ""}</div>
+      <div class="rw-metrics">
+        ${profileMetric("Resident population", "ACS 2024 five-year estimate", "population", [first, second])}
+        ${profileMetric("Median household income", "ACS 2024 five-year estimate", "median_household_income", [first, second], true, true)}
+        ${profileMetric("Workplace jobs", "LODES 2023", "jobs", [first, second])}
+      </div>
+      <div class="rw-breakdowns">
+        ${profileBreakdown("Resident age groups", "ACS 2024 five-year estimates · groups shown are not exhaustive", "resident_age", [["population_under_18_2024", "Under 18"], ["population_65_plus_2024", "65 and over"]], first, second)}
+        ${profileBreakdown("Workplace jobs by worker age", "LODES 2023 · jobs located in the tract", "job_age", [["jobs_age_29_or_younger", "29 or younger"], ["jobs_age_30_to_54", "30 to 54"], ["jobs_age_55_or_older", "55 or older"]], first, second)}
+        ${profileBreakdown("Workplace jobs by monthly earnings", "LODES 2023 · jobs located in the tract", "job_earnings", [["jobs_earn_1250_or_less_monthly", "$1,250 or less"], ["jobs_earn_1251_to_3333_monthly", "$1,251–$3,333"], ["jobs_earn_more_than_3333_monthly", "More than $3,333"]], first, second)}
+        ${profileBreakdown("Workplace jobs by industry", "LODES 2023 · jobs located in the tract", "job_industry", PROFILE_INDUSTRIES, first, second, false)}
+      </div>`;
+    target.querySelector("#rwCompareArea").addEventListener("change", event => {
+      profileComparisonId = event.target.value;
+      persistDashboardView();
+      renderResidentWorkerProfile();
+      renderCompetitionExplorer();
+    });
+    target.querySelectorAll("[data-profile-group]").forEach(details => details.addEventListener("toggle", () => {
+      profileExpanded[details.dataset.profileGroup] = details.open;
+      persistDashboardView();
+    }));
+  } catch (error) {
+    if (renderId !== profileRenderId || !target.isConnected) return;
+    target.innerHTML = '<div class="rw-error" role="alert">Resident and worker records could not load. <button class="quiet-action" type="button">Retry</button></div>';
+    target.querySelector("button").addEventListener("click", renderResidentWorkerProfile);
+  }
+}
+
+function transitValue(value, unit = "") {
+  return value == null ? "Unavailable" : `${Number(value).toLocaleString("en-US", {maximumFractionDigits: unit === "mi" ? 2 : 0})}${unit ? ` ${unit}` : ""}`;
+}
+
+function transitRow(label, value, unit = "") {
+  return `<div class="transit-row"><span>${escapeHtml(label)}</span><strong>${transitValue(value, unit)}</strong></div>`;
+}
+
+function paintTransitActivity(target, data) {
+  const subway = data.subway, bike = data.bike, pedestrian = data.pedestrian, taxi = data.taxi;
+  const card = (key, title, lead, source, period, coverage, rows) => `
+    <details class="transit-card" data-transit-group="${key}" ${transitExpanded[key] ? "open" : ""}>
+      <summary><span>${title}</span><strong>${lead}</strong></summary>
+      <div class="transit-card-body"><p>${escapeHtml(source)} · ${escapeHtml(period || "Observation date unavailable")}</p>
+      <p>${escapeHtml(coverage)}</p><div class="transit-rows">${rows}</div></div>
+    </details>`;
+  target.innerHTML = `<div class="transit-heading"><h3>Transit and Activity Profile</h3>
+    <p>Recorded trips and monitored observations are separate measures, not unique visitors or customer forecasts.</p></div>
+    <div class="transit-grid">
+      ${card("subway", "Subway access and activity", `${transitValue(subway.nearest_distance_miles, "mi")} to nearest complex`, subway.source,
+        subway.period, "Stations in the tract and the nearest station to the tract centroid; one complete week.",
+        `${transitRow("Station complexes in tract", subway.station_count)}${transitRow("Entries at tract stations", subway.weekly_entries, "entries/week")}
+         ${transitRow("Transfers at tract stations", subway.weekly_transfers, "transfers/week")}
+         <div class="transit-row"><span>Nearest complex</span><strong>${escapeHtml(subway.nearest_name || "Unavailable")}</strong></div>
+         ${transitRow("Nearest complex entries", subway.nearest_weekly_entries, "entries/week")}
+         ${subway.nearest_dayparts ? Object.entries(subway.nearest_dayparts).map(([period, value]) => transitRow(`Weekday ${period} · sampled 2025 weeks`, value, "entries/day")).join("") : ""}
+         ${subway.stations.length ? `<div class="transit-stations">${subway.stations.map(station => `<div>${escapeHtml(station.name)} <strong>${transitValue(station.weekly_entries)} entries/week</strong></div>`).join("")}</div>` : ""}`)}
+      ${card("bike", "Citi Bike activity", `${transitValue(bike.departures, "departures")}`, bike.source,
+        bike.period, "Trips begin or end at stations inside the tract; coverage depends on Citi Bike service.",
+        `${transitRow("Stations in tract", bike.station_count)}${transitRow("Arrivals", bike.arrivals, "arrivals")}
+         ${transitRow("Evening departures", bike.evening_departures, "departures")}${transitRow("Weekend departures", bike.weekend_departures, "departures")}
+         <div class="transit-row"><span>Nearest station</span><strong>${escapeHtml(bike.nearest_name || "Unavailable")}</strong></div>
+         ${transitRow("Nearest station distance", bike.nearest_distance_miles, "mi")}
+         ${transitRow("Nearest station departures", bike.nearest_departures, "departures")}`)}
+      ${card("pedestrian", "DOT pedestrian observation", `${transitValue(pedestrian.observed_total, "pedestrians")}`, pedestrian.source,
+        pedestrian.period, "Nearest monitored site to the tract centroid; DOT observes selected sites, not every street.",
+        `<div class="transit-row"><span>Nearest monitor</span><strong>${escapeHtml(pedestrian.monitor_name || "Unavailable")}</strong></div>
+         ${transitRow("Monitor distance", pedestrian.distance_miles, "mi")}
+         ${["AM", "MD", "PM"].map(period => transitRow(`${period} observation`, pedestrian.period_counts?.[period], "pedestrians")).join("")}`)}
+      ${card("taxi", "Taxi-zone activity", `${transitValue(taxi.pickups, "pickups")}`, taxi.source,
+        taxi.period, "HVFHV trips in the taxi zone containing the tract centroid; not a direct tract measurement.",
+        `<div class="transit-row"><span>Assigned taxi zone</span><strong>${escapeHtml(taxi.zone || "Unavailable")}${taxi.zone_borough ? ` · ${escapeHtml(taxi.zone_borough)}` : ""}</strong></div>
+         ${transitRow("Drop-offs", taxi.dropoffs, "drop-offs")}${transitRow("Active source days", taxi.active_days, "days")}`)}
+    </div>`;
+  target.querySelectorAll("[data-transit-group]").forEach(details => details.addEventListener("toggle", () => {
+    transitExpanded[details.dataset.transitGroup] = details.open;
+    persistDashboardView();
+  }));
+}
+
+async function renderTransitActivity() {
+  const target = document.querySelector("#transitActivityProfile");
+  if (!target || !dashboard || activeView !== "scorecard") return;
+  const geoid = selectedLocation().id;
+  const renderId = ++transitRenderId;
+  if (!transitCache.has(geoid)) target.innerHTML = '<div class="transit-loading" role="status">Loading transit and activity records…</div>';
+  try {
+    if (!transitCache.has(geoid)) {
+      const request = fetch(`/api/areas/${encodeURIComponent(geoid)}/transit-activity`)
+        .then(response => {if (!response.ok) throw new Error("Transit records unavailable"); return response.json();})
+        .catch(error => {transitCache.delete(geoid); throw error;});
+      transitCache.set(geoid, request);
+    }
+    const data = await transitCache.get(geoid);
+    if (renderId !== transitRenderId || !target.isConnected || activeView !== "scorecard" || selectedLocation().id !== geoid) return;
+    paintTransitActivity(target, data);
+  } catch (_) {
+    if (renderId !== transitRenderId || !target.isConnected || activeView !== "scorecard") return;
+    target.innerHTML = '<div class="transit-error" role="alert">Transit and activity records could not load. <button type="button">Retry</button></div>';
+    target.querySelector("button").addEventListener("click", renderTransitActivity);
+  }
+}
+
+function competitionShare(count, total) {
+  return total ? `${(count / total * 100).toFixed(1)}%` : "Unavailable";
+}
+
+function competitionSummary(market, comparison) {
+  const card = (data, label) => `<div class="competition-area-card">
+    <span>${label} · ${escapeHtml(data.borough)}</span><h4>${escapeHtml(data.tract_name)}</h4>
+    <div><strong>${data.tract_restaurant_count.toLocaleString("en-US")}</strong><small>Recorded establishments</small></div>
+    ${data.cuisine_supported ? `<p>My Cuisine: <strong>${data.same_cuisine_count.toLocaleString("en-US")}</strong>
+      <span>${data.tract_restaurant_count ? `${competitionShare(data.same_cuisine_count, data.tract_restaurant_count)} of all recorded establishments` : "Share unavailable (zero establishments)"}</span></p>` : ""}
+  </div>`;
+  if (!comparison) return `<div class="competition-area-cards">${card(market, "Selected area")}</div>`;
+  const firstCounts = new Map(market.cuisine_counts.map(item => [item.cuisine, item.count]));
+  const secondCounts = new Map(comparison.cuisine_counts.map(item => [item.cuisine, item.count]));
+  const cuisines = [...new Set([...firstCounts.keys(), ...secondCounts.keys()])]
+    .sort((a, b) => ((firstCounts.get(b) || 0) + (secondCounts.get(b) || 0)) -
+      ((firstCounts.get(a) || 0) + (secondCounts.get(a) || 0)) || a.localeCompare(b));
+  const cell = (count, total) => `<strong>${count.toLocaleString("en-US")}</strong><small>${competitionShare(count, total)}</small>`;
+  return `<div class="competition-area-cards">${card(market, "Selected area")}${card(comparison, "Comparison area")}</div>
+    <details class="competition-comparison" ${competitionComparisonOpen ? "open" : ""}><summary>Cuisine comparison <span>${cuisines.length} classifications</span></summary>
+      <p>Shares use each tract's full active, CAMIS-deduplicated establishment total before list filters or search.</p>
+      <div class="competition-comparison-scroll"><table><thead><tr><th scope="col">Cuisine</th>
+        <th scope="col">${escapeHtml(market.tract_name)}</th><th scope="col">${escapeHtml(comparison.tract_name)}</th></tr></thead>
+        <tbody>${cuisines.length ? cuisines.map(label => `<tr><th scope="row">${escapeHtml(label)}</th>
+          <td>${cell(firstCounts.get(label) || 0, market.tract_restaurant_count)}</td>
+          <td>${cell(secondCounts.get(label) || 0, comparison.tract_restaurant_count)}</td></tr>`).join("") :
+          '<tr><td colspan="3">No recorded establishments in either tract.</td></tr>'}</tbody></table></div>
+    </details><p class="competition-caution">Fewer recorded competitors alone does not indicate a better location.</p>`;
+}
+
+function drawCompetitionRows(target, market) {
+  const rows = market.restaurants.filter(row =>
+    (competitionFilter === "all" || (competitionFilter === "mine" ? row.same_cuisine :
+      row.cuisine === competitionFilter.slice("cuisine:".length))) &&
+    `${row.name} ${row.cuisine} ${row.address}`.toLowerCase().includes(competitionQuery.toLowerCase().trim()));
+  const shown = rows.slice(0, competitionVisible);
+  target.querySelector("#competitionResultCount").textContent = `Showing ${shown.length} of ${rows.length} matching restaurants`;
+  target.querySelector("#competitionRows").innerHTML = shown.length ? shown.map(row => `
+    <div class="competition-row" role="row">
+      <strong role="cell">${escapeHtml(row.name)}</strong>
+      <span role="cell">${escapeHtml(row.cuisine)}</span>
+      <span role="cell">${escapeHtml(row.address || "Address unavailable")}</span>
+    </div>`).join("") : `<div class="competition-empty">${market.tract_restaurant_count === 0
+      ? "No recorded establishments in this tract." : "No restaurants match this filter or search."}</div>`;
+  const more = target.querySelector("#competitionMore");
+  more.hidden = shown.length >= rows.length;
+  target.querySelectorAll("[data-competition-filter]").forEach(button =>
+    button.setAttribute("aria-pressed", String(button.dataset.competitionFilter === competitionFilter)));
+  target.querySelectorAll("[data-competition-cuisine]").forEach(button =>
+    button.setAttribute("aria-pressed", String(competitionFilter === `cuisine:${button.dataset.competitionCuisine}`)));
+  const selectedCuisine = competitionFilter.startsWith("cuisine:") ? competitionFilter.slice("cuisine:".length) : "";
+  target.querySelector("#competitionActiveFilter").textContent = selectedCuisine ? `Filtering list: ${selectedCuisine}` :
+    competitionFilter === "mine" ? "Filtering list: My Cuisine" : "Filtering list: All Cuisines";
+  target.querySelector("#competitionClearFilter").hidden = !selectedCuisine;
+  persistDashboardView();
+}
+
+function paintCompetitionExplorer(target, market, comparison) {
+  const topCount = market.cuisine_counts[0]?.count || 1;
+  const supportNote = market.cuisine_supported ? "" : `
+    <p class="competition-support-note">My Cuisine is unavailable because ${dashboard.meta.concept.cuisine === "any"
+      ? "the brief has no selected cuisine" : "this cuisine is not separately classified in DOHMH records"}.
+      <button type="button" id="competitionEditBrief">Choose a cuisine in Edit Brief</button>.</p>`;
+  target.innerHTML = `
+    <div class="competition-heading">
+      <div><h3>Competition Explorer</h3><p>Recorded establishments, not a guaranteed live inventory.</p></div>
+    </div>
+    <p class="competition-source">${escapeHtml(market.source)} · Latest inspection in file: ${escapeHtml(market.latest_inspection_date || "Date unavailable")} · Extract date unavailable</p>
+    ${competitionSummary(market, comparison)}
+    ${supportNote}
+    <div class="competition-content">
+      <details class="competition-breakdown" ${competitionBreakdownOpen ? "open" : ""}><summary>Cuisine breakdown <span>${market.cuisine_counts.length} classifications</span></summary>
+        <div class="competition-bars">${market.cuisine_counts.length ? market.cuisine_counts.map(item => `
+          <button type="button" class="competition-bar" data-competition-cuisine="${escapeHtml(item.cuisine)}" aria-pressed="false"
+            aria-label="Filter selected-area restaurants to ${escapeHtml(item.cuisine)}: ${item.count} recorded, ${competitionShare(item.count, market.tract_restaurant_count)} of all recorded establishments">
+            <span class="competition-bar-label"><span>${escapeHtml(item.cuisine)}</span><strong>${item.count.toLocaleString("en-US")} · ${competitionShare(item.count, market.tract_restaurant_count)}</strong></span>
+            <span class="competition-bar-track"><span style="width:${Math.max(2, item.count / topCount * 100)}%"></span></span></button>`).join("") :
+          '<p class="competition-empty">No recorded establishments in this tract.</p>'}</div>
+      </details>
+      <div class="competition-list">
+        <div class="competition-tools"><div class="competition-filter" role="group" aria-label="Restaurant cuisine filter">
+          <button type="button" data-competition-filter="all">All Cuisines</button>
+          <button type="button" data-competition-filter="mine" ${market.cuisine_supported ? "" : "disabled"}>My Cuisine${market.cuisine_supported ? ` (${market.same_cuisine_count})` : ""}</button>
+        </div><label>Search restaurants<input id="competitionSearch" type="search" placeholder="Name, cuisine, or address" value="${escapeHtml(competitionQuery)}" /></label></div>
+        <div class="competition-filter-state"><span id="competitionActiveFilter"></span><button type="button" id="competitionClearFilter" hidden>Clear cuisine filter</button></div>
+        <div class="competition-results" id="competitionResultCount" role="status"></div>
+        <div class="competition-table" role="table" aria-label="Recorded restaurants"><div class="competition-row competition-row-head" role="row"><strong role="columnheader">Restaurant</strong><strong role="columnheader">Cuisine</strong><strong role="columnheader">Address</strong></div><div id="competitionRows"></div></div>
+        <button class="competition-more" id="competitionMore" type="button">Show More</button>
+      </div>
+    </div>`;
+  target.querySelector("#competitionEditBrief")?.addEventListener("click", openBrief);
+  target.querySelector(".competition-breakdown").addEventListener("toggle", event => {competitionBreakdownOpen = event.target.open; persistDashboardView();});
+  target.querySelector(".competition-comparison")?.addEventListener("toggle", event => {competitionComparisonOpen = event.target.open; persistDashboardView();});
+  target.querySelectorAll("[data-competition-filter]").forEach(button => button.addEventListener("click", () => {
+    competitionFilter = button.dataset.competitionFilter;
+    competitionVisible = 10;
+    drawCompetitionRows(target, market);
+  }));
+  target.querySelectorAll("[data-competition-cuisine]").forEach(button => button.addEventListener("click", () => {
+    const filter = `cuisine:${button.dataset.competitionCuisine}`;
+    competitionFilter = competitionFilter === filter ? "all" : filter;
+    competitionVisible = 10;
+    drawCompetitionRows(target, market);
+  }));
+  target.querySelector("#competitionClearFilter").addEventListener("click", () => {
+    competitionFilter = "all";
+    competitionVisible = 10;
+    drawCompetitionRows(target, market);
+  });
+  target.querySelector("#competitionSearch").addEventListener("input", event => {
+    competitionQuery = event.target.value;
+    competitionVisible = 10;
+    drawCompetitionRows(target, market);
+  });
+  target.querySelector("#competitionMore").addEventListener("click", () => {
+    competitionVisible += 10;
+    drawCompetitionRows(target, market);
+  });
+  drawCompetitionRows(target, market);
+}
+
+function loadCompetitionData(id, cuisine) {
+  const key = `${id}:${cuisine}`;
+  if (!competitionCache.has(key)) {
+    const generation = requestId;
+    const request = fetch(`/api/locations/${encodeURIComponent(id)}/competition?cuisine=${encodeURIComponent(cuisine)}`)
+      .then(response => {if (!response.ok) throw new Error("Restaurant records unavailable"); return response.json();})
+      .then(result => {if (generation === requestId) competitionResolved.set(key, result); return result;})
+      .catch(error => {if (generation === requestId) competitionCache.delete(key); throw error;});
+    competitionCache.set(key, request);
+  }
+  return competitionCache.get(key);
+}
+
+async function renderCompetitionExplorer() {
+  const target = document.querySelector("#competitionExplorer");
+  if (!target || !dashboard || activeView !== "scorecard") return;
+  const geoid = selectedLocation().id;
+  const cuisine = dashboard.meta.concept.cuisine;
+  if (profileComparisonId === geoid) profileComparisonId = "";
+  const comparisonId = profileComparisonId;
+  const key = `${geoid}:${cuisine}`;
+  if (competitionContext !== key) {
+    competitionContext = key;
+    competitionFilter = "all";
+    competitionQuery = "";
+    competitionVisible = 10;
+  }
+  const renderId = ++competitionRenderId;
+  if (!(competitionResolved.has(key) && (!comparisonId || competitionResolved.has(`${comparisonId}:${cuisine}`))))
+    target.innerHTML = '<div class="competition-loading" role="status">Loading recorded restaurants…</div>';
+  try {
+    const [market, comparison] = await Promise.all([
+      loadCompetitionData(geoid, cuisine), comparisonId ? loadCompetitionData(comparisonId, cuisine) : Promise.resolve(null),
+    ]);
+    if (renderId !== competitionRenderId || !target.isConnected || selectedLocation().id !== geoid ||
+        profileComparisonId !== comparisonId || activeView !== "scorecard") return;
+    paintCompetitionExplorer(target, market, comparison);
+  } catch (error) {
+    if (renderId !== competitionRenderId || !target.isConnected || activeView !== "scorecard") return;
+    target.innerHTML = '<div class="competition-error" role="alert">Restaurant records could not load. <button type="button" class="competition-more">Retry</button></div>';
+    target.querySelector("button").addEventListener("click", renderCompetitionExplorer);
+  }
+}
+
 function revealSelectedRanking() {
   const table = document.querySelector("#rankingTable");
   const row = [...table.querySelectorAll(".table-row[data-id]")].find(item => item.dataset.id === selectedId);
@@ -1328,31 +1878,86 @@ function renderMarketProfile() {
   const location = selectedLocation();
   const profile = location.market_profile || {};
   const measure = (label, value, basis) => `<div class="market-measure"><span>${label}</span><strong>${value}</strong><small>${basis}</small></div>`;
+  const evidence = location.concept_evidence;
+  const count = value => value === null ? "Unavailable" : Number(value).toLocaleString("en-US");
+  const survival = location.survival;
+  const survivalValue = survival?.status === "available" ? `${(100 * survival.probability).toFixed(1)}%` : "Unavailable";
+  const survivalBasis = survival?.status === "available"
+    ? `${survival.source_type === "atharv_tract_export" ? "Archive-based research estimate · disappearance proxy" : `Experimental three-year estimate · ${Math.round(100 * survival.feature_coverage)}% feature coverage`} · ${escapeHtml(survival.model_version)}. Screening ranking is separate.`
+    : `${escapeHtml(dashboard.survival_model?.label || "Survival model unavailable")}. Screening scores are not survival predictions.`;
+  const risks = location.risk_flags.map((risk) => `<li>${titleCase(risk)}</li>`).join("");
+  const components = location.score_components.map((component) => {
+    const noCuisineEvidence = component.key === "market_gap" && component.coverage === 0;
+    return `
+    <article class="score-component">
+      <div class="score-component__top">
+        <div>
+          <h3>${component.label}</h3>
+        </div>
+        <strong class="${noCuisineEvidence ? "score-component-unavailable" : scoreClass(component.score)}">${noCuisineEvidence ? "Unavailable" : component.score}</strong>
+      </div>
+      ${noCuisineEvidence ? `<p class="score-component-note">${cuisineOpportunityExplanation(location)}</p>` : ""}
+      <div class="component-bars">
+        ${noCuisineEvidence ? "" : `<div>
+          <span>Score</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${component.score}%;background:${colorFor(component.score, "opportunity")}"></div></div>
+        </div>`}
+        <div>
+          <span>Evidence Strength ${component.coverage}%</span>
+          <div class="bar-track evidence"><div class="bar-fill" style="width:${component.coverage}%;background:var(--cyan)"></div></div>
+        </div>
+      </div>
+    </article>
+  `;
+  }).join("");
+
   document.querySelector("#scorecardBoard").innerHTML = `
-    <div class="view-heading"><div><span class="eyebrow">${escapeHtml(location.borough)} / ${escapeHtml(profile.neighborhood || "NYC")}</span><h3>${escapeHtml(location.name)}</h3></div><button class="quiet-action" type="button" id="marketCompetition">View Competition</button></div>
-    <div class="market-group"><h3>Local Customer Base</h3><div class="market-measures">
-      ${measure("Residents", displayNumber(profile.population), "2020-2024 ACS five-year estimate")}
-      ${measure("Jobs", displayNumber(profile.jobs), "2023 LODES workplace employment")}
-      ${measure("Median Household Income", profile.median_household_income == null ? "Unavailable" : fmtDollar(profile.median_household_income), profile.income_margin_of_error == null ? "2020-2024 ACS five-year estimate" : `2020-2024 ACS five-year estimate · ±${fmtDollar(profile.income_margin_of_error)}`)}
-    </div></div>
-    <div class="market-group"><h3>Access And Movement</h3><div class="market-measures">
-      ${measure("Walkability", location.walkability == null ? "Unavailable" : `${location.walkability}/100`, "EPA built-environment index")}
-      ${measure("Nearest Subway", profile.subway_distance_miles == null ? "Unavailable" : `${Number(profile.subway_distance_miles).toFixed(2)} mi`, escapeHtml(profile.nearest_subway_station || "Nearest complex"))}
-      ${measure("Subway Entries", displayNumber(profile.nearest_subway_weekly_ridership), escapeHtml(profile.subway_vintage || "Nearest station · one complete week"))}
-      ${profile.nearest_subway_dayparts ? measure("Weekday Morning Entries", displayNumber(profile.nearest_subway_dayparts.morning), "7-10 AM · four sampled 2025 weeks") : ""}
-      ${profile.nearest_subway_dayparts ? measure("Weekday Midday Entries", displayNumber(profile.nearest_subway_dayparts.midday), "11 AM-2 PM · four sampled 2025 weeks") : ""}
-      ${profile.nearest_subway_dayparts ? measure("Weekday Evening Entries", displayNumber(profile.nearest_subway_dayparts.evening), "5-9 PM · four sampled 2025 weeks") : ""}
-      ${measure("Citi Bike Departures", displayNumber(profile.bike_departures_latest_month ?? profile.bike_departures_august_2026), `Tract stations · ${profile.bike_activity_month ? new Date(`${profile.bike_activity_month}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }) : "August 2026"}`)}
-      ${measure("Pedestrian Count", displayNumber(profile.pedestrian_counter_latest), profile.pedestrian_counter_distance_miles == null ? "Nearest monitor · observation date unavailable" : `Nearest monitor · ${Number(profile.pedestrian_counter_distance_miles).toFixed(2)} mi away · date unavailable`)}
-    </div></div>
+    <section class="scorecard-hero">
+      <div>
+        <span class="card-status">Screening Estimate</span>
+        <h3>${escapeHtml(conceptName())} · ${location.name}</h3>
+        <p>${location.recommendation}</p>
+      </div>
+      <div class="scorecard-orbs">
+        <div><strong>${location.opportunity}</strong><span>Score</span></div>
+        <div><strong>${location.confidence_score}%</strong><span>Evidence Strength</span></div>
+      </div>
+    </section>
+    <section class="concept-evidence">
+      <div class="concept-evidence-heading"><h3>${escapeHtml(evidence.positioning)}</h3><span>${escapeHtml(cuisineLabel())} · $${state.averageCheck} Per Guest</span></div>
+      <div class="evidence-grid">
+        <div><span>Walkability</span><strong>${location.walkability ?? "--"}/100</strong></div>
+        <div><span>Business Draw</span><strong>${location.business_draw}/100</strong></div>
+        <div><span>Same Cuisine In Tract</span><strong>${count(evidence.same_cuisine_count)}</strong></div>
+        <div><span>Same Cuisine In Neighborhood</span><strong>${count(evidence.neighborhood_same_cuisine_count)}</strong></div>
+      </div>
+    </section>
+    <section class="rw-profile" id="residentWorkerProfile" aria-label="Resident and worker profile"></section>
+    <section class="transit-profile" id="transitActivityProfile" aria-label="Transit and activity profile"></section>
+    <section class="competition-explorer" id="competitionExplorer" aria-label="Competition explorer"></section>
     <div class="market-group"><h3>Commercial Context</h3><div class="market-measures">
+      ${measure("Estimated Three-Year Survival", survivalValue, survivalBasis)}
       ${measure("Recorded Restaurants", displayNumber(profile.active_restaurants), "DOHMH tract records")}
       ${measure("Reported Vacant Storefronts", displayNumber(profile.reported_vacant_storefronts), "Registry filings; availability unverified")}
-      ${measure("Business Draw", `${location.business_draw}/100`, "Concept-specific screening index")}
+
     </div></div>
     <div class="catchment-result" id="catchmentResult"><button class="primary-action" type="button" id="analyzeCatchment">Analyze 10-Minute Walk</button><span>From Tract Centroid</span></div>
+    <section class="scorecard-layout">
+      <div class="component-grid">${components}</div>
+      <aside class="risk-panel">
+        <h3>Decision Notes</h3>
+        <ul>${risks}</ul>
+        <div class="kv"><span>Concept Fit</span><strong>${titleCase(location.archetype)}</strong></div>
+        <div class="kv"><span>Asking Rent</span><strong>${rentDisplay(location)}</strong></div>
+        <div class="kv"><span>Budget Target</span><strong>${fmtMoney(dashboard.finance.rent_target)}/Month</strong></div>
+      </aside>
+    </section>
   `;
-  document.querySelector("#marketCompetition").addEventListener("click", () => selectView("whitespace"));
+  if (activeView === "scorecard") {
+    renderResidentWorkerProfile();
+    renderTransitActivity();
+    renderCompetitionExplorer();
+  }
   const cached = catchmentCache.get(`${location.id}:${dashboard.meta.concept.cuisine}`);
   if (cached) renderCatchmentResult(cached);
   else document.querySelector("#analyzeCatchment").addEventListener("click", analyzeSelectedCatchment);
@@ -1383,6 +1988,47 @@ async function analyzeSelectedCatchment() {
     container.innerHTML = '<span>Walking Analysis Unavailable.</span><button class="quiet-action" type="button" id="retryCatchment">Retry</button>';
     document.querySelector("#retryCatchment").addEventListener("click", analyzeSelectedCatchment);
   }
+}
+
+function renderFeeds() {
+  document.querySelector("#feedList").innerHTML = dashboard.feeds.map((feed) => `
+    <article class="feed-row">
+      <div class="feed-row__top">
+        <span>${escapeHtml(feed.name)}</span>
+        <span>${escapeHtml(feed.vintage)}</span>
+      </div>
+      <div class="feed-row__meta">
+        <span>${escapeHtml(feed.grain)}</span>
+        <span>${escapeHtml(feed.coverage)}</span>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderShortlist() {
+  const candidates = dashboard.locations.slice(0, 6);
+  document.querySelector("#shortlistBoard").innerHTML = candidates.map((row, index) => `
+    <article class="shortlist-card" data-id="${row.id}">
+      <span class="card-status">Rank ${index + 1}</span>
+      <h3>${row.name}</h3>
+      <div class="score-line">
+        <strong class="${scoreClass(row.opportunity)}">${row.opportunity}</strong>
+        <span>${row.borough} - ${titleCase(row.archetype)}</span>
+      </div>
+      <div class="kv"><span>Best Use</span><strong>${titleCase(row.archetype)}</strong></div>
+      <div class="kv"><span>Asking Rent</span><strong>${rentDisplay(row)}</strong></div>
+      <div class="kv"><span>Business Draw</span><strong>${row.business_draw}/100</strong></div>
+    </article>
+  `).join("");
+
+  document.querySelectorAll(".shortlist-card[data-id]").forEach((card) => {
+    card.addEventListener("click", () => {
+      selectedId = card.dataset.id;
+      activeView = "discover";
+      document.querySelectorAll(".feature-tab").forEach((item) => item.classList.toggle("is-active", item.dataset.view === "discover"));
+      renderAll();
+    });
+  });
 }
 
 function renderCompare() {
@@ -1426,29 +2072,26 @@ function renderCompare() {
 }
 
 function renderLease() {
-  let candidates = dashboard.properties || [];
-  document.querySelector("#propertyHeading").textContent = state.dealType === "purchase" ? "Purchase Properties" : state.dealType === "either" ? "Lease & Purchase Properties" : "Lease Properties";
+  let candidates = (dashboard.properties || []).filter(row => row.lead_type === "listing");
+  document.querySelector("#propertyHeading").textContent = "Properties";
+  syncPropertyTabs();
   if (state.preferredArea) {
     candidates = candidates.filter((row) => row.borough === state.preferredArea);
   }
-  const listingCount = candidates.filter(row => row.lead_type === "listing").length;
-  const registryCount = candidates.length - listingCount;
-  const filter = `<div class="property-toolbar"><span>${listingCount} Source-Linked Listings · ${registryCount} Storefront Records</span><div class="segmented-control" role="group" aria-label="Property Records"><button type="button" data-property-view="all" aria-pressed="${propertyView === "all"}">All</button><button type="button" data-property-view="listing" aria-pressed="${propertyView === "listing"}">Listings</button>${state.dealType !== "purchase" ? `<button type="button" data-property-view="registry_record" aria-pressed="${propertyView === "registry_record"}">Research Records</button>` : ""}</div></div>`;
-  if (state.dealType === "purchase" && propertyView === "registry_record") propertyView = "all";
-  if (propertyView !== "all") candidates = candidates.filter(row => row.lead_type === propertyView);
   if (!candidates.length) {
-    const emptyTitle = state.dealType === "purchase" ? "No Current Purchase Listings" : propertyView === "listing" ? "No Current Lease Listings" : "No Current Property Records Found";
+    const sourceConnected = dashboard.listing_source_connected === true;
+    const type = state.dealType === "purchase" ? "purchase" : state.dealType === "either" ? "lease or purchase" : "lease";
     document.querySelector("#leaseBoard").innerHTML = `
-      ${filter}
-      <article class="property-empty">
-        <h3>${emptyTitle}</h3>
-        <button class="quiet-action" type="button" onclick="openBrief()">Edit Search Brief</button>
+      <article class="property-listings-empty">
+        <span class="property-empty-icon" aria-hidden="true">⌕</span>
+        <div><h3>${sourceConnected ? `No matching ${type} listings` : "No listing source connected"}</h3>
+        <p>${sourceConnected ? `The connected listing source has no verified ${type} records matching this search.` : "Verified lease and purchase listings are not connected in this preview."}</p></div>
       </article>
     `;
-    bindPropertyFilters();
     return;
   }
-  document.querySelector("#leaseBoard").innerHTML = filter + candidates.map((row) => {
+
+  document.querySelector("#leaseBoard").innerHTML = `<div class="property-results-meta">${candidates.length} source-linked ${state.dealType === "purchase" ? "purchase" : state.dealType === "either" ? "lease or purchase" : "lease"} listing${candidates.length === 1 ? "" : "s"}</div>` + candidates.map((row) => {
     const priceLine = row.price_label || "Unavailable";
     const imageClass = row.image ? "property-image" : "property-image no-image";
     const imageStyle = row.image ? ` style="background-image:url('${escapeHtml(row.image.replaceAll("'", "%27"))}')"` : "";
@@ -1490,20 +2133,89 @@ function renderLease() {
       </article>
     `;
   }).join("");
-  bindPropertyFilters();
 }
 
-function bindPropertyFilters() {
-  document.querySelectorAll("[data-property-view]").forEach(button => button.addEventListener("click", () => {
-    propertyView = button.dataset.propertyView;
-    renderLease();
-  }));
+
+function storefrontMatches(row) {
+  const areaMatches = storefrontArea === "all" || (storefrontArea === "selected" ? row.geoid === selectedLocation().id : row.borough === storefrontArea);
+  const vacancyMatches = storefrontVacancy === "all" ||
+    (storefrontVacancy === "dec31" ? row.vacant_on_dec_31 :
+      storefrontVacancy === "jun30" ? row.vacant_on_jun_30_or_sale : row.vacancy_status === storefrontVacancy);
+  const needle = storefrontQuery.toLowerCase().trim();
+  return areaMatches && vacancyMatches && (!needle || `${row.address || ""} ${row.reported_activity || ""}`.toLowerCase().includes(needle));
+}
+
+function drawStorefrontRows(target) {
+  const rows = storefrontData.records.filter(storefrontMatches);
+  const shown = rows.slice(0, storefrontVisible);
+  target.querySelector("#storefrontCount").textContent = `${rows.length.toLocaleString("en-US")} matching records · Showing ${shown.length.toLocaleString("en-US")} of ${storefrontData.total.toLocaleString("en-US")} in source`;
+  target.querySelector("#storefrontRows").innerHTML = shown.length ? shown.map(row => `
+    <article class="storefront-record">
+      <div class="storefront-field"><span class="storefront-mobile-label">Address</span><strong>${escapeHtml(row.address || "Unavailable")}</strong></div>
+      <div class="storefront-field"><span class="storefront-mobile-label">Reported Status</span><span class="storefront-status ${row.vacancy_status === "reported_vacant" ? "is-reported" : "is-unknown"}">${row.vacancy_status === "reported_vacant" ? "Reported vacant" : "Unknown"}</span></div>
+      <div class="storefront-field"><span class="storefront-mobile-label">Reported Activity</span><span>${escapeHtml(row.reported_activity || "Unavailable")}</span></div>
+      <details class="storefront-details"><summary>View details</summary><dl>
+        <div><dt>BBL</dt><dd>${escapeHtml(row.id || "Unavailable")}</dd></div>
+        <div><dt>Borough / ZIP</dt><dd>${escapeHtml([row.borough, row.zip_code].filter(Boolean).join(" · ") || "Unavailable")}</dd></div>
+        <div><dt>Unit</dt><dd>${escapeHtml(row.unit || "Unavailable")}</dd></div>
+        <div><dt>Reporting year</dt><dd>${escapeHtml(row.reporting_year || "Unavailable")}</dd></div>
+        <div><dt>Filing due date</dt><dd>${escapeHtml(row.filing_due_date || "Unavailable")}</dd></div>
+        <div><dt>Vacant on Dec 31</dt><dd>${row.vacant_on_dec_31 ? "Marked yes" : "Not marked"}</dd></div>
+        <div><dt>Vacant on Jun 30 or sale date</dt><dd>${row.vacant_on_jun_30_or_sale ? "Marked yes" : "Not marked"}</dd></div>
+      </dl></details>
+    </article>`).join("") :
+      '<div class="storefront-empty">No registry records match these filters or search.</div>';
+  target.querySelector("#storefrontMore").hidden = shown.length >= rows.length;
+  persistDashboardView();
+}
+
+function paintStorefrontExplorer(target) {
+  const year = storefrontData.reporting_years.join(", ") || "Unavailable";
+  target.innerHTML = `<div class="storefront-heading"><div><h3>Storefront Research</h3>
+    <p>Registry records for research. Availability and asking rent are not verified.</p></div>
+    <span class="storefront-source">${escapeHtml(storefrontData.source)} · Reporting year ${escapeHtml(year)}</span></div>
+    <div class="storefront-toolbar"><div class="storefront-controls">
+      <label>Area<select id="storefrontArea"><option value="all">All boroughs</option><option value="selected">Selected tract · ${escapeHtml(selectedLocation().name)}</option>
+        ${["Bronx", "Brooklyn", "Manhattan", "Queens", "Staten Island"].map(name => `<option value="${name}">${name}</option>`).join("")}</select></label>
+      <label>Reported vacancy<select id="storefrontVacancy"><option value="all">All registry records</option><option value="reported_vacant">Reported vacant</option>
+        <option value="dec31">Vacant on Dec 31</option><option value="jun30">Vacant on Jun 30 or sale date</option><option value="unknown">Unknown status</option></select></label>
+      <label>Search address or activity<input id="storefrontSearch" type="search" placeholder="Address or reported activity" value="${escapeHtml(storefrontQuery)}" /></label>
+    </div><div class="storefront-count" id="storefrontCount" role="status"></div></div>
+    <div class="storefront-row-head"><span>Address</span><span>Reported Status</span><span>Reported Activity</span><span class="sr-only">Details</span></div>
+    <div class="storefront-rows" id="storefrontRows"></div>
+    <button type="button" class="storefront-more" id="storefrontMore">Show More</button>`;
+  target.querySelector("#storefrontArea").value = storefrontArea;
+  target.querySelector("#storefrontVacancy").value = storefrontVacancy;
+  target.querySelector("#storefrontArea").addEventListener("change", event => {storefrontArea = event.target.value; storefrontVisible = 12; drawStorefrontRows(target);});
+  target.querySelector("#storefrontVacancy").addEventListener("change", event => {storefrontVacancy = event.target.value; storefrontVisible = 12; drawStorefrontRows(target);});
+  target.querySelector("#storefrontSearch").addEventListener("input", event => {storefrontQuery = event.target.value; storefrontVisible = 12; drawStorefrontRows(target);});
+  target.querySelector("#storefrontMore").addEventListener("click", () => {storefrontVisible += 12; drawStorefrontRows(target);});
+  drawStorefrontRows(target);
+}
+
+async function renderStorefrontExplorer() {
+  const target = document.querySelector("#storefrontExplorer");
+  if (!target || !dashboard || activeView !== "lease" || propertyTab !== "research") return;
+  if (storefrontData) {paintStorefrontExplorer(target); return;}
+  target.innerHTML = '<div class="storefront-loading" role="status">Loading Storefront Registry records…</div>';
+  try {
+    if (!storefrontPromise) storefrontPromise = fetch("/api/storefronts")
+      .then(response => {if (!response.ok) throw new Error("Storefront Registry unavailable"); return response.json();})
+      .catch(error => {storefrontPromise = null; throw error;});
+    const data = await storefrontPromise;
+    storefrontData = data;
+    if (target.isConnected && activeView === "lease" && propertyTab === "research") paintStorefrontExplorer(target);
+  } catch (_) {
+    if (!target.isConnected || activeView !== "lease" || propertyTab !== "research") return;
+    target.innerHTML = '<div class="storefront-error" role="alert">Storefront Registry records could not load. <button type="button">Retry</button></div>';
+    target.querySelector("button").addEventListener("click", renderStorefrontExplorer);
+  }
 }
 
 function renderWhitespace() {
   const location = selectedLocation();
   const key = `${location.id}:${dashboard.meta.concept.cuisine}`;
-  const market = competitionCache.get(key);
+  const market = competitionResolved.get(key);
   const board = document.querySelector("#gapBoard");
   if (!market) {
     board.innerHTML = `<div class="comparison-empty"><h3>${escapeHtml(location.name)}</h3><p>Loading Restaurant Inventory...</p></div>`;
@@ -1537,14 +2249,11 @@ async function loadCompetition() {
   const location = selectedLocation();
   const cuisine = dashboard.meta.concept.cuisine;
   const key = `${location.id}:${cuisine}`;
-  if (competitionCache.has(key)) return renderWhitespace();
+  if (competitionResolved.has(key)) return renderWhitespace();
   const current = ++competitionRequest;
   renderWhitespace();
   try {
-    const response = await fetch(`/api/locations/${encodeURIComponent(location.id)}/competition?cuisine=${encodeURIComponent(cuisine)}`);
-    if (!response.ok) throw new Error("Competition request failed");
-    const market = await response.json();
-    competitionCache.set(key, market);
+    await loadCompetitionData(location.id, cuisine);
     if (current === competitionRequest && activeView === "whitespace" && selectedId === location.id) renderWhitespace();
   } catch {
     if (current === competitionRequest && activeView === "whitespace") {
@@ -1768,7 +2477,7 @@ function renderPanels() {
   document.querySelectorAll("[data-panel]").forEach((panel) => {
     panel.classList.toggle("is-hidden", panel.dataset.panel !== activeView);
   });
-  if (activeView === "discover" && locationMap) requestAnimationFrame(() => locationMap.resize());
+  if (activeView === "discover" && locationMap) requestAnimationFrame(() => {locationMap.resize(); updateNycConstraints();});
   if (activeView === "whitespace") loadCompetition();
 }
 
@@ -1780,13 +2489,17 @@ function renderAll() {
   renderIntel();
   renderRanking();
   renderMarketProfile();
+  renderFeeds();
+  renderShortlist();
   renderCompare();
   renderLease();
+  if (activeView === "lease" && propertyTab === "research") renderStorefrontExplorer();
   renderWhitespace();
   renderFinance();
   renderReports();
   renderDataLayers();
   renderPanels();
+  persistDashboardView();
   renderMenu();
 }
 
@@ -1794,11 +2507,9 @@ function renderConceptChrome() {
   const name = conceptName();
   document.querySelector("#workspaceTitle").textContent = activeView === "menu" ? `${name} Menu` : `${name} Location Search`;
   document.querySelector("#activeConceptName").textContent = name;
-  document.querySelector("#activeFormat").textContent = `${dealLabel(state.dealType)} · ${profileLabel(state.profile)}`;
-  document.querySelector("#activeCuisine").textContent = state.cuisine === "custom"
-    ? (document.querySelector("#briefCustomCuisine").value.trim() || "Other Cuisine") : cuisineLabel();
+  document.querySelector("#activeCuisine").textContent = state.cuisine === "custom" ? (document.querySelector("#briefCustomCuisine").value.trim() || "Other cuisine") : cuisineLabel();
   document.querySelector("#activePrice").textContent = state.priceMode === "tier" ? `${state.priceTier} Price Range` : `$${state.averageCheck} Per Guest`;
-  document.querySelector("#activeArea").textContent = state.preferredArea || "Anywhere In NYC";
+  document.querySelector("#activeArea").textContent = state.preferredArea || "Anywhere in NYC";
 }
 
 document.querySelectorAll(".feature-tab").forEach((button) => {
@@ -1906,67 +2617,111 @@ document.querySelectorAll(".mini-tab").forEach((button) => {
 });
 
 function syncBriefControls() {
-  document.querySelector("#briefCuisine").value = state.cuisine;
-  document.querySelector("#briefAverageCheck").value = state.averageCheck;
-  document.querySelector("#briefPriceTier").value = state.priceTier;
-  document.querySelector("#briefDietary").value = state.dietary;
-  document.querySelector("#briefDescription").value = state.description;
-  document.querySelector("#briefPurchaseBudget").value = state.purchaseBudget;
-  document.querySelector("#briefServiceStyle").value = state.serviceStyle;
-  document.querySelector("#briefAudience").value = state.audience;
-  document.querySelector("#briefDaypart").value = state.daypart;
+  if (hasSubmittedBrief || legacyCuisineRequired) {
+    const known = ideaOptions.find(item => item.label === state.conceptName);
+    selectedIdea = known || {...ideaOptions.find(item => item.value === "other"), profile: state.profile};
+    document.querySelector("#briefConceptName").value = selectedIdea.label;
+    document.querySelector("#customIdeaField").hidden = selectedIdea.value !== "other";
+    document.querySelector("#briefCustomIdea").value = known ? "" : state.conceptName;
+    document.querySelector("#briefCuisine").value = hasExplicitCuisine(state.cuisine) ? state.cuisine : "";
+    document.querySelector("#cuisineSearch").value = document.querySelector("#briefCuisine").selectedOptions[0]?.textContent || "";
+    document.querySelector("#customCuisineField").hidden = state.cuisine !== "custom";
+    const custom = state.cuisine === "custom" ? state.description.match(/(?:^|\. )Cuisine: (.*)$/) : null;
+    document.querySelector("#briefCustomCuisine").value = custom?.[1] || "";
+    document.querySelector("#briefDescription").value = custom ? state.description.slice(0, custom.index) : state.description;
+    document.querySelector("#briefDeal").value = state.dealType;
+    document.querySelector("#briefPurchaseBudget").value = state.purchaseBudget;
+    document.querySelector("#briefServiceStyle").value = state.serviceStyle;
+    document.querySelector("#briefAudience").value = state.audience;
+    document.querySelector("#briefDaypart").value = state.daypart;
+  }
+  if (hasSubmittedBrief) document.querySelector("#briefCuisine").value = state.cuisine;
+  if (hasSubmittedBrief) document.querySelector("#briefPriceTier").value = state.priceTier;
+  if (hasSubmittedBrief) document.querySelector("#briefDietary").value = state.dietary;
   document.querySelector("#conceptInput").value = conceptName();
-  document.querySelector("#briefConceptName").value = conceptName();
-  document.querySelector("#profileSelect").value = state.profile;
-  document.querySelector("#briefProfile").value = state.profile;
+  if (hasSubmittedBrief && selectedIdea?.value !== "other") document.querySelector("#briefConceptName").value = conceptName();
   document.querySelector("#dealSelect").value = state.dealType;
-  document.querySelector("#briefDeal").value = state.dealType;
-  document.querySelector("#briefBudget").value = String(state.rentCap);
-  document.querySelector("#briefArea").value = state.preferredArea;
+  if (hasSubmittedBrief && rentWasEntered) document.querySelector("#briefBudget").value = String(state.rentCap);
+  if (hasSubmittedBrief) document.querySelector("#briefArea").value = state.preferredArea;
   document.querySelector("#rentRange").value = String(Math.round(state.rentCap / 1000));
   document.querySelector("#rentLabel").textContent = `$${Math.round(state.rentCap / 1000)}k`;
   document.querySelector("#financeFixedCosts").value = state.otherFixedCosts;
   document.querySelector("#financeVariableCosts").value = state.variableCostPct;
   document.querySelector("#financeOperatingDays").value = state.operatingDays;
   syncTransactionFields();
-  syncPriceModeControls();
   updateConceptImage(state.cuisine);
   renderConceptChrome();
 }
 
 function closeBrief() {
   document.querySelector("#briefOverlay").classList.remove("is-open");
+  sessionStorage.setItem("groundwork-brief-open", "false");
 }
 
 function openBrief() {
   syncBriefControls();
   document.querySelector("#briefOverlay").classList.add("is-open");
+  sessionStorage.setItem("groundwork-brief-open", "true");
+}
+
+function hasExplicitCuisine(value) {
+  return Boolean(value && value !== "any" && [...document.querySelector("#briefCuisine").options].some(option => option.value === value));
 }
 
 function applyBrief() {
-  const ideaInput = document.querySelector("#briefConceptName");
-  const suggestion = conceptSuggestionsFor(ideaInput.value)[0];
-  if (suggestion && ideaInput.value.trim() !== state.conceptName &&
-      document.querySelector("#briefCuisine").value === state.cuisine &&
-      document.querySelector("#briefDietary").value === state.dietary &&
-      document.querySelector("#briefProfile").value === state.profile) {
-    chooseConceptSuggestion(suggestion, ideaInput, true);
+  const idea = document.querySelector("#briefConceptName");
+  const cuisine = document.querySelector("#briefCuisine");
+  const price = document.querySelector("#briefPriceTier");
+  const customIdea = document.querySelector("#briefCustomIdea");
+  const customCuisine = document.querySelector("#briefCustomCuisine");
+  const validIdea = selectedIdea && (idea.value === selectedIdea.label);
+  const checks = [
+    ["ideaError", validIdea], ["cuisineError", hasExplicitCuisine(cuisine.value)], ["priceError", Boolean(price.value)],
+  ];
+  checks.forEach(([id, valid]) => document.getElementById(id).hidden = valid);
+  customIdea.required = selectedIdea?.value === "other";
+  customCuisine.required = cuisine.value === "custom";
+  customIdea.setCustomValidity(customIdea.required && !customIdea.value.trim() ? "Enter your restaurant idea." : "");
+  customCuisine.setCustomValidity(customCuisine.required && !customCuisine.value.trim() ? "Enter your cuisine." : "");
+  document.querySelector("#briefDescription").setCustomValidity("");
+  if (!checks.every(([, valid]) => valid)) {
+    (validIdea ? (!hasExplicitCuisine(cuisine.value) ? document.querySelector("#cuisineSearch") : price) : idea).focus();
+    return;
   }
-  state.cuisine = document.querySelector("#briefCuisine").value;
-  state.priceTier = document.querySelector("#briefPriceTier").value;
-  state.averageCheck = state.priceMode === "tier" ? PRICE_DEFAULTS[state.priceTier] : Number(document.querySelector("#briefAverageCheck").value);
-  state.dietary = document.querySelector("#briefDietary").value;
-  state.description = document.querySelector("#briefDescription").value.trim();
-  state.purchaseBudget = Number(document.querySelector("#briefPurchaseBudget").value || 3000000);
-  state.serviceStyle = document.querySelector("#briefServiceStyle").value;
-  state.audience = document.querySelector("#briefAudience").value;
-  state.daypart = document.querySelector("#briefDaypart").value;
-  state.conceptName = document.querySelector("#briefConceptName").value.trim() || "Restaurant Concept";
-  state.dealType = document.querySelector("#briefDeal").value;
-  state.profile = document.querySelector("#briefProfile").value;
+  if (!document.querySelector("#briefForm").reportValidity()) return;
+  state.conceptName = selectedIdea.value === "other" ? customIdea.value.trim() : selectedIdea.label;
+  state.profile = selectedIdea.profile;
+  state.cuisine = cuisine.value;
+  state.priceTier = price.value;
+  state.priceMode = "tier";
+  state.averageCheck = PRICE_DEFAULTS[price.value];
+  state.dietary = document.querySelector("#briefDietary").value || "none";
+  const description = document.querySelector("#briefDescription").value.trim();
+  const otherCuisine = cuisine.value === "custom" ? customCuisine.value.trim() : "";
+  const combinedDescription = [description, otherCuisine ? `Cuisine: ${otherCuisine}` : ""].filter(Boolean).join(". ");
+  if (combinedDescription.length > 500) {
+    document.querySelector("#briefDescription").setCustomValidity("Shorten the description so your custom cuisine also fits within 500 characters.");
+    document.querySelector("#briefDescription").reportValidity();
+    return;
+  }
+  document.querySelector("#briefDescription").setCustomValidity("");
+  state.description = combinedDescription;
+  state.dealType = document.querySelector("#briefDeal").value || "lease";
   state.preferredArea = document.querySelector("#briefArea").value;
-  const budget = Number(document.querySelector("#briefBudget").value || 18000);
-  state.rentCap = Math.max(8000, Math.min(35000, budget));
+  state.serviceStyle = document.querySelector("#briefServiceStyle").value || defaultServiceStyle(state.profile);
+  state.audience = document.querySelector("#briefAudience").value || "residents";
+  state.daypart = document.querySelector("#briefDaypart").value || "all_day";
+  const rent = document.querySelector("#briefBudget").value;
+  rentWasEntered = Boolean(rent);
+  state.rentCap = rent ? Number(rent) : 18000;
+  const purchase = document.querySelector("#briefPurchaseBudget").value;
+  state.purchaseBudget = purchase ? Number(purchase) : 3000000;
+  if (rent && (state.rentCap < 8000 || state.rentCap > 35000)) {document.querySelector("#briefBudget").reportValidity(); return;}
+  hasSubmittedBrief = true;
+  legacyCuisineRequired = false;
+  document.querySelector("#briefSkip").hidden = false;
+  sessionStorage.setItem("groundwork-submitted-brief", JSON.stringify({state, selectedIdea: selectedIdea.value, rentWasEntered, fields: Object.fromEntries(draftIds.map(id => [id, document.getElementById(id).value]))}));
+  sessionStorage.removeItem("groundwork-concept-draft");
   selectedId = null;
   syncBriefControls();
   persistBrief();
@@ -1986,18 +2741,9 @@ document.querySelector("#briefDeal").addEventListener("change", (event) => {
   syncTransactionFields();
 });
 
-document.querySelector("#briefPriceTier").addEventListener("change", (event) => {
-  if (state.priceMode === "tier") document.querySelector("#briefAverageCheck").value = PRICE_DEFAULTS[event.target.value];
-});
-
-document.querySelectorAll("[data-price-mode]").forEach(button => button.addEventListener("click", () => {
-  state.priceMode = button.dataset.priceMode;
-  syncPriceModeControls();
-}));
-
 document.querySelectorAll("[data-theme-choice]").forEach(button => button.addEventListener("click", () => setTheme(button.dataset.themeChoice)));
 
-document.querySelectorAll("#conceptInput, #briefConceptName, #searchInput").forEach(input => {
+document.querySelectorAll("#conceptInput, #searchInput").forEach(input => {
   input.addEventListener("input", () => renderConceptSuggestions(input));
   input.addEventListener("focus", () => renderConceptSuggestions(input));
   input.addEventListener("keydown", event => {
@@ -2026,7 +2772,6 @@ document.querySelectorAll("#conceptInput, #briefConceptName, #searchInput").forE
       if (suggestion) chooseConceptSuggestion(suggestion, input, true);
       else if (input.id === "conceptInput") {
         state.conceptName = query.trim();
-        state.cuisine = "any";
         state.dietary = "none";
         selectedId = null;
         syncBriefControls();
@@ -2042,20 +2787,7 @@ document.addEventListener("keydown", event => {
   if (event.key === "Escape" && document.querySelector(".map-module.is-expanded")) toggleExpandedMap(false);
 });
 
-document.querySelector("#profileSelect").addEventListener("change", (event) => {
-  state.profile = event.target.value;
-  state.serviceStyle = defaultServiceStyle(state.profile);
-  selectedId = null;
-  syncBriefControls();
-  loadDashboard();
-});
-
-document.querySelector("#briefProfile").addEventListener("change", (event) => {
-  document.querySelector("#briefServiceStyle").value = defaultServiceStyle(event.target.value);
-});
-
 document.querySelector("#briefCuisine").addEventListener("change", event => updateConceptImage(event.target.value));
-
 document.querySelector("#rentRange").addEventListener("input", (event) => {
   const value = Number(event.target.value);
   state.rentCap = value * 1000;
@@ -2080,9 +2812,11 @@ document.querySelector("#briefSkip").addEventListener("click", () => {
   closeBrief();
 });
 
-document.querySelector("#briefEditButton").addEventListener("click", () => {
+document.querySelector("#headerEditBrief").addEventListener("click", () => {
   openBrief();
 });
+document.querySelector("#accountAccessButton")?.addEventListener("click", () => document.querySelector("#welcomeOverlay").classList.add("is-open"));
+document.querySelector("#closeAccessButton")?.addEventListener("click", () => document.querySelector("#welcomeOverlay").classList.remove("is-open"));
 
 document.querySelector("#refreshButton").addEventListener("click", () => {
   loadDashboard();
@@ -2091,6 +2825,164 @@ document.querySelector("#refreshButton").addEventListener("click", () => {
 document.querySelector("#viewAnalysis").addEventListener("click", () => selectView("scorecard"));
 document.querySelector("#mapLayerSelect").addEventListener("change", event => setActiveLayer(event.target.value));
 document.querySelector("#mapBasemapSelect").addEventListener("change", event => changeMapView(event.target.value));
+document.querySelector("#showRestaurantsToggle").addEventListener("change", event => {
+  showExistingRestaurants = event.target.checked;
+  syncRestaurantVisibility();
+});
+
+const ideaOptions = [
+  ["restaurant", "Sit-Down Restaurant", "restaurant"], ["bar", "Bar or Gastropub", "bar"],
+  ["coffee", "Coffee and Breakfast", "coffee"], ["fast_casual", "Fast Casual", "fast_casual"],
+  ["counter_service", "Counter Service", "counter_service"], ["bakery", "Bakery or Pastry Shop", "bakery"],
+  ["fine_dining", "Fine Dining", "fine_dining"], ["takeout_delivery", "Takeout and Delivery", "takeout_delivery"],
+  ["cafe", "Café", "coffee"], ["bistro", "Bistro", "restaurant"], ["pizzeria", "Pizzeria", "restaurant"],
+  ["dessert_shop", "Dessert Shop", "bakery"], ["food_truck", "Food Truck", "counter_service"],
+  ["other", "Other", "restaurant"],
+].map(([value, label, profile]) => ({value, label, profile}));
+let selectedIdea = null;
+let hasSubmittedBrief = false;
+let rentWasEntered = false;
+
+function setupChoice(input, list, options, onChoose) {
+  let shown = [], active = -1;
+  function render() {
+    const query = normalizeConceptText(input.value);
+    shown = options().filter(item => !query || normalizeConceptText(item.label).includes(query));
+    list.replaceChildren();
+    shown.forEach((item, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.role = "option";
+      button.id = `${list.id}-${index}`;
+      button.textContent = item.label;
+      button.addEventListener("mousedown", event => event.preventDefault());
+      button.addEventListener("click", () => choose(item));
+      list.append(button);
+    });
+    list.hidden = !shown.length;
+    input.setAttribute("aria-expanded", String(Boolean(shown.length)));
+    active = -1;
+  }
+  function choose(item) {
+    input.value = item.label;
+    onChoose(item);
+    input.dispatchEvent(new Event("change", {bubbles: true}));
+    list.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  }
+  input.addEventListener("focus", render);
+  input.addEventListener("input", render);
+  input.addEventListener("keydown", event => {
+    if (event.key === "Escape") {list.hidden = true; input.setAttribute("aria-expanded", "false"); return;}
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (list.hidden) render();
+      if (!shown.length) return;
+      active = (active + (event.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length;
+      list.querySelectorAll("button").forEach((button, index) => button.setAttribute("aria-selected", String(index === active)));
+      input.setAttribute("aria-activedescendant", `${list.id}-${active}`);
+    } else if (event.key === "Enter" && !list.hidden && shown.length) {event.preventDefault(); choose(shown[Math.max(active, 0)]);}
+  });
+  input.addEventListener("blur", () => setTimeout(() => {list.hidden = true; input.setAttribute("aria-expanded", "false");}, 100));
+}
+
+const ideaInput = document.querySelector("#briefConceptName");
+setupChoice(ideaInput, document.querySelector("#conceptSuggestions"), () => ideaOptions, item => {
+  selectedIdea = item;
+  document.querySelector("#customIdeaField").hidden = item.value !== "other";
+  document.querySelector("#ideaError").hidden = true;
+});
+ideaInput.addEventListener("input", () => {selectedIdea = null; document.querySelector("#customIdeaField").hidden = true;});
+const cuisineInput = document.querySelector("#cuisineSearch");
+const cuisineSelect = document.querySelector("#briefCuisine");
+setupChoice(cuisineInput, document.querySelector("#cuisineSuggestions"), () => [...cuisineSelect.options].filter(option => option.value).map(option => ({value: option.value, label: option.textContent})), item => {
+  cuisineSelect.value = item.value;
+  document.querySelector("#customCuisineField").hidden = item.value !== "custom";
+  document.querySelector("#cuisineError").hidden = true;
+});
+cuisineInput.addEventListener("input", () => {cuisineSelect.value = ""; document.querySelector("#customCuisineField").hidden = true;});
+document.querySelector("#briefPriceTier").addEventListener("change", () => document.querySelector("#priceError").hidden = true);
+for (const id of ["briefCustomIdea", "briefCustomCuisine", "briefDescription"]) {
+  document.getElementById(id).addEventListener("input", event => event.target.setCustomValidity(""));
+}
+const descriptionIdeas = [
+  {text: "Seasonal pastries", terms: "cafe café coffee bakery pastry breakfast brunch seasonal"},
+  {text: "Specialty coffee", terms: "cafe café coffee espresso breakfast"},
+  {text: "Weekday breakfast", terms: "cafe café breakfast brunch bakery morning weekday"},
+  {text: "Quick weekday lunches", terms: "lunch sandwich deli fast casual counter weekday"},
+  {text: "Family dining", terms: "family dinner restaurant bistro neighborhood"},
+  {text: "Late-night dining", terms: "late night bar dinner gastropub"},
+  {text: "Vegetarian options", terms: "vegetarian vegan plant salad healthy"},
+  {text: "Takeout and delivery", terms: "takeout delivery quick pizza"},
+];
+const descriptionField = document.querySelector("#briefDescription");
+const descriptionList = document.querySelector("#descriptionSuggestions");
+let activeDescriptionSuggestion = -1;
+let visibleDescriptionSuggestions = [];
+function closeDescriptionSuggestions() {
+  descriptionList.hidden = true;
+  descriptionField.setAttribute("aria-expanded", "false");
+  activeDescriptionSuggestion = -1;
+}
+function renderDescriptionSuggestions() {
+  const writing = descriptionField.value.toLowerCase();
+  const context = `${ideaInput.value} ${writing}`.toLowerCase();
+  const words = context.match(/[\p{L}]+/gu) || [];
+  visibleDescriptionSuggestions = descriptionIdeas
+    .filter(item => !writing.includes(item.text.toLowerCase()))
+    .map(item => ({...item, score: words.reduce((score, word) => score + (word.length > 2 && item.terms.includes(word) ? 1 : 0), 0)}))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+  descriptionList.replaceChildren();
+  visibleDescriptionSuggestions.forEach((item, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = item.text;
+    button.setAttribute("aria-label", `Add ${item.text} to description`);
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", () => insertDescriptionSuggestion(index));
+    descriptionList.append(button);
+  });
+  activeDescriptionSuggestion = -1;
+  descriptionList.hidden = !visibleDescriptionSuggestions.length;
+  descriptionField.setAttribute("aria-expanded", String(!descriptionList.hidden));
+}
+function insertDescriptionSuggestion(index) {
+  const suggestion = visibleDescriptionSuggestions[index]?.text;
+  if (!suggestion || descriptionField.value.toLowerCase().includes(suggestion.toLowerCase())) return;
+  const existing = descriptionField.value.trimEnd();
+  const separator = existing ? (/[.!?]$/.test(existing) ? " " : ". ") : "";
+  if (existing.length + separator.length + suggestion.length > descriptionField.maxLength) return;
+  descriptionField.value = existing + separator + suggestion;
+  descriptionField.dispatchEvent(new Event("input", {bubbles: true}));
+  closeDescriptionSuggestions();
+  descriptionField.focus();
+}
+descriptionField.addEventListener("input", renderDescriptionSuggestions);
+ideaInput.addEventListener("input", renderDescriptionSuggestions);
+descriptionField.addEventListener("focus", renderDescriptionSuggestions);
+descriptionField.addEventListener("keydown", event => {
+  if (event.key === "Escape") {closeDescriptionSuggestions(); return;}
+  if (descriptionList.hidden) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    activeDescriptionSuggestion = (activeDescriptionSuggestion + (event.key === "ArrowDown" ? 1 : -1) + visibleDescriptionSuggestions.length) % visibleDescriptionSuggestions.length;
+    descriptionList.querySelectorAll("button").forEach((button, index) => button.setAttribute("aria-selected", String(index === activeDescriptionSuggestion)));
+  } else if (event.key === "Enter" && activeDescriptionSuggestion >= 0) {
+    event.preventDefault();
+    insertDescriptionSuggestion(activeDescriptionSuggestion);
+  }
+});
+descriptionField.addEventListener("blur", () => setTimeout(closeDescriptionSuggestions, 120));
+function clearBriefSession() {
+  ["groundwork-submitted-brief", "groundwork-concept-draft", "groundwork-brief-open", "groundwork-dashboard-view"].forEach(key => sessionStorage.removeItem(key));
+}
+document.querySelector("#logoutButton").addEventListener("click", () => {clearBriefSession(); document.querySelector("#logoutForm").submit();});
+document.querySelector("#authForm").addEventListener("submit", clearBriefSession);
+document.querySelector(".guest-form").addEventListener("submit", clearBriefSession);
+
 
 document.querySelector("#savedBriefs").addEventListener("click", event => {
   const open = event.target.closest("[data-open-brief]");
@@ -2100,7 +2992,10 @@ document.querySelector("#savedBriefs").addEventListener("click", event => {
     const brief = rows[Number(open.dataset.openBrief)];
     briefFields.forEach(key => { if (typeof brief[key] === typeof state[key]) state[key] = brief[key]; });
     selectedId = null;
+    hasSubmittedBrief = hasExplicitCuisine(state.cuisine);
+    legacyCuisineRequired = !hasSubmittedBrief;
     syncBriefControls();
+    if (legacyCuisineRequired) openBrief();
     selectView("discover");
     loadDashboard();
   }
@@ -2120,15 +3015,140 @@ document.querySelectorAll("[data-auth-mode]").forEach(button => button.addEventL
   document.querySelector(".auth-submit").textContent = signup ? "Create Account" : "Log In";
   document.querySelectorAll("[data-auth-mode]").forEach(choice => choice.setAttribute("aria-pressed", String(choice === button)));
 }));
-document.querySelector(`[data-auth-mode="${document.querySelector("#authForm").action.endsWith("/signup") ? "signup" : "login"}"]`)?.click();
+document.querySelector(`[data-auth-mode="${document.querySelector("#authForm").action.endsWith("signup") ? "signup" : "login"}"]`).click();
+const draftIds = ["briefConceptName", "briefCustomIdea", "cuisineSearch", "briefCuisine", "briefCustomCuisine", "briefPriceTier", "briefDietary", "briefDeal", "briefBudget", "briefPurchaseBudget", "briefArea", "briefDescription", "briefServiceStyle", "briefAudience", "briefDaypart"];
+let savedFields = null;
+let legacyCuisineRequired = false;
+try {
+  const saved = JSON.parse(sessionStorage.getItem("groundwork-submitted-brief") || "null");
+  if (saved?.state && ideaOptions.some(item => item.value === saved.selectedIdea)) {
+    Object.assign(state, saved.state);
+    legacyCuisineRequired = !hasExplicitCuisine(saved.state.cuisine);
+    hasSubmittedBrief = !legacyCuisineRequired;
+    if (legacyCuisineRequired) state.cuisine = "any";
+    selectedIdea = ideaOptions.find(item => item.value === saved.selectedIdea);
+    rentWasEntered = Boolean(saved.rentWasEntered);
+    savedFields = saved.fields;
+  }
+} catch (_) {}
+syncBriefControls();
+try {
+  const draft = JSON.parse(sessionStorage.getItem("groundwork-concept-draft") || "null");
+  const fields = hasSubmittedBrief ? savedFields : (draft || savedFields);
+  if (fields) {
+    draftIds.forEach(id => {if (fields[id] !== undefined) document.getElementById(id).value = fields[id];});
+    if (!hasSubmittedBrief) selectedIdea = ideaOptions.find(item => item.value === draft?.selectedIdea) || selectedIdea;
+    document.querySelector("#customIdeaField").hidden = selectedIdea?.value !== "other";
+    document.querySelector("#customCuisineField").hidden = cuisineSelect.value !== "custom";
+  }
+} catch (_) {}
+if (selectedIdea && !document.querySelector("#briefConceptName").value) document.querySelector("#briefConceptName").value = selectedIdea.label;
+if ((hasSubmittedBrief || legacyCuisineRequired) && !document.querySelector("#briefPriceTier").value) document.querySelector("#briefPriceTier").value = state.priceTier;
+if (legacyCuisineRequired) {
+  if (!hasExplicitCuisine(cuisineSelect.value)) {
+    cuisineSelect.value = "";
+    cuisineInput.value = "";
+  }
+  document.querySelector("#cuisineError").textContent = "This saved brief needs a cuisine. Choose one from the list to continue.";
+  document.querySelector("#cuisineError").hidden = false;
+  document.querySelector("#briefSkip").hidden = true;
+  document.querySelector("#briefOverlay").classList.add("is-open");
+  sessionStorage.setItem("groundwork-brief-open", "true");
+} else if (hasSubmittedBrief) {
+  if (!hasExplicitCuisine(cuisineSelect.value)) cuisineSelect.value = state.cuisine;
+  cuisineInput.value = cuisineSelect.selectedOptions[0]?.textContent || "";
+  closeBrief();
+}
+if (hasSubmittedBrief || legacyCuisineRequired) {
+  try {
+    const view = JSON.parse(sessionStorage.getItem("groundwork-dashboard-view") || "null");
+    if (view && [...document.querySelectorAll(".feature-tab")].some(button => button.dataset.view === view.activeView)) activeView = view.activeView;
+    if (typeof view?.selectedId === "string" && /^\d{11}$/.test(view.selectedId)) selectedId = view.selectedId;
+    if (typeof view?.comparisonId === "string" && /^\d{11}$/.test(view.comparisonId)) profileComparisonId = view.comparisonId;
+    if (view?.profileExpanded && typeof view.profileExpanded === "object") {
+      Object.keys(profileExpanded).forEach(group => {if (typeof view.profileExpanded[group] === "boolean") profileExpanded[group] = view.profileExpanded[group];});
+    }
+    if (view?.transitExpanded && typeof view.transitExpanded === "object") {
+      Object.keys(transitExpanded).forEach(group => {if (typeof view.transitExpanded[group] === "boolean") transitExpanded[group] = view.transitExpanded[group];});
+    }
+    if (typeof view?.competitionBreakdownOpen === "boolean") competitionBreakdownOpen = view.competitionBreakdownOpen;
+    if (typeof view?.competitionComparisonOpen === "boolean") competitionComparisonOpen = view.competitionComparisonOpen;
+    if (typeof view?.competitionContext === "string") competitionContext = view.competitionContext;
+    if (view?.competitionFilter === "all" || view?.competitionFilter === "mine" ||
+        (typeof view?.competitionFilter === "string" && view.competitionFilter.startsWith("cuisine:"))) competitionFilter = view.competitionFilter;
+    if (typeof view?.competitionQuery === "string") competitionQuery = view.competitionQuery.slice(0, 200);
+    if (Number.isInteger(view?.competitionVisible) && view.competitionVisible >= 10 && view.competitionVisible <= 300) competitionVisible = view.competitionVisible;
+    if (["all", "selected", "Bronx", "Brooklyn", "Manhattan", "Queens", "Staten Island"].includes(view?.storefrontArea)) storefrontArea = view.storefrontArea;
+    if (["all", "reported_vacant", "dec31", "jun30", "unknown"].includes(view?.storefrontVacancy)) storefrontVacancy = view.storefrontVacancy;
+    if (typeof view?.storefrontQuery === "string") storefrontQuery = view.storefrontQuery.slice(0, 200);
+    if (Number.isInteger(view?.storefrontVisible) && view.storefrontVisible >= 12 && view.storefrontVisible <= 300) storefrontVisible = view.storefrontVisible;
+    if (["research", "listings"].includes(view?.propertyTab)) propertyTab = view.propertyTab;
+  } catch (_) {}
+}
+document.querySelector("#briefForm").addEventListener("input", () => sessionStorage.setItem("groundwork-concept-draft", JSON.stringify(Object.fromEntries([...draftIds.map(id => [id, document.getElementById(id).value]), ["selectedIdea", selectedIdea?.value]]))));
+document.querySelector("#briefForm").addEventListener("change", () => sessionStorage.setItem("groundwork-concept-draft", JSON.stringify(Object.fromEntries([...draftIds.map(id => [id, document.getElementById(id).value]), ["selectedIdea", selectedIdea?.value]]))));
+
+syncRestaurantVisibility();
+setTheme(dashboardThemeChoice, false);
+document.querySelectorAll("[data-property-tab]").forEach(button => {
+  button.addEventListener("click", () => selectPropertyTab(button.dataset.propertyTab));
+  button.addEventListener("keydown", event => {
+    const tabs = ["research", "listings"];
+    const index = tabs.indexOf(button.dataset.propertyTab);
+    const next = event.key === "ArrowRight" ? tabs[(index + 1) % tabs.length] :
+      event.key === "ArrowLeft" ? tabs[(index + tabs.length - 1) % tabs.length] :
+        event.key === "Home" ? tabs[0] : event.key === "End" ? tabs[tabs.length - 1] : null;
+    if (next) {event.preventDefault(); selectPropertyTab(next, true);}
+  });
+});
+syncPropertyTabs();
+selectView(activeView);
 document.querySelectorAll("[data-auth-open]").forEach(button => button.addEventListener("click", () => {
   document.querySelector(`[data-auth-mode="${button.dataset.authOpen}"]`).click();
   document.querySelector("#welcomeOverlay").classList.add("is-open");
 }));
 document.querySelector("#closeAccessButton")?.addEventListener("click", () => document.querySelector("#welcomeOverlay").classList.remove("is-open"));
-document.querySelectorAll("[data-logout]").forEach(button => button.addEventListener("click", () => document.querySelector("#logoutForm").submit()));
+document.querySelectorAll("[data-logout]").forEach(button => button.addEventListener("click", () => {clearBriefSession(); document.querySelector("#logoutForm").submit();}));
 setTheme(dashboardThemeChoice, false);
 updateConceptImage(state.cuisine);
 loadConceptImages();
 initializeWorkspace();
 setActiveLayer(activeLayer);
+
+let nycBoundaryData = null;
+let nycBoundaryPending = false;
+let nycBoundaryRetryAfter = 0;
+
+function installNycBoundary() {
+  if (!locationMap?.getStyle()) return;
+  if (!nycBoundaryData) {
+    if (nycBoundaryPending || Date.now() < nycBoundaryRetryAfter) return;
+    nycBoundaryPending = true;
+    fetch("/api/geography/nyc-boundary").then(response => {
+      if (!response.ok) throw new Error("Boundary unavailable");
+      return response.json();
+    }).then(data => {
+      if (data.type !== "FeatureCollection" || data.features?.length !== 3) throw new Error("Invalid city boundary");
+      nycBoundaryData = data;
+      installNycBoundary();
+    }).catch(() => { nycBoundaryRetryAfter = Date.now() + 60000; })
+      .finally(() => { nycBoundaryPending = false; });
+    return;
+  }
+  if (!locationMap.isStyleLoaded()) return;
+  const ids = ["nyc-context-mask", "nyc-boundary-halo", "nyc-boundary-line"];
+  if (!locationMap.getSource("nyc-city-partition")) {
+    locationMap.addSource("nyc-city-partition", {type:"geojson",data:nycBoundaryData});
+    locationMap.addLayer({id:ids[0],type:"fill",source:"nyc-city-partition",filter:["==",["get","kind"],"outside"],paint:{"fill-color":"#102030","fill-opacity":.27}});
+    locationMap.addLayer({id:ids[1],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#ffffff","line-opacity":.92,"line-width":["interpolate",["linear"],["zoom"],9,5,14,7]}});
+    locationMap.addLayer({id:ids[2],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#2764d8","line-opacity":1,"line-width":["interpolate",["linear"],["zoom"],9,2.4,14,3.2]}});
+  }
+  const opacity = activeBasemap === "aerial" ? .38 : currentTheme === "dark" ? .4 : .23;
+  if (locationMap.getPaintProperty(ids[0],"fill-opacity") !== opacity) locationMap.setPaintProperty(ids[0],"fill-opacity",opacity);
+  // Keep the city partition above heatmaps, but below every interactive marker and label.
+  const foreground = ["restaurant-clusters", "restaurant-points",
+    "restaurant-cluster-count"].filter(id=>locationMap.getLayer(id));
+  const ordered = [...ids, ...foreground];
+  const last = locationMap.getStyle().layers.slice(-ordered.length).map(layer=>layer.id);
+  if (ordered.some((id,index)=>last[index] !== id)) ordered.forEach(id=>locationMap.moveLayer(id));
+}

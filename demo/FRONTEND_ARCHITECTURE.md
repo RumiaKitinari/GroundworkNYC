@@ -1,8 +1,8 @@
 # Frontend architecture — Flask dashboard preview
 
-**Scope:** The Flask app in `demo/`. A separate React prototype exists in the `frontend-demo` worktree.
-
-**Branch scope:** This guide describes the `ui-concept-polish` dashboard preview. Its workspace stylesheet, 3D map, Aerial/3D separation, System dashboard control, and Edit Brief theme behavior are specific to that UI branch; they are not in main until the UI code is merged. The Flask APIs and integrated dataset paths apply to both branches.
+**Scope:** The combined Flask app in `demo/`, optionally mounted by FastAPI.
+The legacy Django starter has been removed. The `codes/` model pipeline generates
+artifacts consumed by the optional dashboard connection; it does not serve this UI.
 
 ## Why this structure
 
@@ -23,11 +23,18 @@
 - **`GET /` and `POST /auth/<action>`:** Flask renders the page and handles guest/login/signup/logout sessions. The page receives a flag for whether local Streets tiles exist, so that option can be enabled only when available.
 - **`GET /api/dashboard`:** The main page's data contract. It returns locations, the default selected ID, score components, property leads, source coverage, and finance/panel data. Filters go in the query string; ranking and evidence are calculated by the backend.
 - **`GET /api/osm/tiles/{z}/{x}/{y}.pbf`:** Reads a tile from the optional local MBTiles database. This is map background data, not location scores.
-- **`POST /api/concepts/resolve` and `POST /api/sites/analyze`:** Separate endpoints for concept interpretation and coordinate-level walking evidence. The main dashboard does not call them directly.
+- **`POST /api/concepts/resolve` and `POST /api/sites/analyze`:** Separate endpoints for concept interpretation and coordinate-level walking evidence. The dashboard calls site analysis for the walking-catchment control; concept resolution also occurs inside the dashboard request.
+
+- **`GET /api/areas` and `/api/areas/<geoid>/profile`:** Resident and workplace evidence and comparison choices.
+- **`GET /api/areas/<geoid>/transit-activity`:** Subway, bike, pedestrian and taxi evidence with source periods.
+- **`GET /api/locations/<geoid>/competition`:** Shared response for both competition views; retains tract/neighborhood counts and adds cuisine breakdowns.
+- **`GET /api/storefronts` and `/api/map/restaurants`:** Active-release registry records and restaurant map GeoJSON.
+- **`GET/PUT /api/workspace`, `/api/menu/suggestions`, `/api/concepts/images`:** Account persistence, menu suggestions and optional concept images.
+- **`GET /api/hex-demand`:** Concept-screening GeoJSON fallback when optional spatial tiles are unavailable.
 
 ## Dataset: what is read and why
 
-**Required path:** `data/integrated/restaurant_bar_location_data_ready/`, relative to the repository root. This private package is Git ignored. `app.py` expects these six CSVs at these exact paths:
+**Data selection:** `GROUNDWORK_DATA_DIR`, then `data/integrated/current/`, then the baseline `data/integrated/restaurant_bar_location_data_ready/`. Cached loaders use the resolved release directory. Keep the complete private package for explorer tables and tract geometry; these six CSVs support the main dashboard:
 
 | File inside the package | Why the app reads it |
 | --- | --- |
@@ -52,5 +59,5 @@ The loader caches parsed data and precomputed percentiles so every filter change
 
 ## Browser state and “AI”
 
-- `sessionStorage` restores brief drafts and submitted values after refresh. `localStorage` stores an explicit Light/Dark dashboard choice; without one, the UI follows system appearance. Edit Brief inherits the dashboard's resolved theme when opened from it.
+- `sessionStorage` restores brief drafts and explorer view state. Saved briefs, comparisons and menus use browser storage and synchronize to the local account database through `/api/workspace` when signed in. `localStorage` stores an explicit Light/Dark dashboard choice; without one, the UI follows system appearance. Edit Brief inherits the dashboard's resolved theme when opened from it.
 - Idea and description suggestions use local lists and text matching. Location scoring is a deterministic, uncalibrated screening model in `scoring.py`; this frontend makes no LLM request or visit forecast.
