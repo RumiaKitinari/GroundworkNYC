@@ -8,7 +8,7 @@ class NamesHandler(osmium.SimpleHandler):
     def node(self, n):
         # print(n)
         if 'name' in n.tags:
-            print(f'{n.location}: {n.tags['name']} ({n.tags})')
+            print(f'  ({n.tags})')
 
 def main(osmfile):
     NamesHandler().apply_file(osmfile)

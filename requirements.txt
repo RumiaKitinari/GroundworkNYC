@@ -9,13 +9,22 @@ django_mongodb_backend
 djangotoolbox
 django_mongodb_engine
 
+<<<<<<< Updated upstream
 # Open Street Map Rendering
+=======
+# Open Street Map and Rendering
+>>>>>>> Stashed changes
 osmium
 osmnx
 folium
 geopandas
+<<<<<<< Updated upstream
 esy-osmfilter
 
 # Data Plotting & Visualization
+=======
+
+# Map Plots & Data Visualization
+>>>>>>> Stashed changes
 matplotlib
 mapclassify
