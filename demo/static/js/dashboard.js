@@ -950,7 +950,7 @@ function resetToNYC() {
 function clearHexLayer() {
   hoveredHexId = null;
   if (!locationMap?.getStyle()) return;
-  for (const id of ["concept-hex-outline", "concept-hex-fill"]) {
+  for (const id of ["concept-hex-hover", "concept-hex-outline", "concept-hex-fill"]) {
     if (locationMap.getLayer(id)) locationMap.removeLayer(id);
   }
   if (locationMap.getSource("concept-hexes")) locationMap.removeSource("concept-hexes");
@@ -970,12 +970,38 @@ function paintHexLayer(data) {
     activeBasemap === "buildings3d" ? locationMap.getStyle().layers.find(layer => layer.type === "symbol")?.id : undefined;
   locationMap.addLayer({id: "concept-hex-fill", type: "fill", source: "concept-hexes", ...sourceLayer, paint: {
     "fill-color": ["interpolate", ["linear"], ["get", "score"], 0, "#b2182b", 25, "#ef8a62", 45, "#fddc7a", 60, "#a6dba0", 78, "#1b9e77", 100, "#006837"],
-    "fill-opacity": ["interpolate", ["linear"], ["get", "coverage"], 0, .12, 35, .48, 70, .78, 100, .86],
+    "fill-opacity": ["interpolate", ["linear"], ["get", "coverage"], 0, .10, 35, .38, 70, .59, 100, .70],
   }}, labelLayer);
   locationMap.addLayer({id: "concept-hex-outline", type: "line", source: "concept-hexes", ...sourceLayer, paint: {
-    "line-color": "#f0f5ed", "line-opacity": .78, "line-width": ["interpolate", ["linear"], ["zoom"], 9, .5, 12, 1.1],
+    "line-color": "#ffffff", "line-opacity": .48, "line-width": ["interpolate", ["linear"], ["zoom"], 9, .35, 14, .8],
   }}, labelLayer);
+  locationMap.addLayer({id:"concept-hex-hover",type:"line",source:"concept-hexes",...sourceLayer,
+    filter:["==",["get","id"],""],paint:{"line-color":"#153f5a","line-opacity":1,"line-width":2.2}},labelLayer);
   installNycBoundary();
+}
+
+function highlightHex(feature) {
+  if (!locationMap.getLayer("concept-hex-hover")) return;
+  if (!feature) { locationMap.setFilter("concept-hex-hover", ["==",1,0]); return; }
+  const identity = String(feature?.properties?.cell_id ?? feature?.properties?.id ?? feature?.id ?? "");
+  locationMap.setFilter("concept-hex-hover", ["any",
+    ["==",["to-string",["coalesce",["get","cell_id"],["get","id"],""]],identity],
+    ["==",["to-string",["id"]],identity]]);
+}
+
+function showHexDetails(feature, lngLat, pinned = false) {
+  const {score, coverage, level, cell_count: count} = feature.properties;
+  const detail = document.createElement("div");
+  detail.className = "map-location-detail";
+  if (activeLayer === "huff_demand") {
+    const gap = Number(score), demand = Number(feature.properties.unserved_demand);
+    detail.innerHTML = `<strong>Huff Market Gap Scenario</strong><div><span>Outside Option Share</span><b>${Number.isFinite(gap) ? gap.toFixed(1) : "--"}%</b></div><div><span>Unserved Demand Units</span><b>${Number.isFinite(demand) ? Math.round(demand).toLocaleString("en-US") : "--"}</b></div><small>Scenario estimate; weights and capacity require calibration.</small>`;
+  } else {
+    detail.innerHTML = `<strong>${heatmapTitles[activeHeatMetric || "concept_demand"]}</strong><div><span>${level === "sector" ? "Sector Score" : "Local Score"}</span><b>${score}/100</b></div><div><span>Evidence Coverage</span><b>${coverage}%</b></div><small>Tract-Based Estimate${count ? ` · ${count} Local Cells` : ""}</small>`;
+  }
+  mapPopup?.remove();
+  mapPopup = new maplibregl.Popup({closeButton:pinned,closeOnClick:false,offset:12,maxWidth:"230px"})
+    .setLngLat(lngLat).setDOMContent(detail).addTo(locationMap);
 }
 
 function isHexLayer() {
@@ -1080,6 +1106,7 @@ const RESTAURANT_LAYERS = ["restaurant-clusters", "restaurant-cluster-count", "r
 function syncRestaurantVisibility() {
   const in3D = activeBasemap === "buildings3d";
   document.querySelector(".restaurant-toggle").hidden = !in3D;
+  if (isHexLayer()) document.querySelector(".restaurant-toggle").hidden = true;
   const legend = document.querySelector(".legend-restaurant-entry");
   if (legend) legend.hidden = !in3D || !showExistingRestaurants || isHexLayer();
   if (!locationMap) return;
@@ -1267,7 +1294,18 @@ function propertyFeatureAtPoint(point) {
   return layers.length ? locationMap.queryRenderedFeatures(point, {layers})[0] : null;
 }
 
+function syncPropertyVisibility() {
+  if (!locationMap?.getStyle()) return;
+  const visible = mapInventory === "properties" && !isHexLayer();
+  for (const id of ["property-clusters", "property-points", "property-cluster-count", "property-rank-label", "property-selection", "property-selection-rank"]) {
+    if (!locationMap.getLayer(id)) continue;
+    const next = visible || (id.startsWith("property-selection") && isHexLayer()) ? "visible" : "none";
+    if (locationMap.getLayoutProperty(id,"visibility") !== next) locationMap.setLayoutProperty(id,"visibility",next);
+  }
+}
+
 function installPropertyLayers() {
+  syncPropertyVisibility();
   if (!locationMap.isStyleLoaded() || !propertyMapData) return;
   if (!locationMap.getSource("property-opportunities")) {
     locationMap.addSource("property-opportunities", {type: "geojson", data: propertyMapData, cluster: true, clusterMaxZoom: 12, clusterRadius: 35});
@@ -1277,7 +1315,6 @@ function installPropertyLayers() {
     locationMap.addLayer({id:"property-cluster-count",type:"symbol",source:"property-opportunities",filter:["has","point_count"],layout:{"text-field":["get","point_count_abbreviated"],"text-font":font,"text-size":12,"text-allow-overlap":true},paint:{"text-color":"#ffffff"}});
     locationMap.addLayer({id:"property-rank-label",type:"symbol",source:"property-opportunities",filter:["!",["has","point_count"]],layout:{"text-field":["to-string",["get","rank"]],"text-font":font,"text-size":10,"text-allow-overlap":true},paint:{"text-color":"#102a33","text-halo-color":"#ffffff","text-halo-width":.7}});
   }
-  const visible = mapInventory === "properties" && !isHexLayer();
   const selection = {type:"FeatureCollection", features:propertyMapData.features.filter(row => row.properties.selected)};
   if (!locationMap.getSource("property-selection")) {
     locationMap.addSource("property-selection", {type:"geojson", data:selection});
@@ -1288,10 +1325,7 @@ function installPropertyLayers() {
     const signature = JSON.stringify(selection);
     if (locationMap._groundworkSelection !== signature) { locationMap.getSource("property-selection").setData(selection); locationMap._groundworkSelection = signature; }
   }
-  const visibility = visible ? "visible" : "none";
-  for (const id of ["property-clusters", "property-points", "property-cluster-count", "property-rank-label", "property-selection", "property-selection-rank"]) {
-    if (locationMap.getLayoutProperty(id, "visibility") !== visibility) locationMap.setLayoutProperty(id, "visibility", visibility);
-  }
+  syncPropertyVisibility();
 }
 
 function renderMap() {
@@ -1355,25 +1389,15 @@ function renderMap() {
       locationMap.getCanvas().style.cursor = feature ? "pointer" : "";
       if (!feature) {
         hoveredHexId = null;
+        highlightHex(null);
         mapPopup?.remove();
         return;
       }
       const identity = feature.id ?? feature.properties.cell_id ?? feature.properties.id;
       if (identity === hoveredHexId) return;
       hoveredHexId = identity;
-      const {score, coverage, level, cell_count: count} = feature.properties;
-      const detail = document.createElement("div");
-      detail.className = "map-location-detail";
-      if (activeLayer === "huff_demand") {
-        const gap = Number(score);
-        const demand = Number(feature.properties.unserved_demand);
-        detail.innerHTML = `<strong>Huff Market Gap Scenario</strong><div><span>Outside Option Share</span><b>${Number.isFinite(gap) ? gap.toFixed(1) : "--"}%</b></div><div><span>Unserved Demand Units</span><b>${Number.isFinite(demand) ? Math.round(demand).toLocaleString("en-US") : "--"}</b></div><small>Scenario estimate; weights and capacity require calibration.</small>`;
-      } else {
-        detail.innerHTML = `<strong>${level === "sector" ? "Area Sector" : "Local Cell"}</strong><div><span>${heatmapTitles[activeHeatMetric || "concept_demand"]}</span><b>${score}/100</b></div><div><span>Evidence Coverage</span><b>${coverage}%</b></div>${count ? `<small>${count} Local Cells</small>` : ""}`;
-      }
-      mapPopup?.remove();
-      mapPopup = new maplibregl.Popup({closeButton: false, closeOnClick: false, offset: 12, maxWidth: "230px"})
-        .setLngLat(event.lngLat).setDOMContent(detail).addTo(locationMap);
+      highlightHex(feature);
+      showHexDetails(feature,event.lngLat);
     });
     locationMap.on("mousemove", event => {
       if (mapInventory !== "properties" || isHexLayer()) return;
@@ -1412,6 +1436,9 @@ function renderMap() {
         const ring = feature.geometry.coordinates[0];
         const center = ring.slice(0, -1).reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0]).map(value => value / (ring.length - 1));
         locationMap.easeTo({center, zoom: 12, duration: 450});
+      } else if (feature) {
+        highlightHex(feature);
+        showHexDetails(feature,event.lngLat,true);
       }
     });
     locationMap.on("mousemove", event => {
@@ -1480,6 +1507,9 @@ function renderMap() {
   syncRestaurantVisibility();
   document.querySelector("#mapInventorySelect").disabled = isHexLayer();
   document.querySelector("#mapLayerSelect").disabled = !!activeHeatMetric;
+  document.querySelector("#mapInventorySelect").hidden = isHexLayer();
+  document.querySelector("#mapLayerSelect").hidden = !!activeHeatMetric;
+  document.querySelector(".map-legend")?.classList.toggle("is-hex", isHexLayer());
   document.querySelector(".legend-recommendation-dot + span").textContent = mapInventory === "properties" && !isHexLayer() ? "Property Scenario / Lead" : "Recommended Area";
   if (!isHexLayer() && mapInventory === "areas") locations.forEach((point,index) => {
     const {location, property} = point;
@@ -2673,7 +2703,9 @@ document.querySelector("#heatmapMetricSelect").addEventListener("change", event 
   const status = document.querySelector("#dashboardStatus");
   if (status.textContent === "No Recorded Coverage For This Feature And Concept.") status.hidden = true;
   activeHeatMetric = event.target.value;
-  if (activeLayer === "huff_demand") activeLayer = "opportunity";
+  mapPopup?.remove();
+  if (activeLayer === "huff_demand" || activeLayer === "concept_demand") activeLayer = "opportunity";
+  document.querySelector("#mapLayerSelect").value = activeLayer;
   hexRequestId++; clearHexLayer(); renderMap(); renderRanking();
   document.querySelector("#mapModeTitle").textContent = activeHeatMetric ? `${heatmapTitles[activeHeatMetric]} Heatmap` : "Location Opportunities";
 });

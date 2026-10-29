@@ -124,3 +124,31 @@ test('late response cannot overwrite the layer selected after its request', asyn
   await request;
   assert.equal(env.sources.size, 0);
 });
+
+test('feature heatmaps have subtle hex borders and a separate hover outline', async () => {
+  const env = environment(async () => ({ok:true,json:async()=>({type:'FeatureCollection',features:[]})}));
+  vm.runInContext("window.GROUNDWORK_SPATIAL_BACKEND = false",env.context);
+  await vm.runInContext('showHexLayer()',env.context);
+  assert.equal(env.layers.get('concept-hex-outline').paint['line-opacity'],.48);
+  assert.equal(env.layers.get('concept-hex-hover').paint['line-width'],2.2);
+  assert.equal(env.layers.get('concept-hex-hover').type,'line');
+  vm.runInContext('clearHexLayer()',env.context);
+  assert.equal(env.layers.size,0);
+});
+
+test('heatmap mode keeps only the selected property and restores the full inventory on exit', () => {
+  const visibility=new Map();
+  const context=vm.createContext({mapInventory:'properties',heatmap:true,
+    isHexLayer:()=>context.heatmap,
+    locationMap:{getStyle:()=>({}),getLayer:()=>true,getLayoutProperty:id=>visibility.get(id),setLayoutProperty:(id,key,value)=>visibility.set(id,value)}});
+  vm.runInContext(dashboard.slice(dashboard.indexOf('function syncPropertyVisibility()'),dashboard.indexOf('function installPropertyLayers()')),context);
+  vm.runInContext('syncPropertyVisibility()',context);
+  assert.equal(visibility.get('property-clusters'),'none');
+  assert.equal(visibility.get('property-points'),'none');
+  assert.equal(visibility.get('property-selection'),'visible');
+  assert.equal(visibility.get('property-selection-rank'),'visible');
+  context.heatmap=false;vm.runInContext('syncPropertyVisibility()',context);
+  assert([...visibility.values()].every(value=>value==='visible'));
+  context.mapInventory='areas';vm.runInContext('syncPropertyVisibility()',context);
+  assert([...visibility.values()].every(value=>value==='none'));
+});

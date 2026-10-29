@@ -45,6 +45,27 @@ probabilities, proven financial returns, real available synthetic listings,
 independent final holdout, or an accuracy improvement established by tuning.
 The live demo remains screening-based while research-model validation continues.
 
+## October 29 Demo-Polish Addendum
+
+The feature heatmap presentation now uses thin hex borders, restrained fills,
+and a separate hover outline. Hover shows the feature score and evidence
+coverage; tapping a local cell opens a closable detail popup. Sector selection
+retains the existing zoom-to-local-cell interaction. The popup labels the
+surface as a tract-based estimate rather than suggesting storefront precision.
+
+While a feature heatmap is active, redundant inventory/point-color controls
+and existing-restaurant controls are hidden. Property clusters and other
+property pins are hidden; only the selected property's marker stays visible
+above the heatmap and city boundary. Turning the feature heatmap off restores
+the property controls and inventory. The legend uses a hex symbol. Streets,
+Aerial, 3D, pan, zoom and fullscreen behavior remain available.
+
+This is a presentation/interaction change, not a retraining, new scoring
+formula, verified demand model, or merge of subsequent team model changes.
+The regression suite now includes 18 JavaScript tests, including hex-layer
+cleanup and hover styling; Chrome/WebKit checks cover compact controls,
+desktop/mobile layout and touch details.
+
 ## 1. Model Development And Results
 
 ### What Changed

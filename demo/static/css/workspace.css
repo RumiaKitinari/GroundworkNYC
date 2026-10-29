@@ -461,3 +461,9 @@
   .app-frame .report-plan table { width: 100%; font-size: 10px; }
   .app-frame .report-plan .kv, .app-frame .report-profit-plot > div { break-inside: avoid; }
 }
+.app-frame .module-tabs select[hidden] { display: none !important; }
+.app-frame .map-legend.is-hex .legend-recommendation-dot {
+  width: 13px; height: 14px; border-radius: 0;
+  clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);
+  background: #1b9e77;
+}
