@@ -2,14 +2,14 @@ import csv
 import unittest
 from collections import Counter
 
-from app import INTEGRATED_DATA_DIR, app, current_restaurant_records, integrated_package
+from app import integrated_directory, app, current_restaurant_records, integrated_package
 
 
 class CompetitionExplorerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tracts = {row["geoid"] for row in integrated_package()["tracts"]}
-        with (INTEGRATED_DATA_DIR / "entities" / "current_restaurants.csv").open(newline="", encoding="utf-8-sig") as stream:
+        with (integrated_directory() / "entities" / "current_restaurants.csv").open(newline="", encoding="utf-8-sig") as stream:
             cls.rows = list(csv.DictReader(stream))
 
     def test_recorded_counts_match_csv_for_several_tracts(self):

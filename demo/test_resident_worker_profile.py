@@ -1,11 +1,11 @@
 import csv
 import unittest
 
-from app import INTEGRATED_DATA_DIR, app, integrated_package, resident_worker_profile, source_number
+from app import integrated_directory, app, integrated_package, resident_worker_profile, source_number
 
 
 def indexed_rows(filename):
-    with (INTEGRATED_DATA_DIR / filename).open(newline="", encoding="utf-8-sig") as stream:
+    with (integrated_directory() / filename).open(newline="", encoding="utf-8-sig") as stream:
         return {row["geoid"]: row for row in csv.DictReader(stream)}
 
 

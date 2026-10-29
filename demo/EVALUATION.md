@@ -30,6 +30,12 @@ held-out metrics, calibration bins and serialized numeric model parameters.
 
 ## What can be evaluated now
 
+An additional offline subway-entry model uses three complete 2025 MTA weeks
+for training and holds out a December week. Run `python demo/download_subway.py`
+then `python demo/train_subway.py`. It predicts station-hour entries and reports
+MAE, RMSE and R2 against a station-average baseline. It is not a restaurant
+success, pedestrian-traffic or revenue model and does not affect rankings.
+
 The market-presence target asks whether a tract has a **recorded active restaurant
 of the selected cuisine**. The master table supplies eight location predictors;
 integrated `entities/current_restaurants.csv` supplies cuisine labels, deduplicated

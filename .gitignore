@@ -10,6 +10,8 @@ instance/
 *.log
 
 # Raw and generated geospatial data (keep small examples under data/samples/)
+data/*
+!data/samples/
 *.osm.pbf
 *.mbtiles
 *.sqlite
@@ -22,4 +24,10 @@ data/cleaned_sources/
 data/osm/
 data/listings/
 data/evaluation/
+data/c_rest_AI/
 .DS_Store
+
+# Optional spatial backend tooling
+.pytest_cache/
+.ruff_cache/
+backend/.venv/

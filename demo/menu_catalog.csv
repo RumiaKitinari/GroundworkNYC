@@ -1,0 +1,184 @@
+cuisine,name,section,formats,plant_based_candidate
+any,Seasonal Vegetable Plate,Mains,sit_down;premium;quick,yes
+any,House Salad,Starters,all,yes
+any,Seasonal Soup,Starters,sit_down;quick;premium,no
+any,Roasted Potatoes,Sides,all,yes
+any,Chocolate Cake,Desserts,all,no
+any,Espresso,Drinks,cafe;sit_down;premium,yes
+any,House Lemonade,Drinks,all,yes
+any,Small Plates Selection,Starters,bar;sit_down;premium,no
+any,House Cocktail,Drinks,bar,no
+any,Zero-Proof Cocktail,Drinks,bar,yes
+any,Draft Beer,Drinks,bar,no
+any,Wine By The Glass,Drinks,bar,no
+any,Bar Fries,Sides,bar,yes
+any,Chef's Seasonal Risotto,Mains,premium;sit_down,no
+american,Smash Burger,Mains,quick;bar;sit_down,no
+american,Fried Chicken Sandwich,Mains,quick;bar;sit_down,no
+american,Mac and Cheese,Sides,all,no
+american,Apple Pie,Desserts,all,no
+italian,Margherita Pizza,Mains,quick;sit_down,no
+italian,Spaghetti Pomodoro,Mains,quick;sit_down;premium,yes
+italian,Arancini,Starters,bar;sit_down,no
+italian,Tiramisu,Desserts,sit_down;premium,no
+italian,Osso Buco,Mains,sit_down;premium,no
+mexican,Al Pastor Tacos,Mains,quick;sit_down,no
+mexican,Mushroom Tacos,Mains,quick;sit_down,yes
+mexican,Guacamole and Chips,Starters,bar;quick;sit_down,yes
+mexican,Enchiladas Verdes,Mains,sit_down,no
+mexican,Churros,Desserts,quick;sit_down,no
+korean,Bibimbap,Mains,quick;sit_down,no
+korean,Tofu Bibimbap,Mains,quick;sit_down,yes
+korean,Korean Fried Chicken,Mains,bar;quick;sit_down,no
+korean,Kimchi Pancake,Starters,bar;sit_down,no
+korean,Bulgogi,Mains,sit_down;premium,no
+japanese,Ramen,Mains,quick;sit_down,no
+japanese,Vegetable Sushi Roll,Mains,quick;sit_down,yes
+japanese,Chicken Karaage,Starters,bar;sit_down,no
+japanese,Yakitori,Mains,bar;sit_down,no
+japanese,Matcha Ice Cream,Desserts,sit_down,no
+chinese,Mapo Tofu,Mains,quick;sit_down,no
+chinese,Vegetable Dumplings,Starters,quick;sit_down,yes
+chinese,Kung Pao Chicken,Mains,quick;sit_down,no
+chinese,Scallion Pancakes,Starters,bar;quick;sit_down,yes
+chinese,Mango Pudding,Desserts,sit_down,no
+indian,Chana Masala,Mains,quick;sit_down,yes
+indian,Butter Chicken,Mains,sit_down,no
+indian,Samosa,Starters,quick;sit_down,yes
+indian,Palak Paneer,Mains,sit_down,no
+indian,Mango Lassi,Drinks,quick;sit_down,no
+thai,Pad Thai,Mains,quick;sit_down,no
+thai,Green Curry,Mains,sit_down,no
+thai,Som Tum,Starters,quick;sit_down,no
+thai,Tom Yum,Starters,sit_down,no
+thai,Mango Sticky Rice,Desserts,sit_down,yes
+french,Steak Frites,Mains,sit_down;premium,no
+french,French Onion Soup,Starters,sit_down;premium,no
+french,Ratatouille,Mains,sit_down;premium,yes
+french,Crème Brûlée,Desserts,sit_down;premium,no
+french,Croque Monsieur,Mains,cafe;sit_down,no
+greek,Spanakopita,Starters,sit_down;quick,no
+greek,Greek Salad,Starters,sit_down;quick,no
+greek,Chicken Souvlaki,Mains,sit_down;quick,no
+greek,Grilled Halloumi,Starters,bar;sit_down,no
+greek,Baklava,Desserts,cafe;sit_down,no
+mediterranean,Hummus and Pita,Starters,bar;quick;sit_down,yes
+mediterranean,Falafel Plate,Mains,quick;sit_down,yes
+mediterranean,Grilled Fish,Mains,sit_down;premium,no
+mediterranean,Tabbouleh,Starters,quick;sit_down,yes
+mediterranean,Rice Pudding,Desserts,sit_down,no
+middle_eastern,Shawarma Plate,Mains,quick;sit_down,no
+middle_eastern,Falafel Wrap,Mains,quick;sit_down,yes
+middle_eastern,Baba Ghanoush,Starters,quick;sit_down,yes
+middle_eastern,Kibbeh,Starters,bar;sit_down,no
+middle_eastern,Kunafa,Desserts,sit_down,no
+turkish,Adana Kebab,Mains,sit_down,no
+turkish,Imam Bayildi,Mains,sit_down,yes
+turkish,Lahmacun,Mains,quick;sit_down,no
+turkish,Mercimek Soup,Starters,sit_down,yes
+turkish,Baklava,Desserts,cafe;sit_down,no
+vietnamese,Pho,Mains,quick;sit_down,no
+vietnamese,Banh Mi,Mains,quick,no
+vietnamese,Fresh Spring Rolls,Starters,quick;sit_down,no
+vietnamese,Bun Cha,Mains,sit_down,no
+vietnamese,Vietnamese Iced Coffee,Drinks,cafe;quick;sit_down,no
+filipino,Chicken Adobo,Mains,sit_down,no
+filipino,Pancit,Mains,quick;sit_down,no
+filipino,Lumpia,Starters,bar;sit_down,no
+filipino,Sinangag,Sides,quick;sit_down,yes
+filipino,Halo Halo,Desserts,cafe;sit_down,no
+caribbean,Jerk Chicken,Mains,quick;sit_down,no
+caribbean,Vegetable Roti,Mains,quick;sit_down,yes
+caribbean,Rice and Peas,Sides,quick;sit_down,yes
+caribbean,Plantains,Sides,all,yes
+caribbean,Beef Patty,Starters,quick;bar,no
+ethiopian,Doro Wat,Mains,sit_down,no
+ethiopian,Misir Wat,Mains,sit_down,yes
+ethiopian,Shiro,Mains,sit_down,yes
+ethiopian,Sambusa,Starters,quick;sit_down,no
+ethiopian,Injera,Sides,sit_down,yes
+peruvian,Ceviche,Starters,sit_down;premium,no
+peruvian,Lomo Saltado,Mains,sit_down,no
+peruvian,Aji de Gallina,Mains,sit_down,no
+peruvian,Causa Limena,Starters,sit_down,no
+peruvian,Chicha Morada,Drinks,sit_down,yes
+brazilian,Feijoada,Mains,sit_down,no
+brazilian,Pao de Queijo,Starters,cafe;sit_down,no
+brazilian,Moqueca,Mains,sit_down;premium,no
+brazilian,Coxinha,Starters,bar;quick,no
+brazilian,Brigadeiro,Desserts,cafe;sit_down,no
+spanish,Patatas Bravas,Starters,bar;sit_down,yes
+spanish,Tortilla Española,Starters,bar;sit_down,no
+spanish,Seafood Paella,Mains,sit_down;premium,no
+spanish,Gambas al Ajillo,Starters,bar;sit_down,no
+spanish,Churros,Desserts,sit_down,no
+southern_soul,Fried Chicken,Mains,quick;sit_down,no
+southern_soul,Collard Greens,Sides,sit_down,no
+southern_soul,Shrimp and Grits,Mains,sit_down,no
+southern_soul,Cornbread,Sides,quick;sit_down,no
+southern_soul,Peach Cobbler,Desserts,sit_down,no
+cajun_creole,Gumbo,Mains,sit_down,no
+cajun_creole,Jambalaya,Mains,sit_down,no
+cajun_creole,Po Boy,Mains,quick;sit_down,no
+cajun_creole,Beignets,Desserts,cafe;sit_down,no
+cajun_creole,Red Beans and Rice,Mains,sit_down,no
+steakhouse,New York Strip,Mains,sit_down;premium,no
+steakhouse,Filet Mignon,Mains,sit_down;premium,no
+steakhouse,Creamed Spinach,Sides,sit_down;premium,no
+steakhouse,Wedge Salad,Starters,sit_down;premium,no
+steakhouse,Cheesecake,Desserts,sit_down;premium,no
+seafood,Grilled Salmon,Mains,sit_down;premium,no
+seafood,Fish and Chips,Mains,quick;sit_down,no
+seafood,Oysters,Starters,bar;sit_down;premium,no
+seafood,Clam Chowder,Starters,sit_down,no
+seafood,Shrimp Cocktail,Starters,sit_down;premium,no
+pizza,Margherita Pizza,Mains,quick;sit_down,no
+pizza,Pepperoni Pizza,Mains,quick;sit_down,no
+pizza,Mushroom Pizza,Mains,quick;sit_down,no
+pizza,Garlic Knots,Starters,quick;sit_down,no
+pizza,Tiramisu,Desserts,sit_down,no
+barbecue,Smoked Brisket,Mains,quick;sit_down,no
+barbecue,Pulled Pork Sandwich,Mains,quick;bar,no
+barbecue,Barbecue Ribs,Mains,sit_down,no
+barbecue,Coleslaw,Sides,quick;sit_down,no
+barbecue,Baked Beans,Sides,quick;sit_down,no
+burgers,Classic Cheeseburger,Mains,quick;bar;sit_down,no
+burgers,Black Bean Burger,Mains,quick;sit_down,yes
+burgers,Loaded Fries,Sides,quick;bar,no
+burgers,Milkshake,Drinks,cafe;quick,no
+burgers,Onion Rings,Sides,quick;bar,no
+sandwiches,Turkey Club,Mains,cafe;quick,no
+sandwiches,Caprese Sandwich,Mains,cafe;quick,no
+sandwiches,Grilled Vegetable Sandwich,Mains,cafe;quick,yes
+sandwiches,Chicken Salad Sandwich,Mains,cafe;quick,no
+sandwiches,Tomato Soup,Starters,cafe;quick,yes
+bakery,Croissant,Mains,cafe;quick,no
+bakery,Cinnamon Roll,Desserts,cafe;quick,no
+bakery,Sourdough Loaf,Mains,cafe;quick,yes
+bakery,Fruit Tart,Desserts,cafe;quick,no
+bakery,Coffee Cake,Desserts,cafe;quick,no
+coffee_tea,Espresso,Drinks,cafe,yes
+coffee_tea,Cold Brew,Drinks,cafe,yes
+coffee_tea,Matcha Latte,Drinks,cafe,no
+coffee_tea,Avocado Toast,Mains,cafe,no
+coffee_tea,Overnight Oats,Mains,cafe,no
+breakfast_brunch,Eggs Benedict,Mains,cafe;sit_down,no
+breakfast_brunch,Shakshuka,Mains,cafe;sit_down,no
+breakfast_brunch,Buttermilk Pancakes,Mains,cafe;sit_down,no
+breakfast_brunch,Breakfast Burrito,Mains,cafe;quick,no
+breakfast_brunch,Fruit and Granola,Mains,cafe;quick,no
+salads,Greek Salad,Mains,quick;cafe,no
+salads,Caesar Salad,Mains,quick;cafe,no
+salads,Grain Bowl,Mains,quick;cafe,yes
+salads,Roasted Vegetable Bowl,Mains,quick;cafe,yes
+salads,Chicken Cobb Salad,Mains,quick;cafe,no
+vegan,Lentil Bowl,Mains,quick;sit_down,yes
+vegan,Crispy Tofu Bowl,Mains,quick;sit_down,yes
+vegan,Roasted Cauliflower,Starters,sit_down;premium,yes
+vegan,Chickpea Wrap,Mains,quick,yes
+vegan,Fruit Sorbet,Desserts,all,yes
+desserts,Chocolate Cake,Desserts,cafe;sit_down,no
+desserts,Fruit Sorbet,Desserts,cafe;sit_down,yes
+desserts,Ice Cream Sundae,Desserts,cafe;sit_down,no
+desserts,Brownie,Desserts,cafe;quick,no
+desserts,Cheesecake,Desserts,cafe;sit_down,no

@@ -2,11 +2,11 @@ import csv
 import unittest
 from collections import Counter
 
-from app import INTEGRATED_DATA_DIR, app, integrated_package, source_number
+from app import integrated_directory, app, integrated_package, source_number
 
 
 def indexed(filename):
-    with (INTEGRATED_DATA_DIR / filename).open(newline="", encoding="utf-8-sig") as stream:
+    with (integrated_directory() / filename).open(newline="", encoding="utf-8-sig") as stream:
         return {row["geoid"]: row for row in csv.DictReader(stream)}
 
 
@@ -36,12 +36,12 @@ class TransitStorefrontTests(unittest.TestCase):
                     self.assertEqual(data["pedestrian"]["observed_total"], source_number(self.pedestrian[geoid], "nearest_pedestrian_count_site_latest_pedestrian_count_total"))
                     self.assertEqual(data["taxi"]["pickups"], source_number(self.taxi[geoid], "pickups_may_2026"))
                     self.assertEqual(data["taxi"]["zone"], self.taxi[geoid]["taxi_zone"] or None)
-                    self.assertEqual(data["subway"]["period"], "2025-03-03 through 2025-03-09")
+                    self.assertEqual(data["subway"]["period"], integrated_package()["subway_vintage"])
                     self.assertEqual(data["bike"]["period"], "August 2026")
                     self.assertEqual(data["taxi"]["period"], "May 2026")
 
     def test_storefront_api_keeps_source_records_and_geography(self):
-        with (INTEGRATED_DATA_DIR / "entities/current_storefronts.csv").open(newline="", encoding="utf-8-sig") as stream:
+        with (integrated_directory() / "entities/current_storefronts.csv").open(newline="", encoding="utf-8-sig") as stream:
             source = list(csv.DictReader(stream))
         with app.test_client() as client:
             result = client.get("/api/storefronts")

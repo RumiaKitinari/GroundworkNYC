@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261015-scorecard" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261015-properties-tabs" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261024-integration" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261024-integration" />
   </head>
   <body>
     <div class="app-frame">
@@ -81,6 +81,7 @@
             <h1 id="workspaceTitle">Modern Bistro Location Search</h1>
           </div>
           <div class="top-actions">
+            <select id="locationSelect" class="location-select" aria-label="Selected Location"></select>
             <div class="search concept-search">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="11" cy="11" r="7"></circle>
@@ -109,51 +110,39 @@
           <div class="nav-group" aria-label="Explore"><span class="nav-group-label">Explore</span>
           <button class="feature-tab is-active" data-view="discover" type="button">
             <strong>Overview</strong>
-            <span>Rankings</span>
           </button>
           <button class="feature-tab" data-view="scorecard" type="button">
             <strong>Location Analysis</strong>
-            <span>Drivers</span>
           </button>
-          <button class="feature-tab" data-view="shortlist" type="button">
-            <strong>Top Locations</strong>
-            <span>Top Markets</span>
-          </button>
-          <button class="feature-tab" data-view="compare" type="button">
-            <strong>Compare</strong>
-            <span>Tradeoffs</span>
-          </button>
-          </div>
-          <div class="nav-group" aria-label="Research"><span class="nav-group-label">Research</span>
-          <button class="feature-tab" data-view="lease" type="button">
-            <strong>Properties</strong>
-            <span>Leads</span>
+          <button class="feature-tab" data-view="shortlist" type="button"><strong>Top Locations</strong>
           </button>
           <button class="feature-tab" data-view="whitespace" type="button">
-            <strong>Cuisine Markets</strong>
-            <span>White Space</span>
+            <strong>Competition</strong>
+          </button>
+          <button class="feature-tab" data-view="compare" type="button">
+            <strong>Compare <span id="compareCount" class="tab-count">0</span></strong>
+          </button>
+          </div>
+          <div class="nav-group" aria-label="Plan"><span class="nav-group-label">Plan</span>
+          <button class="feature-tab" data-view="lease" type="button">
+            <strong>Properties</strong>
           </button>
           <button class="feature-tab" data-view="finance" type="button">
-            <strong>Budget</strong>
-            <span>Model</span>
+            <strong>Economics</strong>
           </button>
-          <button class="feature-tab" data-view="now" type="button">
-            <strong>Trading Hours</strong>
-            <span>Dayparts</span>
+          <button class="feature-tab" data-view="menu" type="button">
+            <strong>Menu Studio</strong>
           </button>
           </div>
           <div class="nav-group" aria-label="Workspace"><span class="nav-group-label">Workspace</span>
           <button class="feature-tab" data-view="reports" type="button">
-            <strong>Reports</strong>
-            <span>Exports</span>
+            <strong>Report</strong>
           </button>
-          <button class="feature-tab" data-view="layers" type="button">
+          <button class="feature-tab feature-tab--utility" data-view="layers" type="button">
             <strong>Sources</strong>
-            <span>Coverage</span>
           </button>
-          <button class="feature-tab" data-view="settings" type="button">
+          <button class="feature-tab feature-tab--utility" data-view="settings" type="button">
             <strong>Settings</strong>
-            <span>Preferences</span>
           </button>
           </div>
         </nav>
@@ -181,11 +170,12 @@
                   <option value="activity">Local Demand</option>
                   <option value="whitespace">Cuisine Opportunity</option>
                   <option value="cost">Commercial Fit</option>
+                  <option value="concept_demand">Concept Demand Index</option>
+                  {% if spatial_backend_enabled %}<option value="huff_demand" disabled>Huff Market Gaps (Unavailable)</option>{% endif %}
                 </select>
               </div>
             </div>
-            <div class="map-stage" id="mapStage">
-            </div>
+            <div class="map-stage" id="mapStage"><div class="map-view-status" id="mapViewStatus" role="status" hidden></div></div>
           </div>
 
           <aside class="intel-module">
@@ -206,7 +196,7 @@
               </div>
               <ul id="driverList"></ul>
               <p class="decision-note" id="selectedRecommendation"></p>
-              <button class="quiet-action" id="viewAnalysis" type="button">View Location Analysis</button>
+              <div class="intel-actions"><button class="quiet-action" id="saveLocation" type="button" aria-pressed="false">Save Location</button><button class="quiet-action" id="viewAnalysis" type="button">View Location Analysis</button></div>
             </div>
           </aside>
         </section>
@@ -224,7 +214,7 @@
           <div class="table-module is-hidden" data-panel="scorecard">
             <div class="module-head compact">
               <div>
-                <h2>Location Scorecard</h2>
+                <h2>Market Profile</h2>
               </div>
             </div>
             <div class="scorecard-board" id="scorecardBoard"></div>
@@ -242,7 +232,7 @@
           <div class="table-module is-hidden" data-panel="compare">
             <div class="module-head compact">
               <div>
-                <h2>Compare Locations</h2>
+                <h2>Compare Saved Locations</h2>
               </div>
             </div>
             <div class="compare-board" id="compareBoard"></div>
@@ -269,7 +259,7 @@
           <div class="table-module is-hidden" data-panel="whitespace">
             <div class="module-head compact">
               <div>
-                <h2>Cuisine Markets</h2>
+                <h2>Competition</h2>
               </div>
             </div>
             <div class="gap-board" id="gapBoard"></div>
@@ -278,7 +268,7 @@
           <div class="table-module is-hidden" data-panel="finance">
             <div class="module-head compact">
               <div>
-                <h2>Budget Scenario</h2>
+                <h2>Economics</h2>
               </div>
             </div>
             <form class="finance-scenario-controls" id="financeScenarioForm">
@@ -290,19 +280,42 @@
             <div class="finance-board" id="financeBoard"></div>
           </div>
 
-          <div class="table-module is-hidden" data-panel="now">
-            <div class="module-head compact">
-              <div>
-                <h2>Trading Hours</h2>
-              </div>
+          <div class="table-module is-hidden" data-panel="menu">
+            <div class="module-head compact menu-heading">
+              <div><h2>Menu Studio</h2><p id="menuContext"></p></div>
+              <div class="menu-heading-actions"><button class="quiet-action" id="menuPrint" type="button" disabled>Print Menu</button><button class="quiet-action" id="menuExport" type="button" disabled>Export CSV</button></div>
             </div>
-            <div class="now-board" id="nowBoard"></div>
+            <div class="menu-kpis" id="menuKpis" aria-label="Menu planning summary"></div>
+            <div class="menu-view-switch segmented-control" role="group" aria-label="Menu view"><button type="button" data-menu-view="plan" aria-pressed="true">Plan</button><button type="button" data-menu-view="preview" aria-pressed="false">Preview</button></div>
+            <div class="menu-workspace">
+              <section class="menu-discovery" aria-labelledby="menuIdeasHeading">
+                <div class="menu-section-head"><h3 id="menuIdeasHeading">Dish Ideas</h3><span id="menuSuggestionCount"></span></div>
+                <div class="menu-controls">
+                  <label class="menu-search"><span class="sr-only">Search Dish Ideas</span><input id="menuSearch" type="search" placeholder="Search dishes" autocomplete="off" /></label>
+                  <select id="menuSectionFilter" aria-label="Filter Dish Ideas By Section">
+                    <option value="all">All Sections</option><option>Starters</option><option>Mains</option><option>Sides</option><option>Desserts</option><option>Drinks</option>
+                  </select>
+                </div>
+                <div id="menuSuggestions" class="menu-suggestions" aria-live="polite"></div>
+              </section>
+              <section class="menu-selection" aria-labelledby="menuSelectionHeading">
+                <div class="menu-section-head"><h3 id="menuSelectionHeading">Your Menu</h3><span id="menuItemCount">0 Items</span></div>
+                <div id="menuSaved" class="menu-saved"></div>
+                <form id="menuCustomForm" class="menu-custom-form">
+                  <input id="menuCustomName" type="text" maxlength="80" placeholder="Add a custom dish" aria-label="Custom Dish Name" required />
+                  <select id="menuCustomSection" aria-label="Custom Dish Section"><option>Starters</option><option selected>Mains</option><option>Sides</option><option>Desserts</option><option>Drinks</option></select>
+                  <button class="primary-action" type="submit">Add Dish</button>
+                </form>
+                <div class="menu-save-status" id="menuSaveStatus" role="status"></div>
+              </section>
+            </div>
+            <div id="menuPreview" class="menu-preview" hidden></div>
           </div>
 
           <div class="table-module is-hidden" data-panel="reports">
             <div class="module-head compact">
               <div>
-                <h2>Reports</h2>
+                <h2>Decision Report</h2>
               </div>
             </div>
             <div class="report-board" id="reportBoard"></div>
@@ -328,6 +341,16 @@
                   <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
                 </div>
               </div>
+              <div class="settings-row">
+                <div><h3>Account</h3><span>{{ email if email else 'Guest' }}</span></div>
+                <div class="settings-account-actions">
+                  {% if access == 'guest' %}<button type="button" data-auth-open="login">Log In</button><button type="button" data-auth-open="signup">Sign Up</button>{% elif access == 'account' %}<button type="button" data-logout>Log Out</button>{% endif %}
+                </div>
+              </div>
+              <div class="settings-row settings-row--saved">
+                <div><h3>Saved Concepts</h3><span id="workspaceSyncStatus" role="status"></span></div>
+                <div id="savedBriefs" class="saved-briefs"></div>
+              </div>
             </div>
           </div>
 
@@ -350,31 +373,24 @@
           <div class="welcome-brand-row"><div class="welcome-brand">GW <span>Groundwork</span></div>{% if access == 'guest' %}<button type="button" id="closeAccessButton" class="access-close">Close</button>{% endif %}</div>
           <div class="eyebrow">NYC RESTAURANT LOCATION RESEARCH</div>
           <h1 id="welcomeTitle">Find your place in New York.</h1>
-          <p>Shape your restaurant idea and explore locations with the Groundwork research dashboard.</p>
-          <div class="auth-switch" role="group" aria-label="Account options">
-            <button type="button" data-auth-mode="login">Log in</button>
-            <button type="button" data-auth-mode="signup">Sign up</button>
-          </div>
+          <p>Shape your restaurant idea and explore locations across New York City.</p>
+          <div class="auth-switch" role="group" aria-label="Account Options"><button type="button" data-auth-mode="login">Log In</button><button type="button" data-auth-mode="signup">Sign Up</button></div>
           <form id="authForm" method="post" action="{{ url_for('auth_action', action=auth_mode) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf }}" />
             <label class="control-field"><span>Email</span><input name="email" type="email" autocomplete="email" required maxlength="254" /></label>
             <label class="control-field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128" /></label>
-            <label class="control-field" id="confirmField" hidden><span>Confirm password</span><input name="confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" /></label>
+            <label class="control-field" id="confirmField" hidden><span>Confirm Password</span><input name="confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" /></label>
             {% if auth_error %}<p class="form-error" role="alert">{{ auth_error }}</p>{% endif %}
-            <button class="primary-action auth-submit" type="submit">Log in</button>
+            <button class="primary-action auth-submit" type="submit">Log In</button>
           </form>
-          <form method="post" action="{{ url_for('auth_action', action='guest') }}" class="guest-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf }}" />
-            <button type="submit" class="quiet-action">Continue as guest <span aria-hidden="true">→</span></button>
-          </form>
-          <p class="welcome-note">Guest access needs no account.</p>
+          <form method="post" action="{{ url_for('auth_action', action='guest') }}" class="guest-form"><input type="hidden" name="csrf_token" value="{{ csrf }}" /><button type="submit" class="quiet-action">Continue As Guest</button></form>
         </div>
       </div>
     </section>
 
     <section class="brief-overlay {{ 'is-open' if access else '' }}" id="briefOverlay" aria-labelledby="briefTitle" aria-modal="true" role="dialog">
       <div class="brief-dialog">
-        <div class="brief-photo" aria-hidden="true"><div class="photo-caption">A better location starts with a clearer idea.</div></div>
+        <div id="briefPhoto" class="brief-photo" aria-hidden="true"><div class="photo-caption">A better location starts with a clearer idea.</div></div>
         <form class="brief-form" id="briefForm" novalidate>
           <div class="brief-heading">
             <div><div class="eyebrow">CONCEPT STUDIO</div><h2 id="briefTitle">Define your restaurant</h2><p>A few details help shape your location search.</p></div>
@@ -471,9 +487,8 @@
     </section>
 
     <form id="logoutForm" method="post" action="{{ url_for('auth_action', action='logout') }}" hidden><input type="hidden" name="csrf_token" value="{{ csrf }}" /></form>
-
-    <script>window.GROUNDWORK_HAS_STREET_TILES = {{ street_tiles_available|tojson }};</script>
+    <script>window.GROUNDWORK_HAS_STREET_TILES = {{ street_tiles_available|tojson }}; window.GROUNDWORK_MENU_OWNER = {{ (email or 'guest')|tojson }}; window.GROUNDWORK_ACCESS = {{ access|tojson }}; window.GROUNDWORK_CSRF = {{ csrf|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261015-properties-tabs"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261024-integration"></script>
   </body>
 </html>

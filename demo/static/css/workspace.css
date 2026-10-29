@@ -469,3 +469,31 @@
   .storefront-details dl { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .property-listings-empty { padding:18px; }
 }
+
+.app-frame .settings-row > div:first-child > span { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+.app-frame .settings-account-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.app-frame .settings-account-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--bright);
+}
+.app-frame .settings-account-actions button:hover { border-color: var(--cyan); color: var(--cyan); }
+.app-frame .settings-row--saved { align-items: flex-start; max-width: none; }
+.app-frame .saved-briefs { display: grid; gap: 0; width: min(600px, 100%); }
+.app-frame .saved-brief-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 56px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.app-frame .saved-brief-row > div { min-width: 0; }
+.app-frame .saved-brief-row strong { display: block; color: var(--bright); font-size: 13px; overflow-wrap: anywhere; }
+.app-frame .saved-brief-row span, .app-frame .saved-brief-empty { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.app-frame .saved-brief-row button { min-height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--cyan); }
+.app-frame .saved-brief-row button:last-child { font-size: 18px; line-height: 1; }
+.app-frame .saved-brief-row button:disabled { color: var(--muted); cursor: default; }
+.app-frame .saved-brief-row button:not(:disabled):hover { border-color: var(--cyan); }
+
+.app-frame .location-select { height:38px; min-width:145px; max-width:220px; border:1px solid var(--workspace-border); background:var(--workspace-surface); color:var(--bright); font-size:12px; }
+.app-frame .intel-actions { gap:7px; }
+.app-frame .top-actions { flex-wrap:wrap; }
+.app-frame .table-module > :not(.module-head) { min-width:0; }
+@media (max-width:760px) { .app-frame .settings-row--saved { display:block; } .app-frame .saved-briefs { margin-top:12px; } }
