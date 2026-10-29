@@ -23,7 +23,7 @@ The dashboard, resident/worker and transit profiles, competition explorer,
 storefront research, 3D restaurant overlay, saved workspaces and menu tools
 are combined in `demo/`. Read [the app README](demo/README.md) for setup and
 [the architecture note](demo/FRONTEND_ARCHITECTURE.md) for the API boundaries.
-`GWNYC_site/` is the separate Django/MongoDB starter. The team's `codes/`
+The legacy Django/MongoDB starter was removed from main. The team's `codes/`
 model pipeline remains separate; its instructions are in `Readme/README.md`.
 
 ## Local data and optional services

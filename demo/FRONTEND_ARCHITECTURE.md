@@ -1,7 +1,8 @@
 # Frontend architecture — Flask dashboard preview
 
 **Scope:** The combined Flask app in `demo/`, optionally mounted by FastAPI.
-The separate Django starter and `codes/` model pipeline do not serve this UI.
+The legacy Django starter has been removed. The `codes/` model pipeline generates
+artifacts consumed by the optional dashboard connection; it does not serve this UI.
 
 ## Why this structure
 
