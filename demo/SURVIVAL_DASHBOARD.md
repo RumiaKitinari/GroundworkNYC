@@ -1,4 +1,11 @@
-# Optional historical AFT inference
+# Survival connections
+
+The current demo uses a genuine Atharv tract export generated from his documented
+workflow. See [ATHARV_DEMO.md](ATHARV_DEMO.md) for artifacts, demo steps and
+reproduction. `tract_scores` in the private config (or `GROUNDWORK_ATHARV_SCORES`)
+selects this contract. It does not require a historical-aft-v1 audit file.
+
+## Separate optional historical AFT inference
 
 The dashboard reuses the inference/validation path from Otis Week 10 `dce1e03`.
 Dated feature helpers are extracted into `survival_features.py` so web requests
@@ -10,8 +17,8 @@ Screening scores, ordering and explorers retain their existing meaning.
 
 ## Missing bundle and exact contract
 
-No compatible artifacts or usable prediction exports were found in local
-`data/` or `checkpoints/`. Shared Drive contents still need compatibility review.
+No compatible historical-aft-v1 artifact bundle is installed. The separate
+Atharv archive-based export is active; it must not be relabeled as this dated model.
 Default required files are:
 
 - `data/output/atharv_model/model/survival_model.json`: native XGBoost
@@ -42,7 +49,7 @@ values or blank cells. Observation/publication dates and checksums are checked.
 
 Keep the base Flask install unchanged. Actual inference additionally needs
 numpy, pandas and XGBoost compatible with the supplied native artifact.
-This checkout has numpy 2.0.2 and XGBoost 2.1.4; pandas is absent. Artifact/runtime
+This checkout has numpy 2.0.2, pandas 2.2.3 and XGBoost 2.1.4. Artifact/runtime
 compatibility has therefore not been established. Otis's research dependency
 pins target Python 3.14 and must not be copied over this Python 3.11 baseline.
 

@@ -7,6 +7,7 @@ from datetime import date
 from functools import lru_cache
 import hashlib
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +35,7 @@ def options(config_path=DEFAULT_CONFIG):
     return {"model_dir": resolve(config.get("model_dir", str(DEFAULT_MODEL))),
             "data_dir": resolve(config.get("data_dir", str(ROOT / "data"))),
             "manifests": [resolve(p) for p in config.get("snapshots", list(map(str, DEFAULT_MANIFESTS)))],
+            "tract_scores": resolve(os.environ.get("GROUNDWORK_ATHARV_SCORES") or config["tract_scores"]) if os.environ.get("GROUNDWORK_ATHARV_SCORES") or config.get("tract_scores") else None,
             "cuisine_scores": resolve(config.get("cuisine_scores", "data/output/atharv_model/hex_cuisine_scores.csv"))}
 
 
@@ -111,6 +113,9 @@ def model_state(config_path=DEFAULT_CONFIG, prediction_date=None):
     prediction_date = prediction_date or date.today().isoformat()
     try:
         config = options(config_path)
+        if config["tract_scores"] is not None:
+            from atharv_export import export_state
+            return export_state(config["tract_scores"])
         required = [config["model_dir"] / name for name in ("survival_model.json", "model_meta.json", "audit.json")]
         if any(not p.is_file() for p in required):
             return None, {"status": "awaiting_artifact", "label": "Survival model awaiting trained artifact",

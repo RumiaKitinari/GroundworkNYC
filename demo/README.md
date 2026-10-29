@@ -358,5 +358,7 @@ prevent concurrent tabs from silently overwriting a saved revision. Existing
 account/workspace files remain private under instance/.
 
 [Optional survival inference](SURVIVAL_DASHBOARD.md) is connected separately
-from screening rankings. No compatible trained bundle is installed, and no
-survival probability is invented from an existing location score.
+from screening rankings. A locally generated Atharv tract export now supplies real estimates; see
+[the demo/reproduction guide](ATHARV_DEMO.md). It uses the archive-based model
+contract from `ADM6112-complete-v1`, distinct from Otis's dated-model contract.
+Artifacts stay local, and screening scores remain separately labeled.

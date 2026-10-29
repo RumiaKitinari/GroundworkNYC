@@ -45,11 +45,12 @@ lease availability.
 
 Flask runs without PostGIS or Redis. The optional FastAPI wrapper serves the
 same dashboard on port 8000; follow [backend/README.md](backend/README.md).
-Published spatial snapshots and compatible trained survival artifacts are absent from this checkout.
-The optional survival connection reports its status at `/api/models/survival`;
-Market Profile shows an unavailable estimate until an audited bundle is supplied.
-See [the survival setup](demo/SURVIVAL_DASHBOARD.md). Shared Drive research
-artifacts have not been checked for compatibility.
+A real local Atharv model run now supplies the dashboard's three-year tract
+estimates via its generated CSV. See [demo steps and reproduction](demo/ATHARV_DEMO.md).
+These archive-based research estimates are separate from screening rankings.
+Artifacts and the private activation pointer are ignored; a fresh clone must
+restore or regenerate them. Otis's dated-model contract remains a separate
+optional path in [the survival setup](demo/SURVIVAL_DASHBOARD.md).
 Keep private data, account databases, signing keys, virtual environments,
 checkpoints and generated caches outside commits.
 

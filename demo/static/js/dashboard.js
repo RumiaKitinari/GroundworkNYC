@@ -1883,7 +1883,7 @@ function renderMarketProfile() {
   const survival = location.survival;
   const survivalValue = survival?.status === "available" ? `${(100 * survival.probability).toFixed(1)}%` : "Unavailable";
   const survivalBasis = survival?.status === "available"
-    ? `Experimental three-year estimate · ${Math.round(100 * survival.feature_coverage)}% feature coverage · ${escapeHtml(survival.model_version)}. Screening ranking is separate.`
+    ? `${survival.source_type === "atharv_tract_export" ? "Archive-based research estimate · disappearance proxy" : `Experimental three-year estimate · ${Math.round(100 * survival.feature_coverage)}% feature coverage`} · ${escapeHtml(survival.model_version)}. Screening ranking is separate.`
     : `${escapeHtml(dashboard.survival_model?.label || "Survival model unavailable")}. Screening scores are not survival predictions.`;
   const risks = location.risk_flags.map((risk) => `<li>${titleCase(risk)}</li>`).join("");
   const components = location.score_components.map((component) => {
