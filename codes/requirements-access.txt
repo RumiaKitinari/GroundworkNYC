@@ -1,0 +1,7 @@
+# Otis Python 3.14 environment; compatible baseline verified on Python 3.11.
+numpy==2.0.2; python_version < "3.14"
+pandas==2.2.3; python_version < "3.14"
+scipy==1.17.1; python_version < "3.14"
+numpy==2.5.3; python_version >= "3.14"
+pandas==3.0.6; python_version >= "3.14"
+scipy==1.18.1; python_version >= "3.14"

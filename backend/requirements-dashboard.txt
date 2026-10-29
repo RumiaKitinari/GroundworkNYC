@@ -1,0 +1,9 @@
+# Combined dashboard runtime, using the current feature/model environment.
+# The standalone Python 3.12 backend requirements remain unchanged.
+-r ../demo/requirements.txt
+-r ../codes/requirements-access.txt
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+psycopg[binary,pool]==3.2.13
+redis==7.0.1
+python-dotenv==1.2.4

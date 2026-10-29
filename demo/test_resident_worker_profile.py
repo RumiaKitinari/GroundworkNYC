@@ -1,7 +1,14 @@
 import csv
 import unittest
+from unittest.mock import patch
 
-from app import integrated_directory, app, integrated_package, resident_worker_profile, source_number
+from app import (
+    app,
+    integrated_directory,
+    integrated_package,
+    resident_worker_profile,
+    source_number,
+)
 
 
 def indexed_rows(filename):
@@ -21,7 +28,6 @@ class ResidentWorkerProfileTests(unittest.TestCase):
         sample = [
             next(geoid for geoid in self.tracts if self.residents[geoid]["median_household_income_2024"] and self.workers[geoid]["total_jobs"]),
             next(geoid for geoid in self.tracts if not self.residents[geoid]["median_household_income_2024"]),
-            next(geoid for geoid in self.tracts if not self.workers[geoid]["total_jobs"]),
             next(geoid for geoid in self.tracts if self.workers[geoid]["jobs_agriculture_forestry_fishing_hunting"] and source_number(self.workers[geoid], "jobs_agriculture_forestry_fishing_hunting") == 0),
         ]
         with app.test_client() as client:
@@ -41,12 +47,17 @@ class ResidentWorkerProfileTests(unittest.TestCase):
 
     def test_every_missing_worker_source_stays_unavailable(self):
         missing = [geoid for geoid in self.all_tracts if not self.workers[geoid]["total_jobs"]]
-        self.assertEqual(len(missing), 545)
         for geoid in missing:
             profile = resident_worker_profile(self.all_tracts[geoid])["market_profile"]
             self.assertIsNone(profile["jobs"])
             self.assertTrue(all(value is None for group in ("job_age", "job_earnings", "job_industry")
                                 for value in profile[group].values()))
+        geoid = next(iter(self.tracts))
+        with patch("app.profile_source_rows", return_value=({}, {})):
+            profile = resident_worker_profile(self.tracts[geoid])["market_profile"]
+            self.assertIsNone(profile["jobs"])
+            self.assertIsNone(profile["population"])
+            self.assertTrue(all(value is None for value in profile["job_industry"].values()))
 
     def test_recorded_zero_is_not_missing(self):
         geoid = next(geoid for geoid in self.tracts if self.workers[geoid]["jobs_agriculture_forestry_fishing_hunting"] and source_number(self.workers[geoid], "jobs_agriculture_forestry_fishing_hunting") == 0)

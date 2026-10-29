@@ -1,10 +1,34 @@
 # GroundworkNYC backend
 
-This implementation adds a FastAPI service, PostGIS storage, Redis tile caching, offline Huff demand allocation, and optional XGBoost model serving to the existing Flask dashboard. Flask remains mounted at `/`, so login, guest access, saved workspaces, briefs, menus, rankings, and existing API paths keep their contracts. OpenAPI documentation for the new endpoints is at `/docs`.
+This implementation adds a FastAPI service, PostGIS storage, Redis tile caching, offline Huff demand allocation, and XGBoost model serving to the supplied frontend. The existing Flask dashboard remains mounted at `/`, so login, guest access, saved workspaces, briefs, menus, rankings, and existing API paths keep their contracts. OpenAPI documentation for the new endpoints is at `/docs`.
 
-**Integration status:** the Flask dashboard, concept-screening vector tiles, PostGIS queries, and Redis cache were tested with a local integrated release. Huff demand allocation and survival predictions remain unpublished; no trained survival model is supplied. This is a local screening demo, not a calibrated forecasting service or a hosted production deployment.
+**Integration status:** the Flask dashboard and a concept-screening vector layer were tested through this service with the local integrated release. PostGIS serves the tiles and Redis caches repeat tile requests. Huff demand allocation and survival-model predictions remain unpublished. The integrated datasets stay local, and no trained survival model is supplied. This is a local screening demo, not a calibrated forecasting service.
 
 ## Start with Docker
+
+### Current Combined Local Runtime
+
+The preferred local entry point is `.venv/bin/python run_local.py` from the
+repository root, with the existing Compose database/Redis services running.
+Install `backend/requirements-dashboard.txt` into the current project environment.
+This adds the service dependencies without downgrading the feature pipeline's
+NumPy/pandas environment to the standalone backend's Python 3.12 pins.
+
+The launcher reads the private `.env` without printing credentials. Explicit
+`DATABASE_URL`/`REDIS_URL` settings take precedence; otherwise it uses the existing
+Compose loopback ports, 15432 and 16379, with `POSTGRES_PASSWORD`. It checks the
+database before starting, reports Redis availability, and serves the combined
+app at `http://127.0.0.1:5001` by default. `--check` checks services without
+starting a listener. `--port 8000` selects an alternative port.
+
+Storage responsibilities remain explicit: PostGIS stores immutable published
+spatial layers and model batches; Redis is an expendable tile cache; original
+and integrated source artifacts remain local files; accounts and saved
+workspaces/menus remain in `instance/accounts.sqlite3`. No SQLite-to-Postgres
+account migration is implied or performed. This is still a local prototype,
+not a complete production authentication/deployment setup.
+
+### Standalone Container Setup
 
 From the repository root:
 
@@ -15,9 +39,19 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open `http://localhost:8000` for the existing UI and `http://localhost:8000/docs` for the new API. The migration service initializes PostGIS before the API starts. Database, Redis, and API ports bind to loopback only (15432, 16379, and 8000). The PostgreSQL image targets Linux containers; Apple Silicon Docker installations may need x86 emulation for this PostGIS image.
+Open `http://localhost:8000` for the existing UI and `http://localhost:8000/docs` for the new API. The migration service initializes PostGIS before the API starts. Database, Redis and API ports bind to loopback only (15432, 16379 and 8000 respectively). The PostgreSQL image targets Linux containers; Apple Silicon Docker installations may need x86 emulation for this PostGIS image.
 
-If Docker Desktop cannot mount `./data`, run only `db`, `redis`, and `migrate` in Compose and start the API on the host. Set `DATABASE_URL` to `postgresql://groundwork:${POSTGRES_PASSWORD}@127.0.0.1:15432/groundwork` and `REDIS_URL` to `redis://127.0.0.1:16379/0` in that host process. Keep `.env` private.
+If Docker Desktop rejects the `./data` bind mount because the project directory is not shared with Docker, leave the API on the host and run only the infrastructure in Compose. From the repository root, with the separate `backend/.venv` installed:
+
+```bash
+docker compose up -d db redis migrate
+set -a; source .env; set +a
+export DATABASE_URL="postgresql://groundwork:${POSTGRES_PASSWORD}@127.0.0.1:15432/groundwork"
+export REDIS_URL="redis://127.0.0.1:16379/0"
+backend/.venv/bin/uvicorn groundwork_backend.api:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+The host API reads the same local `data/integrated/current/` release. Use `http://127.0.0.1:8000/`, not the standalone Flask port, to test spatial tiles. Keep the generated `.env` private.
 
 The UI entry screen can load without private data. The dashboard returns a clear 503 until the required dataset is supplied. `/health/live` checks that the service runs; `/health/ready` also requires the database schema and at least one published spatial snapshot. Redis is an optional acceleration layer, so its failure does not prevent PostGIS from serving tiles.
 
@@ -38,7 +72,7 @@ Configure `DATABASE_URL` and optionally `REDIS_URL` in the process environment. 
 
 ## Restore the existing dashboard data
 
-The Flask dashboard reads `data/integrated/current/`, a symlink to the active validated release. For a separately mounted release, set `GROUNDWORK_DATA_DIR` to its directory. Keep the private package there with at least:
+The local Flask demo reads `data/integrated/current/`, a symlink to the active validated release. Keep the private package there with at least:
 
 ```text
 data/integrated/current/
@@ -61,6 +95,14 @@ Edit `backend/examples/concept-query.json` to use the dashboard's query argument
 docker compose run --rm api python -m groundwork_backend.cli export-screening \
   --snapshot screening_korean_20261008 \
   --query /app/backend/examples/concept-query.json
+```
+
+With the host API workaround, run the exporter in a second terminal after setting `DATABASE_URL` as above and `PYTHONPATH=backend`:
+
+```bash
+backend/.venv/bin/python -m groundwork_backend.cli export-screening \
+  --snapshot screening_default_YYYYMMDD \
+  --query backend/examples/concept-query.json
 ```
 
 This precomputes H3 resolutions 7, 8 and 9 with the existing scoring model. The frontend asks `/api/v1/spatial/resolve` for the matching immutable tile URLs. Published concepts use vector tiles; concepts without a matching export retain `/api/hex-demand` GeoJSON. A budget or map-style change does not rerun the offline surface computation.
@@ -140,7 +182,7 @@ The batch checks the artifact checksum, objective, class meaning, resolution and
 
 Schedule these offline commands in an existing scheduler or a one-shot container job after data updates. Celery was omitted because the current UI does not submit long-running user jobs: a separate scheduled batch process meets the roadmap's latency requirement with fewer moving parts. Add a durable queue if interactive jobs are introduced.
 
-Before training, define permanent closure and censoring with verified business outcomes; do not assume a health-enforcement closure is business failure. Use time-stamped features preceding each outcome, temporal and spatial holdouts, calibration checks and Brier scores. The spatial service contains neither a validated restaurant-survival label set nor a trained production model artifact.
+Before training, define permanent closure and censoring with verified business outcomes; do not assume a health-enforcement closure is business failure. Use time-stamped features preceding each outcome, temporal and spatial holdouts, calibration checks and Brier scores. These data and validation decisions remain outstanding because the ZIP contains neither historical labeled outcomes nor the pretrained artifact referenced by the roadmap.
 
 ## API additions
 
@@ -175,7 +217,9 @@ node --test backend/tests/frontend_hex.test.cjs
 
 To run spatial integration tests, set `TEST_DATABASE_URL` to a **disposable** PostGIS database. Each test uses an isolated schema and drops it afterward. Integration tests cover source replay, projected count allocation, Huff publication, actual MVT decoding, independent active-layer pointers, immutable releases and persisted model predictions. `.github/workflows/backend.yml` provisions PostGIS and executes these tests in CI.
 
-The XGBoost tests use a temporary synthetic model exclusively as a test fixture; it is not shipped as a forecasting artifact. PostGIS integration tests require a disposable database through `TEST_DATABASE_URL`. No private source dataset or provisional walkability sample is included in this integration. Run the checks above and the existing `demo/` tests before publishing changes.
+Local verification: 38 backend Python unit tests, 131 existing demo tests, 4 frontend map-contract tests, and 2 PostGIS integration tests passed; lint and JavaScript syntax checks passed. The PostGIS tests used a separate disposable database. The XGBoost tests use a temporary synthetic model exclusively as a test fixture; it is not shipped as a forecasting artifact. The mounted Flask dashboard, default concept resolution, a nonempty PostGIS vector tile, and Redis cache miss/hit behavior were smoke-tested with the local integrated release. No Huff layer or survival prediction was published.
+
+The optional `data/samples/walkability-smoke.jsonl` fixture is local reference data, not a training input. Tests using it skip when the fixture is absent from a shared checkout.
 
 ## Design references
 

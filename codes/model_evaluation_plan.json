@@ -1,0 +1,20 @@
+{
+  "schema": "groundwork-evaluation-plan-v1",
+  "version": "2026-10-27-v1",
+  "cutoff": "2024-01-01",
+  "as_of": "2026-10-27",
+  "rounds": 200,
+  "folds": 5,
+  "horizon_years": 3.0,
+  "target": "Dated, independently verified restaurant-operation and permanent-closure intervals",
+  "predictors": ["population_density_per_sq_mile", "median_household_income", "job_density_per_sq_mile", "national_walkability_index"],
+  "validation": "Training openings and known labels strictly before cutoff; future openings in SHA256(NTA) mod 5 held-out spatial groups",
+  "early_stopping": false,
+  "baseline": "Training-fold-only constant log-normal AFT; scale fixed to model scale",
+  "ablation": "Remove each historical predictor in turn; same fold, rounds and parameters; no test-selected feature set",
+  "metrics": ["interval_negative_log_likelihood", "interval_order_concordance", "NTA_cluster_bootstrap_95_CI", "resolved_subset_3yr_calibration_not_population_calibration"],
+  "current_access_features_in_survival": false,
+  "synthetic_properties_in_survival_training": false,
+  "deployment_policy": "No automatic promotion from an engineering test or an uncalibrated scenario",
+  "limitation": "The post-2024 holdout cannot establish complete 3-year follow-up by 2026-10-27. Report unresolved cases; do not classify them as survivors. Empirical training still requires the evidence contract."
+}

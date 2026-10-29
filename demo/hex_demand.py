@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import h3
+from evidence_policy import THRESHOLDS
 from shapely.geometry import shape
 from shapely.strtree import STRtree
 
@@ -15,6 +16,7 @@ from shapely.strtree import STRtree
 SECTOR_RESOLUTION = 7
 CELL_RESOLUTION = 8
 DEMAND_SIGNALS = ("demand", "customer_fit", "access", "market_gap", "competition_balance")
+HEAT_METRICS = ("concept_demand", "location_score", "walkability", "inverse_walkability", *DEMAND_SIGNALS, "economics")
 
 
 def surface_weights(profile_weights):
@@ -48,7 +50,7 @@ def grid(directory, cell_resolution=CELL_RESOLUTION, sector_resolution=SECTOR_RE
     with (directory / "master_tract_features.csv").open(newline="", encoding="utf-8-sig") as stream:
         rows = list(csv.DictReader(stream))
     eligible = {row["geoid"]: row for row in rows if row.get("eligible_for_location_screening", "").lower() in {"true", "1"}
-                and row.get("borough") != "Staten Island" and row.get("centroid_latitude") and row.get("centroid_longitude")}
+                and row.get("centroid_latitude") and row.get("centroid_longitude")}
     features = json.loads((directory / "geography" / "nyc_2020_census_tracts.geojson").read_text())["features"]
     polygons, geoids, candidates = [], [], set()
     for feature in features:
@@ -77,15 +79,34 @@ def grid(directory, cell_resolution=CELL_RESOLUTION, sector_resolution=SECTOR_RE
     return tuple(result)
 
 
-def concept_surface(package, directory, concept, profile, weights, borough="", cell_resolution=CELL_RESOLUTION):
+def concept_surface(package, directory, concept, profile, weights, borough="", cell_resolution=CELL_RESOLUTION, metric="concept_demand"):
+    if metric not in HEAT_METRICS:
+        raise ValueError("Choose a supported heatmap metric.")
     rows = {row["geoid"]: row for row in package["tracts"] if not borough or row.get("borough") == borough}
     model = package["screening_model"]
-    signal_weights = surface_weights(weights)
+    signal_weights = surface_weights(weights) if metric == "concept_demand" else {metric: 1.}
     tract_scores = {}
     for geoid, row in rows.items():
-        components = model.evaluate(row, concept, weights, profile)["components"]
-        score = sum(components[key]["score"] * weight for key, weight in signal_weights.items())
-        coverage = sum(components[key]["coverage"] * weight for key, weight in signal_weights.items())
+        result = model.evaluate(row, concept, weights, profile)
+        components = result["components"]
+        if metric == "inverse_walkability":
+            access = package.get("customer_access_scores", {}).get(geoid, {})
+            score = access.get("index")
+            coverage = 100 * (access.get("routing_coverage") or 0)
+            if score is None:
+                continue
+        elif metric == "location_score":
+            score, coverage = result["opportunity"], result["confidence_score"]
+        elif metric == "walkability":
+            score = result.get("walkability")
+            if score is None:
+                continue
+            coverage = 100
+        else:
+            score = sum(components[key]["score"] * weight for key, weight in signal_weights.items())
+            coverage = sum(components[key]["coverage"] * weight for key, weight in signal_weights.items())
+        if coverage <= 0:
+            continue
         tract_scores[geoid] = (score, coverage)
     stations = [(float(row["latitude"]), float(row["longitude"])) for row in package["subway_stations"]
                 if row.get("latitude") and row.get("longitude")]
@@ -102,11 +123,14 @@ def concept_surface(package, directory, concept, profile, weights, borough="", c
         nearest = min((miles(latitude, longitude, lat, lon) for lat, lon in stations), default=None)
         prior_access = sum(subway_access(float(rows[geoid]["nearest_subway_distance_miles"])) * weight
                            for geoid, weight in shares if rows[geoid].get("nearest_subway_distance_miles") not in (None, ""))
-        if nearest is not None and prior_access:
+        if nearest is not None and prior_access and signal_weights.get("access"):
             base += signal_weights["access"] * (subway_access(nearest) - prior_access)
         score = round(max(0, min(100, base)))
         properties = {"id": cell, "parent_id": parent, "level": "cell", "score": score,
                       "coverage": round(coverage), "tract_count": len(shares),
+                      "metric": metric,
+                      "assessment_basis": "General Concept Screening; Not Verified Cuisine Demand",
+                      "recommendation_eligible": coverage >= THRESHOLDS["minimum_screening_coverage"]*100,
                       "land_share": round(land_fraction * 100),
                       "borough": rows[max(shares, key=lambda item: item[1])[0]]["borough"]}
         cells.append({"type": "Feature", "geometry": boundary(cell), "properties": properties})

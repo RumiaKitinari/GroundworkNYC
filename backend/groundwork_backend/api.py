@@ -227,7 +227,24 @@ def create_app(settings=None, store=None, cache=None, include_legacy=True):
 
         @legacy.app.context_processor
         def spatial_context():
-            return {"spatial_backend_enabled": bool(settings.database_url)}
+            import os
+
+            return {
+                "spatial_backend_enabled": bool(settings.database_url),
+                "real_data_preview": os.getenv("GROUNDWORK_PREVIEW") == "1",
+            }
+
+        import os
+
+        if os.getenv("GROUNDWORK_PREVIEW") == "1" and not settings.production:
+
+            @legacy.app.get("/demo")
+            def open_preview():
+                from flask import redirect, session
+
+                if session.get("access") != "account":
+                    session["access"] = "guest"
+                return redirect("/?demo=1")
 
         legacy.app.config["SESSION_COOKIE_SECURE"] = settings.production
         legacy.app.config["MAX_CONTENT_LENGTH"] = 1_000_000

@@ -70,7 +70,7 @@ class PropertyDataTests(unittest.TestCase):
     def test_listing_photo_requires_explicit_display_permission(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "verified_properties.csv"
-            fields = ["listing_id", "geoid", "transaction", "address", "asking_rent_monthly", "source_url", "checked_at", "image_url", "photo_display_permission"]
+            fields = ["listing_id", "geoid", "transaction", "address", "asking_rent_monthly", "source_url", "checked_at", "image_url", "photo_display_permission", "image_rights_reference"]
             with path.open("w", newline="") as handle:
                 writer = csv.DictWriter(handle, fieldnames=fields)
                 writer.writeheader()
@@ -81,14 +81,18 @@ class PropertyDataTests(unittest.TestCase):
                 without_rights = app.matching_properties([self.location], "lease", 18000, 3000000)
             with path.open("a", newline="") as handle:
                 writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writerow({"listing_id": "photo-no-grant", "geoid": "tract-1", "transaction": "lease", "address": "3 Test Street",
+                                 "asking_rent_monthly": "12000", "source_url": "https://example.com/c",
+                                 "checked_at": date.today().isoformat(), "image_url": "https://example.com/photo.jpg",
+                                 "photo_display_permission": "yes"})
                 writer.writerow({"listing_id": "photo-rights", "geoid": "tract-1", "transaction": "lease", "address": "2 Test Street",
                                  "asking_rent_monthly": "12000", "source_url": "https://example.com/b",
                                  "checked_at": date.today().isoformat(), "image_url": "https://example.com/photo.jpg",
-                                 "photo_display_permission": "yes"})
+                                 "photo_display_permission": "yes", "image_rights_reference": "partner permission agreement"})
             with patch.object(app, "LISTINGS_PATH", path), patch.object(app, "integrated_package", return_value={"storefronts": []}):
                 with_rights = app.matching_properties([self.location], "lease", 18000, 3000000)
         self.assertEqual(without_rights[0]["image"], "")
-        self.assertEqual([row["image"] for row in with_rights], ["", "https://example.com/photo.jpg"])
+        self.assertEqual([row["image"] for row in with_rights], ["", "", "https://example.com/photo.jpg"])
 
 
 if __name__ == "__main__":

@@ -1,4 +1,6 @@
+import csv
 import json
+import gzip
 import tempfile
 import unittest
 import zipfile
@@ -11,6 +13,52 @@ import refresh_integrated as refresh
 
 
 class RefreshIntegratedTests(unittest.TestCase):
+    def test_full_lodes_blocks_rebuild_worker_totals_and_rates(self):
+        with tempfile.TemporaryDirectory() as folder:
+            stage = Path(folder)
+            (stage / "features").mkdir()
+            raw = stage / "jobs.csv.gz"
+            with gzip.open(raw, "wt", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=["w_geocode", "C000", *refresh.LODES_COLUMNS])
+                writer.writeheader()
+                for block, jobs in (("360610001001001", 10), ("360610001001002", 5), ("360610002001001", 3),
+                                    ("360010001001001", 100)):
+                    writer.writerow({"w_geocode": block, "C000": jobs,
+                                     **{field: jobs if field in {"CA01", "CE01", "CNS07"} else 0 for field in refresh.LODES_COLUMNS}})
+            master = [{"geoid": "36061000100", "land_area_sq_miles": "2", "population_2024": "100"},
+                      {"geoid": "36061000200", "land_area_sq_miles": "1", "population_2024": ""}]
+            result = refresh.rebuild_lodes(stage, raw, master, minimum_blocks=0)
+            self.assertEqual(result["blocks"], 3)
+            self.assertEqual(result["nyc_jobs"], 18)
+            self.assertEqual(master[0]["total_jobs"], 15)
+            self.assertEqual(master[0]["jobs_retail_trade"], 15)
+            self.assertEqual(master[0]["job_density_per_sq_mile"], 7.5)
+            self.assertEqual(master[0]["jobs_per_1000_residents"], 150)
+            self.assertEqual(master[1]["jobs_per_1000_residents"], "")
+
+    def test_pedestrian_counts_use_latest_complete_period_and_nearest_point(self):
+        with tempfile.TemporaryDirectory() as folder:
+            stage = Path(folder)
+            (stage / "features").mkdir()
+            (stage / "entities").mkdir()
+            raw = stage / "pedestrians.csv"
+            refresh.write_csv(raw, [
+                {"objectid": "1", "loc": "A", "the_geom": "POINT (-74.0 40.7)",
+                 "oct25_am": "1", "oct25_md": "2", "oct25_pm": "3", "may26_am": "4", "may26_md": "5", "may26_pm": "6"},
+                {"objectid": "2", "loc": "B", "the_geom": "POINT (-73.8 40.8)",
+                 "oct25_am": "7", "oct25_md": "8", "oct25_pm": "9", "may26_am": "10", "may26_md": "", "may26_pm": "12"},
+            ], ("objectid", "loc", "the_geom", "oct25_am", "oct25_md", "oct25_pm",
+                "may26_am", "may26_md", "may26_pm"))
+            master = [{"geoid": "36061000100", "centroid_latitude": "40.7", "centroid_longitude": "-74.0"},
+                      {"geoid": "36081000100", "centroid_latitude": "40.8", "centroid_longitude": "-73.8"}]
+            result = refresh.rebuild_pedestrians(stage, raw, master, minimum_sites=2)
+            self.assertEqual(result["sites"], 2)
+            self.assertEqual(master[0]["nearest_pedestrian_count_site_latest_pedestrian_count_total"], 15)
+            self.assertEqual(master[1]["nearest_pedestrian_count_site_latest_pedestrian_count_total"], 24)
+            self.assertEqual(master[0]["nearest_pedestrian_count_site_distance_miles"], 0)
+            sites = refresh.read_csv(stage / "entities" / "pedestrian_count_sites_latest.csv")
+            self.assertEqual(sites[1]["period"], "2025-10")
+
     def test_release_validation_checks_all_tract_tables(self):
         with tempfile.TemporaryDirectory() as folder:
             stage = Path(folder)

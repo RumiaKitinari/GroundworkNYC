@@ -148,6 +148,7 @@ def test_concept_keys_ignore_presentation_and_budget():
     b, _ = concept_key({"cuisine": "korean", "rent_cap": "22000", "level": "fine"})
     assert a == b
     assert a != concept_key({"cuisine": "italian"})[0]
+    assert a != concept_key({"cuisine": "korean", "borough": "Staten Island"})[0]
 
 
 def test_explicit_cors_allowlist():
@@ -165,14 +166,24 @@ def test_explicit_cors_allowlist():
         )
 
 
-def test_legacy_dashboard_auth_and_missing_private_data(monkeypatch, tmp_path):
-    monkeypatch.setenv("GROUNDWORK_DATA_DIR", str(tmp_path / "missing-release"))
+def test_legacy_dashboard_auth_and_missing_private_data():
+    from unittest.mock import patch
+
     with TestClient(create_app(Settings(), FakeStore(), include_legacy=True)) as client:
         assert client.get("/").status_code == 200
         assert client.get("/api/menu/suggestions?cuisine=korean").status_code == 200
         assert client.post("/auth/login", data={"email": "a@example.com", "password": "x"}).status_code == 400
-        assert client.get("/api/dashboard").status_code == 503
+        with patch("groundwork_legacy_app._load_integrated_package", side_effect=FileNotFoundError):
+            assert client.get("/api/dashboard").status_code == 503
         assert client.get("/health/live").status_code == 200
+
+
+def test_spatial_map_control_only_appears_with_configured_backend():
+    with TestClient(create_app(Settings(database_url="postgresql://test-only"), FakeStore(), include_legacy=True)) as client:
+        page = client.get("/")
+    assert page.status_code == 200
+    assert 'value="huff_demand"' in page.text
+    assert "GROUNDWORK_SPATIAL_BACKEND = true" in page.text
 
 
 def test_layer_specific_active_snapshot_lookup():
@@ -181,19 +192,31 @@ def test_layer_specific_active_snapshot_lookup():
             if layer and layer.startswith("screening_"):
                 return {
                     "snapshot": "screening_2",
-                    "metadata": {},
+                    "metadata": {"data_release": "integrated_2"},
                     "layers": [{"layer": layer, "resolution": 8}],
                 }
             return super().metadata(snapshot, layer)
 
     with TestClient(create_app(Settings(), LayerStore(), include_legacy=False)) as client:
-        assert client.get("/api/v1/spatial/resolve?cuisine=korean").json()["snapshot"] == "screening_2"
+        resolved = client.get("/api/v1/spatial/resolve?cuisine=korean").json()
+        assert resolved["snapshot"] == "screening_2"
+        assert resolved["data_release"] == "integrated_2"
         assert (
             client.post("/api/v1/locations/analyze", json={"latitude": 40.75, "longitude": -73.97}).json()[
                 "snapshot"
             ]
             == "release_1"
         )
+
+
+def test_stale_screening_code_is_rejected_on_live_dashboard():
+    from unittest.mock import patch
+
+    with TestClient(create_app(Settings(), FakeStore(), include_legacy=True)) as client:
+        with patch("groundwork_backend.provenance.screening_is_current", return_value=False):
+            response = client.get("/api/v1/spatial/resolve?cuisine=korean")
+        assert response.status_code == 409
+        assert "GeoJSON" in response.json()["detail"]
 
 
 def test_unavailable_store_returns_503():
@@ -226,23 +249,3 @@ def test_huff_manifest_returns_pinned_vector_urls(client):
     assert data["snapshot"] == "release_1"
     assert data["source_layer"] == "demand"
     assert data["tiles"]["8"] == "/api/v1/tiles/release_1/huff/8/{z}/{x}/{y}.mvt"
-
-
-def test_screening_provenance_rejects_stale_tiles_with_shared_data_override(monkeypatch, tmp_path):
-    from groundwork_backend.provenance import screening_provenance
-    monkeypatch.setenv('GROUNDWORK_DATA_DIR', str(tmp_path))
-
-    class ScreeningStore(FakeStore):
-        provenance = {'data_release': tmp_path.name, **screening_provenance()}
-
-        def metadata(self, snapshot=None, layer=None):
-            return {'snapshot': 'checked', 'metadata': self.provenance,
-                    'layers': [{'layer': layer, 'resolution': 8}]}
-
-    store = ScreeningStore()
-    with TestClient(create_app(Settings(), store, include_legacy=True)) as client:
-        response = client.get('/api/v1/spatial/resolve?cuisine=korean')
-        assert response.status_code == 200
-        assert response.json()['data_release'] == tmp_path.name
-        store.provenance = {**store.provenance, 'screening_code_sha256': 'stale'}
-        assert client.get('/api/v1/spatial/resolve?cuisine=korean').status_code == 409

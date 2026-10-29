@@ -4,10 +4,18 @@ The integrated Storefront Registry has addresses and vacancy filings, but it is
 not an active listing feed. The dashboard labels those rows as research records.
 The separate `data/listings/public_opportunities.csv` holds one manually checked
 NYCHA restaurant-ready space from its [public leasing page](https://www.nyc.gov/site/nycha/business/store-leasing-available-properties.page),
-checked October 6, 2026. Its asking rent and size are source-reported; call
-NYCHA to confirm availability, use restrictions, and lease terms. This is not
+with the latest check date recorded in that CSV. Its asking rent and size are
+source-reported; call NYCHA to confirm availability, use restrictions, and lease terms. This is not
 citywide listing coverage. No photo is displayed because none was licensed.
 NYCHA does not approve new bar uses, so the lead is excluded for bar searches.
+
+The dashboard also reads `data/listings/synthetic_properties.csv` as a clearly
+separate **synthetic demonstration** inventory. Its 900 modeled leases and 100
+modeled purchases have approximate tract locations and market-calibrated
+prices, but no actual address, broker, source listing, photo, or confirmed
+availability. They are never imported through the verified-listing path or
+presented as live offers. See [SYNTHETIC_PROPERTIES.md](SYNTHETIC_PROPERTIES.md)
+for generation, market sources, validation, and the data dictionary.
 
 To add listings, place a CSV at `data/listings/verified_properties.csv` from the
 project root. The file is private data and must not be committed to GitHub.
@@ -31,7 +39,7 @@ as lease research leads but never as purchase listings.
 Optional columns:
 
 ```text
-title,sqft,frontage,condition,availability,image_url,photo_display_permission,latitude,longitude,broker_name,broker_contact,notes
+title,sqft,frontage,condition,availability,image_url,photo_display_permission,image_rights_reference,latitude,longitude,broker_name,broker_contact,notes
 ```
 
 Keep `source_url` and `checked_at` current. An asking price is not a transaction
@@ -59,9 +67,9 @@ The importer replaces only that provider's prior snapshot. It checks positive
 asking rent or sale price, source URLs, check dates within 90 days, duplicate IDs,
 NYC coordinates and tract matches. If coordinates are omitted, each row must
 include an integrated 11-digit `geoid`; this verifies membership, not the street
-address. An `image_url` requires both an HTTPS URL and
-`photo_display_permission=yes` on that row, in addition to the written rights
-reference. It does not download or grant rights to any photo. The supplied CSV
+address. An `image_url` requires an HTTPS URL, `photo_display_permission=yes`,
+and an `image_rights_reference` on that row, in addition to the written provider
+rights reference. It does not download or grant rights to any photo. The supplied CSV
 may use the columns above. The dashboard labels
 availability as provider-reported and still requires independent confirmation.
 

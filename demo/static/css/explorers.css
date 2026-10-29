@@ -1,0 +1,56 @@
+.team-explorer-details { margin: 18px 20px; border-top: 1px solid var(--line); min-width: 0; }
+.team-explorer-details > summary { padding: 16px 0; cursor: pointer; font-weight: 700; font-size: 14px; color: var(--bright); }
+.rw-profile,.transit-profile,.competition-explorer,.storefront-explorer { min-width: 0; padding: 16px 0; color: var(--text); }
+.rw-heading,.competition-heading,.storefront-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; align-items: start; }
+:is(.rw-profile,.transit-profile,.competition-explorer,.storefront-explorer) h3 { margin: 0 0 8px; font-size: 18px; color: var(--bright); }
+:is(.rw-profile,.transit-profile,.competition-explorer,.storefront-explorer) p { font-size: 12px; color: var(--muted); line-height: 1.5; }
+:is(.rw-profile,.transit-profile,.competition-explorer,.storefront-explorer) label { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
+:is(.rw-profile,.competition-explorer,.storefront-explorer) :is(select,input) { min-width: 0; width: 100%; max-width: 330px; min-height: 40px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); }
+.rw-area-names,.rw-metrics,.rw-breakdowns,.transit-grid,.competition-area-cards { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin: 16px 0; }
+.rw-metrics { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.rw-metric,.rw-area-names > div,.competition-area-card { min-width: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.rw-metric h4,.competition-area-card h4 { margin: 0 0 8px; font-size: 14px; }
+.rw-metric-value,.rw-area-names > div { display: grid; gap: 5px; }
+.rw-metric-value + .rw-metric-value { margin-top: 12px; }
+.rw-metric-value strong,.competition-area-card > div strong { font-size: 22px; color: var(--bright); }
+.rw-metric-value span,.rw-area-names span,.rw-area-names small { font-size: 11px; color: var(--muted); }
+.rw-breakdown,.transit-card,.competition-breakdown,.competition-comparison { border-top: 1px solid var(--line); min-width: 0; }
+:is(.rw-breakdown,.transit-card,.competition-breakdown,.competition-comparison) summary { padding: 12px 0; font-size: 13px; font-weight: 650; cursor: pointer; }
+.rw-breakdown summary small { display: block; font-size: 11px; font-weight: 400; margin-top: 6px; color: var(--muted); }
+.rw-table-scroll,.competition-comparison-scroll { overflow: auto; }
+:is(.rw-breakdown,.competition-comparison) table { width: 100%; border-collapse: collapse; font-size: 12px; }
+:is(.rw-breakdown,.competition-comparison) :is(th,td) { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.transit-card summary strong { display: block; margin-top: 6px; font-size: 16px; }
+.transit-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.transit-row strong { text-align: right; overflow-wrap: anywhere; }
+.transit-stations { max-height: 160px; overflow: auto; font-size: 12px; }
+.competition-content { display: grid; grid-template-columns: minmax(180px,.4fr) minmax(0,1fr); gap: 24px; }
+.competition-bars { display: grid; gap: 6px; max-height: 360px; overflow: auto; }
+.competition-bar { width: 100%; padding: 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text); text-align: left; }
+.competition-bar[aria-pressed="true"] { border-color: var(--blue); }
+.competition-bar-label { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.competition-bar-track { display: block; background: var(--line); height: 5px; margin-top: 6px; }
+.competition-bar-track span { display: block; height: 100%; background: #267b98; }
+.competition-tools,.storefront-controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; align-items: end; }
+.competition-filter { display: flex; gap: 8px; }
+:is(.competition-explorer,.storefront-explorer) button:not(.competition-bar) { padding: 8px 12px; min-height: 36px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+.competition-filter button[aria-pressed="true"] { border-color: var(--blue); }
+.competition-row,.storefront-record,.storefront-row-head { display: grid; grid-template-columns: 1fr .8fr 1.2fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.competition-row-head,.storefront-row-head { font-weight: 700; color: var(--muted); }
+.storefront-record,.storefront-row-head { grid-template-columns: 1.1fr .8fr 1fr auto; }
+.storefront-mobile-label { display: none; }
+.storefront-details dl { margin: 8px 0; font-size: 11px; }
+.storefront-details dl > div { padding: 5px 0; }
+.storefront-details dd { margin: 3px 0 0; }
+.storefront-count,.competition-results,.competition-filter-state { color: var(--muted); font-size: 12px; margin: 12px 0; }
+.competition-explorer small { display: block; color: var(--muted); font-size: 11px; }
+.competition-explorer,.storefront-explorer { overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .rw-area-names,.rw-metrics,.rw-breakdowns,.transit-grid,.competition-area-cards,.competition-content { grid-template-columns: 1fr; }
+  .competition-heading label,.rw-heading label,.storefront-controls label { width: 100%; }
+  .competition-row,.storefront-record { grid-template-columns: 1fr; gap: 6px; }
+  .competition-row-head,.storefront-row-head { display: none; }
+  .storefront-mobile-label { display: block; font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  .rw-table-scroll table { font-size: 11px; }
+  .rw-table-scroll :is(th,td) { padding: 7px 4px; }
+}
