@@ -121,7 +121,7 @@ def build_tract_features(master: pd.DataFrame) -> pd.DataFrame:
         return m[name].values if name in m else np.nan
 
     # Residents
-    income = m["median_household_income_2024"].fillna(m.get("neighbor_income_2024_estimate"))
+    income = m["median_household_income_2024"].fillna(m.get("neighbor_income_2024_estimate", np.nan))
     f["population_density"] = col("population_density_per_sq_mile")
     f["pct_under_18"] = col("pct_residents_under_18")
     f["pct_65_plus"] = col("pct_residents_65_plus")

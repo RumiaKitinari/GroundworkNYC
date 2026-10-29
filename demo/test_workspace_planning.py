@@ -26,7 +26,10 @@ class PlanningWorkspaceTests(AuthTests):
                      "profile": {"display_name": "Chef One", "company": "Cafe"},
                      "plans": {"concept": {"property_ids": ["synthetic-1"], "selected_property_id": "synthetic-1",
                          "draft": INPUTS, "scenarios": {"Expected": INPUTS}, "basket": {"tea": 2},
-                         "menu_details": {"tea": {"ingredients": "Tea, water", "complexity": "simple"}}}}}
+                         "menu_details": {"tea": {"ingredients": "Tea, water", "complexity": "simple",
+                             "recipe": {"portions": 1, "waste_pct": 0, "lines": [{"name": "Tea", "quantity": 1, "unit": "bag", "unit_cost": 1}]}}},
+                         "planning_inputs": {"opening_cash": 150000, "scenario_name": "Expected"},
+                         "checklist": {"property_visit": True, "funding": False}}}}
         response = self.client.put("/api/workspace", json={"revision": 0, "workspace": workspace}, headers={"X-CSRF-Token": token})
         self.assertEqual(response.status_code, 200, response.json)
         other = module.app.test_client()
@@ -51,3 +54,7 @@ class PlanningWorkspaceTests(AuthTests):
         self.assertFalse(valid_plans({"x": {"scenarios": []}}))
         self.assertFalse(valid_plans({"x": {"draft": {**INPUTS, "owner_id": 1}}}))
         self.assertFalse(valid_plans({"x": {"menu_details": {"tea": {"complexity": "unknown"}}}}))
+        self.assertFalse(valid_plans({"x": {"checklist": {"funding": "yes"}}}))
+        self.assertFalse(valid_plans({"x": {"checklist": {"arbitrary": True}}}))
+        self.assertFalse(valid_plans({"x": {"planning_inputs": {"months": 0}}}))
+        self.assertFalse(valid_plans({"x": {"menu_details": {"tea": {"recipe": {}}}}}))

@@ -1,6 +1,7 @@
 """Read-only local release gate. Never downloads, publishes, stages or trains."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -63,6 +64,9 @@ def main():
         failures.append("Local service configuration unavailable")
     try:
         inventory = training_inventory()
+        configured_data = os.environ.get("GROUNDWORK_DATA_DIR")
+        if configured_data and Path(configured_data).expanduser().resolve() != Path(inventory["active_release"]).resolve():
+            failures.append("Configured dashboard dataset differs from the audited integrated release; validate and publish it before release")
         failures.extend(inventory["structural_issues"])
         data = {key: inventory[key] for key in (
             "tract_rows", "master_columns", "documented_columns", "feature_matrix_sha256",
@@ -77,6 +81,8 @@ def main():
     _, model = model_state()
     if model["status"] == "invalid_artifact":
         failures.append("Configured survival artifact failed validation")
+    elif model.get("source_type") == "atharv_tract_export":
+        warnings.append("Archive-proxy tract export is display-only; verified survival inference remains unavailable")
     elif model["status"] != "available":
         warnings.append("Verified survival model unavailable; release is screening-only")
     staged = staged_issues()

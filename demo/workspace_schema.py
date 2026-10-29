@@ -1,5 +1,7 @@
 """Bounded, backward-compatible account planning payloads."""
+from business_plan import CHECKLIST_KEYS, planning_inputs
 from economics import scenario
+from menu_planning import recipe_cost
 
 
 def valid_plans(plans):
@@ -8,7 +10,14 @@ def valid_plans(plans):
     for key, plan in plans.items():
         if not isinstance(key, str) or len(key) > 500 or not isinstance(plan, dict):
             return False
-        if set(plan) - {"property_ids", "selected_property_id", "draft", "scenarios", "basket", "menu_details"}:
+        if set(plan) - {"property_ids", "selected_property_id", "draft", "scenarios", "basket", "menu_details", "planning_inputs", "checklist"}:
+            return False
+        try:
+            planning_inputs(plan.get("planning_inputs", {}))
+        except (ValueError, TypeError):
+            return False
+        checklist = plan.get("checklist", {})
+        if not isinstance(checklist, dict) or set(checklist) - CHECKLIST_KEYS or any(not isinstance(value, bool) for value in checklist.values()):
             return False
         ids = plan.get("property_ids", [])
         if (not isinstance(ids, list) or len(ids) > 4
@@ -42,10 +51,15 @@ def valid_plans(plans):
         if not isinstance(details, dict) or len(details) > 100:
             return False
         for item, detail in details.items():
-            if not isinstance(item, str) or len(item) > 120 or not isinstance(detail, dict) or set(detail) - {"ingredients", "complexity"}:
+            if not isinstance(item, str) or len(item) > 120 or not isinstance(detail, dict) or set(detail) - {"ingredients", "complexity", "recipe"}:
                 return False
             if not isinstance(detail.get("ingredients", ""), str) or len(detail.get("ingredients", "")) > 300:
                 return False
             if detail.get("complexity", "standard") not in {"simple", "standard", "complex"}:
                 return False
+            if "recipe" in detail:
+                try:
+                    recipe_cost(detail["recipe"])
+                except (ValueError, TypeError):
+                    return False
     return True

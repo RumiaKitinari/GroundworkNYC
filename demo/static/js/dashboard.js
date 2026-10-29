@@ -143,6 +143,8 @@ function selectView(view) {
   if (view === "access") renderCustomerAccess();
   if (view === "finance") prepareEconomicsLab();
   if (view === "reports" && dashboard) renderReports();
+  if (dashboard) renderTeamExplorers();
+  if (view === "workspace" && dashboard) prepareBusinessWorkspace();
 }
 
 function shortlistKey() {
@@ -535,6 +537,8 @@ function setTheme(theme, persist = true) {
   });
   if (locationMap && activeBasemap === "streets") locationMap.setStyle(mapStyle("streets"));
   if (economicsResult && activeView === "finance") renderEconomicsCharts(economicsResult);
+  if (activeView === "menu") renderAdvancedMenu();
+  if (activeView === "workspace" && businessForecastResult) renderBusinessForecast(businessForecastResult);
 }
 systemTheme.addEventListener("change", () => {if (dashboardThemeChoice === "system") setTheme("system", false);});
 
@@ -1991,57 +1995,12 @@ function bindPropertyFilters() {
 }
 
 function renderWhitespace() {
-  const location = selectedLocation();
-  const key = `${location.id}:${dashboard.meta.concept.cuisine}`;
-  const market = competitionCache.get(key);
-  const board = document.querySelector("#gapBoard");
-  if (!market) {
-    board.innerHTML = `<div class="comparison-empty"><h3>${escapeHtml(location.name)}</h3><p>Loading Restaurant Inventory...</p></div>`;
-    return;
-  }
-  const evidence = location.concept_evidence;
-  board.innerHTML = `
-    <div class="view-heading"><div><span class="eyebrow">${escapeHtml(cuisineLabel())} / ${escapeHtml(market.neighborhood || location.borough)}</span><h3>${escapeHtml(location.name)}</h3></div><span class="card-status">${escapeHtml(evidence.positioning)}</span></div>
-    <div class="market-measures">
-      <div class="market-measure"><span>Restaurants In Tract</span><strong>${displayNumber(market.tract_restaurant_count)}</strong><small>Active DOHMH records</small></div>
-      <div class="market-measure"><span>Same Cuisine In Tract</span><strong>${displayNumber(market.tract_same_cuisine_count)}</strong><small>DOHMH cuisine classification</small></div>
-      <div class="market-measure"><span>Same Cuisine In Neighborhood</span><strong>${displayNumber(market.neighborhood_same_cuisine_count)}</strong><small>${escapeHtml(market.neighborhood || "NTA")}</small></div>
-      <div class="market-measure"><span>Cuisine Label Coverage</span><strong>${evidence.cuisine_label_coverage}%</strong><small>Tract inventory</small></div>
-    </div>
-    <div class="restaurant-list"><div class="view-heading"><h3>Recorded Restaurants</h3><span id="restaurantCount">${market.restaurants.length} Shown</span></div>
-      <input class="restaurant-search" id="restaurantSearch" type="search" placeholder="Search Restaurant, Cuisine Or Address" aria-label="Search Recorded Restaurants" />
-      <div id="restaurantRows"></div>
-    </div>`;
-  const drawRows = (query = "") => {
-    const needle = query.toLowerCase().trim();
-    const rows = market.restaurants.filter(row => `${row.name} ${row.cuisine} ${row.address}`.toLowerCase().includes(needle));
-    document.querySelector("#restaurantCount").textContent = `${rows.length} Of ${market.restaurants.length} Shown`;
-    document.querySelector("#restaurantRows").innerHTML = rows.length ? rows.map(row => `<div class="restaurant-row"><div><strong>${escapeHtml(row.name)}</strong><span>${escapeHtml(row.address || "Address Unavailable")}</span></div><span>${escapeHtml(row.cuisine)}</span>${row.same_cuisine ? '<b>Same Cuisine</b>' : ""}</div>`).join("") : '<div class="comparison-empty">No Matching Restaurants.</div>';
-  };
-  document.querySelector("#restaurantSearch").addEventListener("input", event => drawRows(event.target.value));
-  drawRows();
+  if (!document.querySelector("#competitionExplorer")) document.querySelector("#gapBoard").innerHTML = "<section id=\"competitionExplorer\" class=\"competition-explorer\"></section>";
 }
 
 async function loadCompetition() {
-  if (!dashboard || activeView !== "whitespace") return;
-  const location = selectedLocation();
-  const cuisine = dashboard.meta.concept.cuisine;
-  const key = `${location.id}:${cuisine}`;
-  if (competitionCache.has(key)) return renderWhitespace();
-  const current = ++competitionRequest;
   renderWhitespace();
-  try {
-    const response = await fetch(`/api/locations/${encodeURIComponent(location.id)}/competition?cuisine=${encodeURIComponent(cuisine)}`);
-    if (!response.ok) throw new Error("Competition request failed");
-    const market = await response.json();
-    competitionCache.set(key, market);
-    if (current === competitionRequest && activeView === "whitespace" && selectedId === location.id) renderWhitespace();
-  } catch {
-    if (current === competitionRequest && activeView === "whitespace") {
-      document.querySelector("#gapBoard").innerHTML = `<div class="comparison-empty"><h3>Restaurant Inventory Unavailable</h3><button class="quiet-action" id="retryCompetition" type="button">Retry</button></div>`;
-      document.querySelector("#retryCompetition").addEventListener("click", loadCompetition);
-    }
-  }
+  await renderCompetitionExplorer();
 }
 
 function renderFinance() {
@@ -2240,15 +2199,17 @@ function renderMenu() {
       <label class="menu-price"><small>Menu Price</small><span>$</span><input type="number" data-menu-price min="0" max="1000" step="0.01" value="${escapeHtml(item.price ?? "")}" placeholder="0.00" aria-label="Planned Price For ${escapeHtml(item.name)}" /></label>
       <label class="menu-price"><small>Ingredient Cost</small><span>$</span><input type="number" data-menu-cost min="0" max="1000" step="0.01" value="${escapeHtml(item.cost ?? "")}" placeholder="0.00" aria-label="Ingredient Cost Per Portion For ${escapeHtml(item.name)}" /></label>
       <span class="menu-margin" title="Menu price minus ingredient cost; excludes labor, rent and other expenses">${Number(item.price) > 0 && item.cost !== "" && item.cost != null ? `${money(Number(item.price) - Number(item.cost))} / Portion` : "—"}</span>
+      <div class="menu-item-tools"><button type="button" data-recipe-edit="${escapeHtml(item.id)}" class="quiet-action">Recipe Cost</button><button type="button" data-menu-duplicate="${escapeHtml(item.id)}" class="quiet-action">Duplicate</button></div>
       <div class="menu-order"><button type="button" data-menu-move="up" aria-label="Move ${escapeHtml(item.name)} Up" title="Move Up">↑</button><button type="button" data-menu-move="down" aria-label="Move ${escapeHtml(item.name)} Down" title="Move Down">↓</button></div>
       <button type="button" class="menu-remove" data-menu-remove title="Remove ${escapeHtml(item.name)}" aria-label="Remove ${escapeHtml(item.name)}">×</button>
       <input class="menu-note" type="text" data-menu-note maxlength="200" value="${escapeHtml(item.note || "")}" placeholder="Description shown on menu" aria-label="Description For ${escapeHtml(item.name)}" />
     </div>`).join("")}</div>`).join("") : '<div class="menu-empty">No Dishes Added Yet.</div>';
   document.querySelector("#menuPreview").innerHTML = `<div class="menu-preview-head"><span>Groundwork Menu</span><h3>${escapeHtml(conceptName())}</h3><p>${escapeHtml(label)}</p></div>${groups.length ? groups.map(([section, items]) => `<section><h4>${section}</h4>${items.map(item => `<div class="menu-preview-item"><div><strong>${escapeHtml(item.name)}</strong>${item.note ? `<p>${escapeHtml(item.note)}</p>` : ""}</div><span>${Number(item.price) > 0 ? money(Number(item.price)) : ""}</span></div>`).join("")}</section>`).join("") : '<div class="menu-empty">Add dishes to preview your menu.</div>'}`;
   renderMenuPlanning();
+  renderAdvancedMenu();
 }
 
-function money(value) { return `$${Number(value).toFixed(2)}`; }
+function money(value) { return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(value)); }
 
 function prepareEconomicsLab() {
   if (!dashboard || activeView !== "finance") return;
@@ -2341,7 +2302,7 @@ function exportMenu() {
 }
 
 function renderPanels() {
-  const section = ["lease", "finance", "menu"].includes(activeView) ? "lease" : ["reports", "layers", "settings"].includes(activeView) ? "reports" : "discover";
+  const section = ["lease", "finance", "menu"].includes(activeView) ? "lease" : ["workspace", "reports", "layers", "settings"].includes(activeView) ? "reports" : "discover";
   document.querySelectorAll("[data-section-view]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.sectionView === section)));
   document.querySelectorAll(".nav-group").forEach(group => group.classList.toggle("has-active-tab", !!group.querySelector(".is-active")));
   document.querySelector(".workspace")?.classList.toggle("is-discover", activeView === "discover");
@@ -2377,11 +2338,13 @@ function renderAll() {
   renderPanels();
   renderMenu();
   if (activeView === "finance") prepareEconomicsLab();
+  renderTeamExplorers();
+  if (activeView === "workspace") prepareBusinessWorkspace();
 }
 
 function renderConceptChrome() {
   const name = conceptName();
-  const titles = {discover: "Location Search", scorecard: "Market Profile", access: "Customer Access", whitespace: "Competition", compare: "Location Comparison", lease: "Property Search", finance: "Operating Economics", menu: "Menu Studio", reports: "Decision Report", layers: "Sources & Coverage", settings: "Workspace Settings"};
+  const titles = {discover: "Location Search", scorecard: "Market Profile", access: "Customer Access", whitespace: "Competition", compare: "Location Comparison", lease: "Property Search", finance: "Operating Economics", menu: "Menu Studio", workspace: "Business Plan", reports: "Decision Report", layers: "Sources & Coverage", settings: "Workspace Settings"};
   document.querySelector("#workspaceTitle").textContent = `${name} ${titles[activeView] || "Location Search"}`;
   document.title = `${titles[activeView] || "Location Search"} | Groundwork NYC`;
   document.querySelector("#activeConceptName").textContent = name;
@@ -2469,6 +2432,7 @@ document.querySelector("#menuSaved").addEventListener("click", event => {
   const button = event.target.closest("[data-menu-remove]");
   if (!button) return;
   const id = button.closest("[data-menu-id]")?.dataset.menuId;
+  rememberRemovedMenuItem(id);
   savedMenu = savedMenu.filter(item => item.id !== id);
   const plan = currentPlan(); delete plan.basket[id]; delete plan.menu_details[id]; savePlan(plan);
   persistMenu();
@@ -2783,4 +2747,6 @@ updateConceptImage(state.cuisine);
 loadConceptImages();
 initializeWorkspace();
 initializePlanningControls();
+initializeMenuLab();
+initializeBusinessWorkspace();
 setActiveLayer(activeLayer);

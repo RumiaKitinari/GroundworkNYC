@@ -30,7 +30,7 @@ def check_services(environ):
     result = {"postgres": "unavailable", "redis": "unavailable",
               "account_workspace_store": "instance/accounts.sqlite3",
               "access_bundle_present": (ROOT / "data/output/customer_access_dashboard/dashboard_access.json").is_file()}
-    current = ROOT / "data/integrated/current"
+    current = Path(environ["GROUNDWORK_DATA_DIR"]).expanduser() if environ.get("GROUNDWORK_DATA_DIR") else ROOT / "data/integrated/current"
     result["current_data_release"] = current.resolve().name if current.exists() else None
     try:
         with psycopg.connect(environ["DATABASE_URL"], connect_timeout=5,

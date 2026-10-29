@@ -6,7 +6,8 @@
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261027-access" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261027-access" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261029-planning" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/explorers.css') }}?v=20261029" />
   </head>
   <body>
     <div class="app-frame">
@@ -148,6 +149,7 @@
           </button>
           </div>
           <div class="nav-group" aria-label="Workspace"><span class="nav-group-label">Workspace</span>
+          <button class="feature-tab" data-view="workspace" type="button"><strong>Business Plan</strong></button>
           <button class="feature-tab" data-view="reports" type="button">
             <strong>Report</strong>
           </button>
@@ -236,6 +238,9 @@
               </div>
             </div>
             <div class="scorecard-board" id="scorecardBoard"></div>
+            <section id="modelOutputSummary" class="planning-section" hidden></section>
+            <details id="residentDetails" class="team-explorer-details"><summary>Resident & Workforce Details</summary><section id="residentWorkerProfile" class="rw-profile"></section></details>
+            <details id="transitDetails" class="team-explorer-details"><summary>Transit & Activity Details</summary><section id="transitActivityProfile" class="transit-profile"></section></details>
           </div>
 
           <div class="table-module is-hidden" data-panel="compare">
@@ -259,6 +264,7 @@
               </div>
             </div>
             <div class="lease-board" id="leaseBoard"></div>
+            <details id="storefrontResearch" class="team-explorer-details"><summary>Storefront Registry Research</summary><section id="storefrontExplorer" class="storefront-explorer"></section></details>
           </div>
 
           <div class="table-module is-hidden" data-panel="whitespace">
@@ -309,9 +315,10 @@
               <div class="menu-heading-actions"><button class="quiet-action" id="menuPrint" type="button" disabled>Print Menu</button><button class="quiet-action" id="menuExport" type="button" disabled>Export CSV</button></div>
             </div>
             <div class="menu-kpis" id="menuKpis" aria-label="Menu planning summary"></div>
+            <div class="menu-view-switch segmented-control" role="group" aria-label="Menu view"><button type="button" data-menu-view="plan" aria-pressed="true">Plan</button><button type="button" data-menu-view="analysis" aria-pressed="false">Analysis</button><button type="button" data-menu-view="preview" aria-pressed="false">Preview</button></div>
+            <div id="menuUndoNotice" class="menu-undo-notice" role="status" hidden><span>Dish Removed</span><button type="button" id="menuUndoRemove" class="quiet-action">Undo</button></div>
             <section id="menuPlanning" class="planning-section" aria-label="Menu Composition And Guest Basket"></section>
             <div class="menu-pricing-toolbar"><label title="Price is calculated from your ingredient cost and target percentage, rounded up to $0.50. Other operating costs are excluded.">Target Ingredient Cost <input id="menuTargetCost" type="number" min="10" max="70" step="1" value="30" aria-label="Target Ingredient Cost Percentage" required />%</label><button type="button" class="quiet-action" id="menuApplyPricing">Price Unpriced Items</button><span id="menuReviewStatus" role="status"></span></div>
-            <div class="menu-view-switch segmented-control" role="group" aria-label="Menu view"><button type="button" data-menu-view="plan" aria-pressed="true">Plan</button><button type="button" data-menu-view="preview" aria-pressed="false">Preview</button></div>
             <div class="menu-workspace">
               <section class="menu-discovery" aria-labelledby="menuIdeasHeading">
                 <div class="menu-section-head"><h3 id="menuIdeasHeading">Dish Ideas</h3><span id="menuSuggestionCount"></span></div>
@@ -335,6 +342,27 @@
               </section>
             </div>
             <div id="menuPreview" class="menu-preview" hidden></div>
+            <section id="menuAnalysis" class="planning-section" hidden aria-label="Menu Cost Analysis"></section>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="workspace">
+            <div class="module-head compact"><h2>Business Plan</h2><span class="card-status">User-Assumed Scenario</span></div>
+            <div class="business-workspace">
+              <div id="businessPlanContext" class="business-context"></div>
+              <form id="businessPlanForm" class="business-plan-inputs">
+                <label>Operating Scenario<select name="scenario_name" id="businessScenario"><option value="">Current Economics Draft</option></select></label>
+                <label>Starting Cash ($)<input name="opening_cash" type="number" min="0" max="10000000" step="any" value="100000" required /></label>
+                <label>One-Time Opening Costs ($)<input name="startup_cost" type="number" min="0" max="10000000" step="any" value="50000" required /></label>
+                <label>Monthly Owner Draw ($)<input name="owner_draw" type="number" min="0" max="1000000" step="any" value="0" required /></label>
+                <label>Month-One Volume (%)<input name="ramp_start_pct" type="number" min="0" max="100" step="any" value="60" required /></label>
+                <label>Months To Full Volume<input name="ramp_months" type="number" min="1" max="12" step="1" value="3" required /></label>
+                <label>Planning Horizon<select name="months"><option value="6">6 Months</option><option value="12" selected>12 Months</option><option value="18">18 Months</option><option value="24">24 Months</option></select></label>
+                <button type="submit" class="primary-action">Update Cash Plan</button>
+              </form>
+              <div id="businessPlanStatus" role="status"></div>
+              <div id="businessPlanResults"></div>
+              <section class="planning-section"><div class="view-heading"><h3>Due Diligence</h3><span id="businessChecklistCount"></span></div><div id="businessChecklist" class="business-checklist"></div></section>
+            </div>
           </div>
 
           <div class="table-module is-hidden" data-panel="reports">
@@ -581,7 +609,10 @@
     <script>window.GROUNDWORK_MENU_OWNER = {{ (email or 'guest')|tojson }}; window.GROUNDWORK_ACCESS = {{ access|tojson }}; window.GROUNDWORK_CSRF = {{ csrf|tojson }}; window.GROUNDWORK_SPATIAL_BACKEND = {{ (spatial_backend_enabled|default(false))|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/explorers.js') }}?v=20261029"></script>
     <script src="{{ url_for('static', filename='js/planning.js') }}?v=20261028"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261028-workspace"></script>
+    <script src="{{ url_for('static', filename='js/menu_lab.js') }}?v=20261029"></script>
+    <script src="{{ url_for('static', filename='js/business_workspace.js') }}?v=20261029"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261029-menu-workspace"></script>
   </body>
 </html>

@@ -185,7 +185,7 @@ def export_screening(url, snapshot, arguments):
 
     concept = Concept(**canonical["concept"])
     package = legacy.integrated_package()
-    directory = legacy.PROJECT_ROOT / package["data_path"]
+    directory = legacy.integrated_directory()
     weights = legacy.PROFILE_WEIGHTS[canonical["profile"]]
     from hex_demand import concept_surface
 

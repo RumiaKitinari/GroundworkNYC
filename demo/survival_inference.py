@@ -7,6 +7,7 @@ from datetime import date
 from functools import lru_cache
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from evidence_policy import THRESHOLDS
@@ -39,6 +40,8 @@ def options(config_path=DEFAULT_CONFIG):
     return {"model_dir": resolve(config.get("model_dir", str(DEFAULT_MODEL))),
             "data_dir": resolve(config.get("data_dir", str(ROOT / "data"))),
             "manifests": [resolve(p) for p in config.get("snapshots", list(map(str, DEFAULT_MANIFESTS)))],
+            "tract_scores": resolve(os.environ.get("GROUNDWORK_ATHARV_SCORES") or config["tract_scores"])
+                if os.environ.get("GROUNDWORK_ATHARV_SCORES") or config.get("tract_scores") else None,
             "cuisine_scores": resolve(config.get("cuisine_scores", "data/output/atharv_model/hex_cuisine_scores.csv"))}
 
 
@@ -116,6 +119,9 @@ def model_state(config_path=DEFAULT_CONFIG, prediction_date=None):
     prediction_date = prediction_date or date.today().isoformat()
     try:
         config = options(config_path)
+        if config["tract_scores"] is not None:
+            from atharv_export import export_state
+            return export_state(config["tract_scores"])
         required = [config["model_dir"] / name for name in ("survival_model.json", "model_meta.json", "audit.json")]
         if any(not p.is_file() for p in required):
             return None, {"status": "awaiting_artifact", "label": "Survival model awaiting trained artifact",
@@ -189,6 +195,9 @@ def attach_model(locations, tracts, cuisine, config_path=DEFAULT_CONFIG):
         predictions = engine.predict(tracts)
         for row in locations:
             row["survival"] = predictions.get(row["geoid"], {"status": "missing_historical_features", "probability": None})
+        if status.get("source_type") == "atharv_tract_export":
+            # Archive-proxy exports are supplemental display, never a replacement ranking.
+            return locations, status
         # New policy-aware consumers can retain concept-specific general fit
         # without pretending a sparse cuisine surface is measured demand.
         policy_aware = bool(locations) and all("support" in row.get("concept_evidence", {}) for row in locations)
@@ -238,6 +247,23 @@ def attach_model(locations, tracts, cuisine, config_path=DEFAULT_CONFIG):
             row.setdefault("survival", {"status": "inference_unavailable", "probability": None})
         status.update(status="inference_unavailable", label="Survival ranking unavailable", message=str(error), ranking_mode="screening")
         return locations, status
+
+
+def attach_predictions(locations, config_path=DEFAULT_CONFIG):
+    """Optional predictions without mutating scores, order or component meanings."""
+    engine, status = model_state(config_path)
+    predictions = {}
+    if engine is not None:
+        try:
+            predictions = engine.predict(locations)
+        except (OSError, ValueError, KeyError, TypeError, ImportError) as error:
+            status = {**status, "status": "inference_unavailable", "message": str(error)}
+    for row in locations:
+        row["survival"] = predictions.get(str(row["geoid"]), {
+            "status": "missing_historical_features" if status["status"] == "available" else status["status"],
+            "probability": None,
+        })
+    return status
 
 
 def general_model_ranking(locations, status, model_id):

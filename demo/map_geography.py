@@ -9,7 +9,7 @@ from shapely.ops import unary_union
 
 
 @lru_cache(maxsize=4)
-def city_partition(path):
+def city_partition(path, signature=None):
     source = json.loads(Path(path).read_text())
     polygons = []
     for feature in source["features"]:

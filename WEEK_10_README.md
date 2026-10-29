@@ -1,6 +1,6 @@
 # Week 10: Otis Changes And Briefing Handoff
 
-**For Atharv and the Groundwork NYC team. Updated October 28, 2026.**
+**For Atharv and the Groundwork NYC team. Updated October 29, 2026.**
 
 This branch combines the current local implementation with the existing team
 history. It preserves Jas's frontend design and Joseph's spatial-service work,
@@ -47,6 +47,48 @@ The live demo remains screening-based while research-model validation continues.
 
 ## October 29 Demo-Polish Addendum
 
+### Menu Studio And Business Plan
+
+The Plan group now includes **Menu Studio: Plan / Analysis / Preview**. Each
+dish has a Recipe Cost dialog with ingredient quantities, matching unit prices,
+batch yield and waste allowance. Applying the calculation explicitly updates
+ingredient cost per portion. Dishes can be duplicated, reordered and removed;
+Undo restores the removed dish and its own recipe/basket metadata without
+overwriting other financial edits. Analysis shows ingredient-only contribution,
+cost percentages, missing prices/costs and loss-making items. It does not invent
+sales popularity or classify dishes from nonexistent transaction data.
+
+The Workspace group now has a separate **Business Plan** tab. It uses the
+current Economics draft or a selected saved scenario, then adds starting cash,
+one-time opening costs, monthly owner draw and an opening-volume ramp. Two
+charts show month-end cash balances under entered and +/-20% volume assumptions,
+and monthly cash in/out. The view includes shortfall timing, additional cash
+needed, expandable monthly detail, CSV export and a six-item due-diligence
+checklist. It will not generate a cash plan without valid operating assumptions.
+Capacity caps, month-zero shortfalls and incomplete/deleted scenarios are handled
+explicitly. Costs and guest volumes are assumptions, not trained profit forecasts;
+purchase financing is not added automatically.
+
+Recipes, cash-plan assumptions and checklist state use the existing private,
+revisioned account database. Fresh-browser checks confirm restoration; separate
+accounts and concept/transaction plans remain isolated. The detailed tools stay
+inside a dialog, subtab or expandable section to preserve the current design.
+
+Implementation and formulas: [Menu and business planning](demo/MENU_WORKSPACE.md).
+Verification: **433 Python tests pass, 2 skip; 22 JavaScript unit tests pass**.
+Chrome and WebKit desktop/mobile checks cover recipe application, duplication,
+Undo, charts, account restoration and existing map/property/explorer workflows.
+No training data, credentials, account databases or native model files are added
+to this push. The release gate remains screening-only, not survival validation.
+
+**Later main-branch review:** [Selective integration notes](demo/MAIN_INTEGRATION_20261029.md)
+document the new team work at `d1005ee`, what was ported and what remains separate.
+Resident/workforce comparisons, transit details, competition breakdowns and
+full storefront research now extend this dashboard without replacing its
+property, heatmap, menu, economics or account workflows. The optional tract
+prediction CSV loader is supported, but its documented private export is not
+present locally; no survival predictions have been fabricated or activated.
+
 The feature heatmap presentation now uses thin hex borders, restrained fills,
 and a separate hover outline. Hover shows the feature score and evidence
 coverage; tapping a local cell opens a closable detail popup. Sector selection
@@ -62,7 +104,7 @@ Aerial, 3D, pan, zoom and fullscreen behavior remain available.
 
 This is a presentation/interaction change, not a retraining, new scoring
 formula, verified demand model, or merge of subsequent team model changes.
-The regression suite now includes 18 JavaScript tests, including hex-layer
+The regression suite includes JavaScript tests for hex-layer
 cleanup and hover styling; Chrome/WebKit checks cover compact controls,
 desktop/mobile layout and touch details.
 
