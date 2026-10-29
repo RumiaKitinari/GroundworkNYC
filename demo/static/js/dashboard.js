@@ -10,7 +10,7 @@ let economicsResult = null;
 let economicsInputTimer = null;
 let mapInventory = "properties";
 let selectedPropertyId = null;
-let opportunityVisible = 48;
+const OVERVIEW_RESULT_LIMIT = 5;
 let propertyMapData = null;
 let nycBoundaryData = null;
 let nycBoundaryPending = false;
@@ -499,7 +499,8 @@ async function initializeWorkspace() {
     }
   } else workspaceStatus("Saved on this device");
   const hasSavedBrief = restoreBrief();
-  if (hasSavedBrief) closeBrief();
+  entryHasSavedBrief = hasSavedBrief;
+  if (window.GROUNDWORK_ACCESS) openBrief();
   renderSavedBriefs();
   updateConceptImage(state.cuisine);
   syncBriefControls();
@@ -616,9 +617,9 @@ function syncTransactionFields() {
 }
 
 function syncPriceModeControls() {
-  document.querySelector("#briefTierField").hidden = state.priceMode !== "tier";
-  document.querySelector("#briefExactPriceField").hidden = state.priceMode !== "exact";
-  document.querySelector("#briefAverageCheck").required = state.priceMode === "exact";
+  document.querySelector("#briefTierField").hidden = false;
+  document.querySelector("#briefExactPriceField").hidden = true;
+  document.querySelector("#briefAverageCheck").required = false;
   document.querySelectorAll("[data-price-mode]").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.priceMode === state.priceMode));
   });
@@ -857,7 +858,6 @@ async function loadDashboard() {
       return false;
     }
     dashboard = result;
-    opportunityVisible = 48;
     if (!selectedPropertyId) selectedPropertyId = currentPlan().selected_property_id || null;
     if (!(dashboard.properties || []).some(row => row.id === selectedPropertyId)) selectedPropertyId = null;
     updateHuffAvailability();
@@ -904,6 +904,13 @@ function allLocations() {
 
 function selectedLocation() {
   return allLocations().find((location) => location.id === selectedId) || dashboard.locations[0];
+}
+
+function overviewRecommendations(kind = mapInventory) {
+  const rows = kind === "properties"
+    ? (dashboard.properties || []).filter(row => row.lead_type !== "registry_record")
+    : dashboard.locations;
+  return rows.slice(0, OVERVIEW_RESULT_LIMIT);
 }
 
 function renderMetrics() {
@@ -1496,11 +1503,11 @@ function renderMap() {
   else clearHexLayer();
   const locationLookup = new Map(allLocations().map(row => [row.id, row]));
   const points = mapInventory === "properties"
-    ? (dashboard.properties || []).filter(row => row.lead_type !== "registry_record").map((property,index) => ({
+    ? overviewRecommendations("properties").map((property,index) => ({
         property, location: locationLookup.get(property.location_id),
         latitude: Number(property.latitude), longitude: Number(property.longitude), id: property.id, rank: index + 1,
       }))
-    : [...dashboard.locations, ...(dashboard.saved_locations || [])].filter((row, index, rows) => rows.findIndex(item => item.id === row.id) === index)
+    : overviewRecommendations("areas")
       .map(location => ({location, latitude: location.latitude, longitude: location.longitude, id: location.id}));
   const locations = points.filter(row => row.location && Number.isFinite(row.latitude) && Number.isFinite(row.longitude) && row.latitude >= 40.45 && row.latitude <= 40.95 && row.longitude >= -74.3 && row.longitude <= -73.65);
   if (mapInventory === "properties") {
@@ -1625,18 +1632,16 @@ function renderIntel() {
 }
 
 function renderRanking() {
-  const rows = dashboard.locations;
+  const rows = overviewRecommendations("areas");
   const table = document.querySelector("#rankingTable");
   const previousTop = table.scrollTop;
   const previousLeft = table.scrollLeft;
   table.classList.toggle("is-property-ranking", mapInventory === "properties" && !isHexLayer());
   if (mapInventory === "properties" && !isHexLayer()) {
-    const properties = (dashboard.properties || []).filter(row => row.lead_type !== "registry_record");
-    const selectedIndex = properties.findIndex(row => row.id === selectedPropertyId);
-    const shown = properties.slice(0, Math.max(opportunityVisible, selectedIndex + 1));
-    table.innerHTML = `<div class="table-row header"><span>#</span><span>Property / Scenario</span><span>Area Score</span><span>Customer Access</span><span>Transaction</span><span>Price</span><span>Floor Area</span><span>Details</span></div>${shown.map((row, index) => `<div class="table-row${row.id === selectedPropertyId ? " is-selected" : ""}" data-opportunity-property="${escapeHtml(row.id)}" tabindex="0"><span>${index + 1}</span><button class="place-name" type="button">${escapeHtml(row.address)}<small>${row.lead_type === "synthetic" ? "Synthetic Scenario" : "Source-Reported Lead"}</small></button><span>${row.location_score}</span><span>${row.customer_access?.index ?? "Unavailable"}</span><span>${row.transaction === "purchase" ? "Purchase" : "Lease"}</span><span>${escapeHtml(row.price_label)}</span><span>${displayNumber(row.sqft)} Sq Ft</span><button type="button" class="quiet-action">Select</button></div>`).join("")}${properties.length > shown.length ? `<button type="button" class="quiet-action" id="moreOpportunities">Show More · ${properties.length - shown.length} Remaining</button>` : ""}${!properties.length ? '<div class="property-empty"><h3>No Properties Match This Brief</h3><button type="button" class="quiet-action" id="editOpportunityBrief">Edit Brief</button></div>' : ""}`;
+    const properties = overviewRecommendations("properties");
+    const shown = properties;
+    table.innerHTML = `<div class="table-row header"><span>#</span><span>Property / Scenario</span><span>Area Score</span><span>Customer Access</span><span>Transaction</span><span>Price</span><span>Floor Area</span><span>Details</span></div>${shown.map((row, index) => `<div class="table-row${row.id === selectedPropertyId ? " is-selected" : ""}" data-opportunity-property="${escapeHtml(row.id)}" tabindex="0"><span>${index + 1}</span><button class="place-name" type="button">${escapeHtml(row.address)}<small>${row.lead_type === "synthetic" ? "Synthetic Scenario" : "Source-Reported Lead"}</small></button><span>${row.location_score}</span><span>${row.customer_access?.index ?? "Unavailable"}</span><span>${row.transaction === "purchase" ? "Purchase" : "Lease"}</span><span>${escapeHtml(row.price_label)}</span><span>${displayNumber(row.sqft)} Sq Ft</span><button type="button" class="quiet-action">Select</button></div>`).join("")}${!properties.length ? '<div class="property-empty"><h3>No Properties Match This Brief</h3><button type="button" class="quiet-action" id="editOpportunityBrief">Edit Brief</button></div>' : ""}`;
     document.querySelector("#editOpportunityBrief")?.addEventListener("click", () => openBrief());
-    document.querySelector("#moreOpportunities")?.addEventListener("click", () => { opportunityVisible += 48; renderRanking(); });
     document.querySelectorAll("[data-opportunity-property]").forEach(row => {
       const choose = () => {
         const property = properties.find(item => item.id === row.dataset.opportunityProperty);
@@ -2505,6 +2510,7 @@ function syncBriefControls() {
   syncPriceModeControls();
   updateConceptImage(state.cuisine);
   renderConceptChrome();
+  syncEntryFields();
 }
 
 function closeBrief() {
@@ -2516,37 +2522,7 @@ function openBrief() {
   document.querySelector("#briefOverlay").classList.add("is-open");
 }
 
-function applyBrief() {
-  const ideaInput = document.querySelector("#briefConceptName");
-  const suggestion = conceptSuggestionsFor(ideaInput.value)[0];
-  if (suggestion && ideaInput.value.trim() !== state.conceptName &&
-      document.querySelector("#briefCuisine").value === state.cuisine &&
-      document.querySelector("#briefDietary").value === state.dietary &&
-      document.querySelector("#briefProfile").value === state.profile) {
-    chooseConceptSuggestion(suggestion, ideaInput, true);
-  }
-  state.cuisine = document.querySelector("#briefCuisine").value;
-  state.priceTier = document.querySelector("#briefPriceTier").value;
-  state.averageCheck = state.priceMode === "tier" ? PRICE_DEFAULTS[state.priceTier] : Number(document.querySelector("#briefAverageCheck").value);
-  state.dietary = document.querySelector("#briefDietary").value;
-  state.description = document.querySelector("#briefDescription").value.trim();
-  state.purchaseBudget = Number(document.querySelector("#briefPurchaseBudget").value || 3000000);
-  state.serviceStyle = document.querySelector("#briefServiceStyle").value;
-  state.audience = document.querySelector("#briefAudience").value;
-  state.daypart = document.querySelector("#briefDaypart").value;
-  state.conceptName = document.querySelector("#briefConceptName").value.trim() || "Restaurant Concept";
-  state.dealType = document.querySelector("#briefDeal").value;
-  state.profile = document.querySelector("#briefProfile").value;
-  state.preferredArea = document.querySelector("#briefArea").value;
-  const budget = Number(document.querySelector("#briefBudget").value || 18000);
-  state.rentCap = Math.max(2000, Math.min(100000, budget));
-  selectedId = null;
-  syncBriefControls();
-  persistBrief();
-  closeBrief();
-  selectView("discover");
-  loadDashboard();
-}
+function applyBrief() { submitEntryBrief(); }
 
 document.querySelector("#dealSelect").addEventListener("change", (event) => {
   state.dealType = event.target.value;
@@ -2555,7 +2531,7 @@ document.querySelector("#dealSelect").addEventListener("change", (event) => {
 });
 
 document.querySelector("#briefDeal").addEventListener("change", (event) => {
-  state.dealType = event.target.value;
+  state.dealType = event.target.value || "lease";
   syncTransactionFields();
 });
 
@@ -2570,7 +2546,7 @@ document.querySelectorAll("[data-price-mode]").forEach(button => button.addEvent
 
 document.querySelectorAll("[data-theme-choice]").forEach(button => button.addEventListener("click", () => setTheme(button.dataset.themeChoice)));
 
-document.querySelectorAll("#conceptInput, #briefConceptName, #searchInput").forEach(input => {
+document.querySelectorAll("#conceptInput, #searchInput").forEach(input => {
   input.addEventListener("input", () => renderConceptSuggestions(input));
   input.addEventListener("focus", () => renderConceptSuggestions(input));
   input.addEventListener("keydown", event => {
