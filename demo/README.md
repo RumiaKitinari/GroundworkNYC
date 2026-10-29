@@ -1,5 +1,10 @@
 # Groundwork NYC Flask Frontend Prototype
 
+**For the integrated checkout, use [OTIS_LOCAL_SETUP.md](OTIS_LOCAL_SETUP.md).**
+It records verified startup, the actual local release and generated access bundles,
+and missing survival artifacts. The completion release described below is an
+upstream data package, not the currently installed 107-column release.
+
 See [Connected Account Workspace](CONNECTED_WORKSPACE.md) for property shortlists,
 saved economic scenarios, menu baskets and private database persistence.
 

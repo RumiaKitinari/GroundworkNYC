@@ -1,28 +1,33 @@
 # GroundworkNYC
 
-## Week 10: Otis Branch
+## Integrated dashboard
 
-**Atharv: start with [Week 10 Changes and Briefing Notes](WEEK_10_README.md).**
-It explains the new model experiments, feature engineering, data checks,
-infrastructure and every dashboard section, with implementation links and
-explicit remaining limitations. This branch also includes earlier local-only
-work; the document distinguishes that work from the October 27-28 results.
+This checkout integrates Otis's Week 10 update at `11aaece` with the existing
+frontend, explorers and reliability fixes. Start with the verified
+[local setup and artifact requirements](demo/OTIS_LOCAL_SETUP.md).
 
-Branch: `otis-week-10`. This is a review/handoff branch; it does not replace
-`main`. Private datasets, native models, individual predictions, secrets and
-account databases are not included.
+```bash
+.venv/bin/python -m pip install -r demo/requirements.txt -r codes/requirements-access.txt
+.venv/bin/python -m flask --app demo/app.py run --host 127.0.0.1 --port 5001 --no-reload
+```
 
-The Flask dashboard runs through Joseph's FastAPI/PostGIS backend using
-`.venv/bin/python run_local.py` at `http://127.0.0.1:5001`.
-It preserves the Flask routes, uses PostGIS for published spatial layers and Redis
-for tile caching, and retains the existing SQLite account/workspace store.
-Private datasets and synthetic property scenarios remain outside Git.
+Python 3.11 is verified locally. Open http://localhost:5001. The active local
+results are concept screening and newly generated network customer-access
+indices over the installed tract release and synthetic property scenarios.
+**No validated Otis survival model is installed.** The older Atharv export is
+preserved but not selected by default. Missing predictions are never replaced
+with screening scores.
 
-Install the combined local runtime with
-`.venv/bin/python -m pip install -r backend/requirements-dashboard.txt` and keep
-the private `.env` configuration. Run `.venv/bin/python run_local.py --check`
-to verify services before startup. See [`backend/`](backend/README.md) for
-infrastructure setup. Survival predictions still require a validated artifact.
+[Week 10 Changes](WEEK_10_README.md) and [Otis's integration notes](demo/MAIN_INTEGRATION_20261029.md)
+describe the upstream work. Their data counts and research results refer to
+Otis's machine; see the local setup document for the actual 107-column release,
+new access bundles, missing artifacts, and verification limitations here.
+
+The optional combined FastAPI/PostGIS/Redis runtime uses `run_local.py` after
+installing `backend/requirements-dashboard.txt`, configuring private database
+settings, and starting services. Run `run_local.py --check` first. See
+[backend setup](backend/README.md). Private data, model files, account databases,
+and generated route bundles remain outside Git.
 
 ## Frontend Lineage And Current Status
 

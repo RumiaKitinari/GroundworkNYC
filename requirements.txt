@@ -1,5 +1,6 @@
-# 1.) DOWNLOAD: pip install -r requirements.txt
-# 2.) Run .venv: .venv\Scripts\activate
+# 0.) Create .venv: python -m venv venv
+# 1.) Run .venv: .venv\Scripts\activate
+# 2.) DOWNLOAD: pip install -r requirements.txt
 
 django
 django_mongodb_backend

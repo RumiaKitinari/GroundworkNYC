@@ -1,3 +1,7 @@
+> Upstream handoff notes from Otis’s machine. For this checkout’s actual
+> artifacts and verification, see [OTIS_LOCAL_SETUP.md](OTIS_LOCAL_SETUP.md).
+> The older Atharv CSV exists here but is deliberately not activated.
+
 # Main Branch Review And Selective Integration
 
 Reviewed `origin/main` at `d1005ee2734549407a0096068f740c67468f8258`

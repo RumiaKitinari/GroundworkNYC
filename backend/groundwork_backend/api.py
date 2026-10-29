@@ -125,7 +125,7 @@ def create_app(settings=None, store=None, cache=None, include_legacy=True):
         current = metadata(layer=layer)
         if include_legacy:
             from .provenance import screening_is_current
-            release = (ROOT / "data/integrated/current").resolve().name
+            release = legacy_module().integrated_directory().name
             if not screening_is_current(current["metadata"], release):
                 raise HTTPException(409, "Screening tiles are outdated. Use the current screening GeoJSON API.")
         resolutions = {row["resolution"] for row in current["layers"] if row["layer"] == layer}

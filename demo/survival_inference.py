@@ -17,7 +17,7 @@ CODES = str(ROOT / "codes")
 if CODES not in sys.path:
     sys.path.append(CODES)
 
-DEFAULT_CONFIG = ROOT / "data/output/atharv_model/dashboard_model.json"
+DEFAULT_CONFIG = ROOT / "data/output/otis_model/dashboard_model.json"
 DEFAULT_MODEL = ROOT / "data/output/atharv_model/model"
 DEFAULT_MANIFESTS = [ROOT / "data/evaluation/snapshots" / p for p in (
     "2023-04-v0/historical_core_snapshots.json",

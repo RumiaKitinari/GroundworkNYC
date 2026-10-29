@@ -120,6 +120,10 @@ def build_tract_features(master: pd.DataFrame) -> pd.DataFrame:
     def col(name):
         return m[name].values if name in m else np.nan
 
+    def optional(name):
+        # An absent source column is unknown, not a measured zero.
+        return m.get(name, pd.Series(np.nan, index=m.index))
+
     # Residents
     income = m["median_household_income_2024"].fillna(m.get("neighbor_income_2024_estimate", np.nan))
     f["population_density"] = col("population_density_per_sq_mile")
@@ -149,7 +153,8 @@ def build_tract_features(master: pd.DataFrame) -> pd.DataFrame:
 
     # Citi Bike: blank means "no station in tract" -> 0, not unknown
     f["citibike_departures_per_sq_mile"] = (
-        m["citibike_departures_per_sq_mile_latest_month"].fillna(0).values)
+        (m["citibike_departures_per_sq_mile_latest_month"].fillna(0).values
+         if "citibike_departures_per_sq_mile_latest_month" in m else np.nan))
     f["citibike_evening_share"] = col("citibike_evening_departure_share_latest_month")
     f["citibike_weekend_share"] = col("citibike_weekend_departure_share_latest_month")
     f["nearest_citibike_miles"] = col("nearest_citibike_distance_miles")
@@ -158,8 +163,8 @@ def build_tract_features(master: pd.DataFrame) -> pd.DataFrame:
     # Convert to a density over the zone's land area so it is not
     # multiplied by the number of tracts in the zone.
     zone_area = m.groupby("taxi_zone")["land_area_sq_miles"].transform("sum")
-    f["rideshare_dropoffs_per_sq_mile"] = _safe_div(m["dropoffs_latest_month"], zone_area).values
-    f["rideshare_pickups_per_sq_mile"] = _safe_div(m["pickups_latest_month"], zone_area).values
+    f["rideshare_dropoffs_per_sq_mile"] = _safe_div(optional("dropoffs_latest_month"), zone_area).values
+    f["rideshare_pickups_per_sq_mile"] = _safe_div(optional("pickups_latest_month"), zone_area).values
 
     # Pedestrians (keep the distance so the model knows how far the counter is)
     f["ped_count_nearest"] = col("nearest_pedestrian_count_site_latest_pedestrian_count_total")
@@ -171,14 +176,14 @@ def build_tract_features(master: pd.DataFrame) -> pd.DataFrame:
     f["commercial_mixed_lot_share"] = col("commercial_mixed_lot_share_all")
     f["vacant_land_share"] = col("vacant_land_share_all_lots")
     f["mean_commercial_floors"] = col("mean_commercial_mixed_num_floors")
-    f["storefronts_per_sq_mile"] = _safe_div(m["registered_storefronts"], area).values
-    f["storefront_vacancy_rate"] = (1 - _safe_div(m["leased_storefronts"],
-                                                  m["registered_storefronts"])).clip(0, 1).values
+    f["storefronts_per_sq_mile"] = _safe_div(optional("registered_storefronts"), area).values
+    f["storefront_vacancy_rate"] = (1 - _safe_div(optional("leased_storefronts"),
+                                                  optional("registered_storefronts"))).clip(0, 1).values
 
     # Food market (OpenStreetMap, not DOHMH survivors)
-    f["food_poi_per_sq_mile"] = _safe_div(m["food_nightlife_poi_count"], area).values
-    f["bar_per_sq_mile"] = _safe_div(m["bar_nightlife_competitor_count"], area).values
-    f["cafe_per_sq_mile"] = _safe_div(m["cafe_competitor_count"], area).values
+    f["food_poi_per_sq_mile"] = _safe_div(optional("food_nightlife_poi_count"), area).values
+    f["bar_per_sq_mile"] = _safe_div(optional("bar_nightlife_competitor_count"), area).values
+    f["cafe_per_sq_mile"] = _safe_div(optional("cafe_competitor_count"), area).values
 
     # Events (currently "next 90 days"; swap for past-year counts when available)
     f["events_next_90_days"] = col("permitted_event_count_next_90_days")
@@ -189,7 +194,7 @@ def build_tract_features(master: pd.DataFrame) -> pd.DataFrame:
     f["nbr_income"] = col("neighbor_income_2024_estimate")
 
     # Neighbour averages computed here
-    nbrs = m.set_index("geoid")["neighbor_geoids"].fillna("")
+    nbrs = pd.Series(optional("neighbor_geoids").fillna("").values, index=m["geoid"])
     nbr_lists = {g: [int(x) for x in s.split(";") if x] for g, s in nbrs.items()}
     for c in NEIGHBOUR_COLS:
         vals = f[c]

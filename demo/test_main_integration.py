@@ -18,13 +18,17 @@ def test_external_data_directory_is_shared_by_package_loader(tmp_path, monkeypat
 
 def test_missing_neighbor_income_does_not_break_feature_builder():
     master = pd.read_csv(module.integrated_directory() / "master_tract_features.csv").head(2)
-    master = master.drop(columns=["neighbor_income_2024_estimate"], errors="ignore")
+    master = master.drop(columns=["neighbor_income_2024_estimate",
+        "citibike_departures_per_sq_mile_latest_month", "dropoffs_latest_month",
+        "neighbor_geoids"], errors="ignore")
     master.loc[master.index[0], "median_household_income_2024"] = float("nan")
     # This two-row fixture intentionally omits most neighboring tracts.
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="Mean of empty slice", category=RuntimeWarning)
         features = build_tract_features(master)
     assert pd.isna(features.iloc[0]["median_household_income"])
+    assert features["citibike_departures_per_sq_mile"].isna().all()
+    assert features["rideshare_dropoffs_per_sq_mile"].isna().all()
 
 
 def test_proxy_export_cannot_replace_screening_rank(tmp_path, monkeypatch):
@@ -50,3 +54,10 @@ def test_invalid_numeric_source_values_stay_unavailable():
     for value in ("", "nan", "inf", "not-a-number"):
         assert module.source_number({"value": value}, "value") is None
     assert module.source_number({"value": "0"}, "value") == 0
+
+
+def test_default_pointer_does_not_reuse_preserved_atharv_export():
+    from survival_inference import DEFAULT_CONFIG
+    assert DEFAULT_CONFIG.parent.name == "otis_model"
+    # Existing legacy pointers remain untouched; selecting one requires opt-in.
+    assert DEFAULT_CONFIG.name == "dashboard_model.json"

@@ -6,6 +6,10 @@ is connected. `/api/dashboard` includes a `survival_model` status and per-locati
 `survival` objects; the Market Profile displays the three-year estimate and the
 interface identifies the active ranking method.
 
+See [current local setup](OTIS_LOCAL_SETUP.md) for preserved legacy artifacts
+and the active customer-access run. Legacy CSVs require explicit opt-in and are
+not selected by the default Otis pointer.
+
 ## Current artifact availability
 
 The checked remote branch `ADM6112-complete-v1` at
@@ -40,7 +44,7 @@ PYTHONPATH=demo .venv/bin/python -m flask --app app run --host 127.0.0.1 --port 
 ```
 
 The connector validates the run before atomically writing the local
-`data/output/atharv_model/dashboard_model.json` pointer. Changed artifacts and
+`data/output/otis_model/dashboard_model.json` pointer. Changed artifacts and
 snapshots invalidate the inference cache; model activation needs no server
 restart. Missing optional cuisine scores can be omitted from the command.
 
@@ -59,8 +63,10 @@ restart. Missing optional cuisine scores can be omitted from the command.
 - A ranking score is not a survival probability. Screening/context components
   remain separately labeled. The individual probability is shown in Market
   Profile with training date and feature coverage.
-- Unsupported cuisines, incomplete feature coverage, or missing cuisine scores
-  retain screening rankings; available survival estimates are still attached.
+- With adequate native-model coverage but unsupported/missing cuisine scores,
+  Otis uses 60% survival percentile plus 40% concept-specific general fit.
+  Incomplete prediction/feature coverage retains screening rankings for the
+  whole batch. Available estimates remain separately labeled.
 - Existing property filters consume the selected area ranks. Property-level
   survival inference, property-specific hard filtering before percentile ranks,
   and model-derived H3 heatmap tiles are not introduced by this change.
