@@ -9,8 +9,7 @@ Usage examples (Windows):
 
 Inputs (looked up in outputs\ first, then data\):
     synthetic_properties.csv     available locations (one row per listing)
-    master_tract_features.csv    tract features (same file used for training)
-    restaurant_lifespans.csv     for counting competitors open today
+    --snapshots                 dated, checksummed historical feature manifests
     hex_cuisine_scores.csv       output of make_heatmaps.py (cuisine competition)
     outputs\model\survival_model.json + model_meta.json   from train_survival.py
 
@@ -31,14 +30,16 @@ Output: outputs\recommendations\recommendations_<cuisine>.csv + a printed table.
 """
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 
-from features import CompetitionIndex, build_tract_features
-from paths import MODEL, RECOMMENDATIONS, ensure_dirs, find
+from features import (HISTORICAL_FEATURES, TEMPORAL_SCHEMA, build_historical_features,
+                      load_historical_snapshots)
+from paths import DATA, MODEL, RECOMMENDATIONS, ensure_dirs, find
 from train_survival import survival_prob
 
 CUISINES_50 = [
@@ -70,10 +71,17 @@ def parse_args():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model-dir", default=None, help="default: outputs\\model")
     ap.add_argument("--listings", default="synthetic_properties.csv")
-    ap.add_argument("--master", default="master_tract_features.csv")
-    ap.add_argument("--lifespans", default="restaurant_lifespans.csv")
+    ap.add_argument("--snapshots", type=Path, action="append", help="Historical manifest; repeat for multiple vintages")
+    ap.add_argument("--data-dir", type=Path, default=DATA)
+    ap.add_argument("--prediction-date", default=date.today().isoformat())
     ap.add_argument("--cuisine-scores", default="hex_cuisine_scores.csv")
     ap.add_argument("--list-cuisines", action="store_true")
+    ap.add_argument("--access-run", type=Path, help="Pinned customer-access feature bundle; optional")
+    ap.add_argument("--w-access", type=float, default=0, help="Experimental access blend in [0,1]; default preserves 60/40 ranking")
+    ap.add_argument("--service-style", choices=["quick_service", "casual", "fine_dining"], default="casual")
+    ap.add_argument("--average-check", type=float, default=35)
+    ap.add_argument("--audience", choices=["residents", "workers", "destination"], default="residents")
+    ap.add_argument("--daypart", choices=["all_day", "morning", "lunch", "evening"], default="all_day")
 
     g = ap.add_argument_group("restaurant concept")
     g.add_argument("--cuisine", help='one of the 50 cuisines, e.g. "Indian" or "Coffee / Tea"')
@@ -151,17 +159,19 @@ def main():
     if not a.cuisine:
         raise SystemExit("Give a cuisine with --cuisine (or --list-cuisines).")
     cuisine = match_cuisine(a.cuisine)
+    if not np.isfinite(a.w_access) or not 0 <= a.w_access <= 1 or (a.w_access and not a.access_run):
+        raise SystemExit("Use --w-access in [0,1], with --access-run when nonzero.")
 
     ensure_dirs()
     model_dir = Path(a.model_dir) if a.model_dir else MODEL
     meta = json.loads((model_dir / "model_meta.json").read_text())
+    validate_temporal_model(meta, a.prediction_date)
+    if not a.snapshots:
+        raise SystemExit("Temporal scoring requires --snapshots; current-master fallback is disabled.")
     model = xgb.Booster()
     model.load_model(str(model_dir / "survival_model.json"))
 
     listings = pd.read_csv(find(a.listings))
-    master = pd.read_csv(find(a.master), low_memory=False)
-    life = pd.read_csv(find(a.lifespans), low_memory=False,
-                       parse_dates=["open_date", "close_date", "last_snapshot"])
 
     L = apply_filters(listings, a)
     print(f"{len(L)} of {len(listings)} listings pass the filters.")
@@ -169,19 +179,17 @@ def main():
         return
 
     # ---- Survival (location + concept details, no cuisine) -----------------
-    tract_feats = build_tract_features(master)
-    L = L.join(tract_feats.drop(columns=["borough"]), on="geoid", rsuffix="_tract")
-    missing = L["nta_code"].isna().sum()
-    if missing:
-        print(f"  ! {missing} listings have a geoid not in the master table; dropped.")
-        L = L[L["nta_code"].notna()].copy()
-
-    latest = pd.Timestamp(meta["latest_snapshot"])
-    comp = CompetitionIndex(life, latest)
-    L["is_chain"] = int(a.chain)
-    L["competitors_400m_at_open"] = [comp.count(la, lo, latest)
-                                     for la, lo in zip(L["latitude"], L["longitude"])]
-    L["open_year"] = meta["reference_open_year"]
+    snapshots = load_historical_snapshots(a.snapshots, a.data_dir, a.prediction_date)
+    L["geoid"] = L["geoid"].astype(str)
+    L["open_date"] = a.prediction_date
+    historical, provenance = build_historical_features(L, snapshots)
+    L[list(HISTORICAL_FEATURES)] = historical
+    L = L[historical.notna().any(axis=1)].copy()
+    if L.empty:
+        raise SystemExit("No eligible listings have historically available features.")
+    if a.chain:
+        print("Chain status is excluded from this temporal model; --chain does not affect survival.")
+    L["competitors_400m_at_open"] = np.nan  # unavailable, not a fabricated zero
     X = L[meta["features"]].astype(float).values
     pred = model.predict(xgb.DMatrix(X, feature_names=meta["features"]))
     L["survival_3yr"] = survival_prob(pred, meta["horizon_years"], meta["aft_scale"])
@@ -198,6 +206,19 @@ def main():
 
     # ---- Final score -------------------------------------------------------
     score = a.w_survival * L["survival_3yr"].rank(pct=True) + a.w_cuisine * L["cuisine_gap"]
+    if a.access_run:
+        from customer_access import AccessConcept, score_cached_run
+        concept = AccessConcept(a.service_style, a.average_check, a.audience, a.daypart)
+        access = score_cached_run(a.access_run, concept, L, a.prediction_date)
+        L["inverse_walkability_percentile"] = access.inverse_walkability_percentile
+        L["customer_access_coverage"] = access.routing_mass_coverage
+        if a.w_access:
+            supported = L.inverse_walkability_percentile.notna()
+            print(f"Customer-access blend: excluding {int((~supported).sum())} insufficient-coverage candidates.")
+            L = L[supported].copy()
+            score = (1 - a.w_access) * score[supported] + a.w_access * L.inverse_walkability_percentile / 100
+            if L.empty:
+                raise SystemExit("No candidates have sufficient customer-access coverage.")
     is_true = lambda c: L[c].astype(str).str.lower().eq("true")
     if a.prefer_food_use:
         score += 0.05 * is_true("former_food_use")
@@ -213,10 +234,13 @@ def main():
             "corner_position", "survival_3yr", "survival_vs_borough",
             "competitors_400m_at_open", "cuisine_here", "cuisine_nearby_area", "cuisine_gap", "score",
             "latitude", "longitude", "geoid"]
+    if a.access_run:
+        cols += ["inverse_walkability_percentile", "customer_access_coverage"]
     out = L[cols].rename(columns={"competitors_400m_at_open": "restaurants_within_400m"})
     fname = f"recommendations_{cuisine.split(' /')[0].replace(' ', '_').lower()}.csv"
     fname = RECOMMENDATIONS / fname
     out.to_csv(fname, index=False)
+    pd.DataFrame(provenance).to_csv(fname.with_suffix(".feature_provenance.csv"), index=False)
 
     show = out.head(a.top).copy()
     show["survival_3yr"] = (show["survival_3yr"] * 100).round(1).astype(str) + "%"
@@ -230,6 +254,15 @@ def main():
                 "survival_3yr", "survival_vs_borough", "cuisine_gap", "score"]].to_string(index=False))
     print(f"\nFull ranked list saved to {fname}")
     print("Note: synthetic listings are scenarios, not real availability.")
+    print("Survival estimates are research-only and depend on verified outcome evidence and AFT assumptions.")
+
+
+def validate_temporal_model(meta, prediction_date):
+    if meta.get("schema") != TEMPORAL_SCHEMA or meta.get("features") != list(HISTORICAL_FEATURES):
+        raise ValueError("Legacy/current-context survival model rejected; retrain using dated evidence.")
+    day = date.fromisoformat(prediction_date)
+    if not date.fromisoformat(meta["trained_as_of"]) <= day <= date.today():
+        raise ValueError("Prediction date must be on/after model training as-of and not in the future")
 
 
 if __name__ == "__main__":

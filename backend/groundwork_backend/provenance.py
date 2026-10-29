@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def screening_provenance(root=ROOT):
-    files = ["demo/app.py", "demo/scoring.py", "demo/hex_demand.py"]
+    files = ["demo/app.py", "demo/scoring.py", "demo/evidence_policy.py", "demo/hex_demand.py"]
     return {"screening_code_sha256": sha256(b"".join(
         name.encode() + b"\0" + (root / name).read_bytes() for name in files
     )).hexdigest()}

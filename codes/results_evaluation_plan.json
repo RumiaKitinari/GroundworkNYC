@@ -1,0 +1,21 @@
+{
+  "schema": "matched-results-plan-v1",
+  "seed": 440,
+  "folds": 3,
+  "rounds": 200,
+  "role": "development_diagnostic_only_no_model_selection",
+  "cohort": "Frozen local archive cohort; development role from existing split; all four opening-time core features observed",
+  "feature_sets": ["local_legacy_50", "corrected_context_35", "current_core_4", "dated_core_4", "constant_aft"],
+  "protocol_refinement": "Added a current-version four-variable control after initial development diagnostics to separate vintage from feature-count differences; still exploratory, not independent confirmation",
+  "closure_rules": ["one_later_capture", "two_later_captures", "three_later_captures"],
+  "fold_strategy": "Identical GroupKFold neighborhood assignments for every feature set and closure rule",
+  "parameter_strategy": "Existing fixed base XGBoost AFT parameters; 200 rounds; no search or early stopping",
+  "primary_metric": "Interval negative log likelihood, compared only within an identical target and cohort",
+  "secondary_metrics": ["Interval-order concordance", "Paired neighborhood-bootstrap differences", "Resolved-subset three-year Brier with unresolved counts"],
+  "globally_untouched_test": false,
+  "reserved_assessment_used_for_selection": false,
+  "proxy_events_verified": false,
+  "current_context_historical_availability_verified": false,
+  "production_deployment_allowed": false,
+  "stage_two": "Full 1000-property prospective scenario checks, not observed customer demand or success validation"
+}

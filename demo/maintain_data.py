@@ -12,6 +12,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from download_sources import DESTINATION, SOURCES, download_source, load_manifest, resolve
+from permit_presence import refresh as refresh_permit_presence
 from refresh_integrated import BASELINE, CURRENT, INTEGRATED_ROOT, ROOT, SUPPORTED, run, sha256
 
 
@@ -27,22 +28,29 @@ FREQUENCY.update({"restaurants": "daily", "events": "daily", "weather": "daily",
                   "osm": "weekly", "mta_subway": "weekly"})
 
 SOURCE_ROLE = {
-    "acs_demographics": ("tract", "baseline transform pending"),
-    "acs_income": ("tract", "baseline transform pending"),
-    "lodes": ("census block to tract", "baseline transform pending"),
+    "acs_demographics": ("tract; supplied by acs_context bulk tables", "integrated via acs_context"),
+    "acs_income": ("tract; supplied by acs_context bulk tables", "integrated via acs_context"),
+    "lodes": ("census block to tract", "integrated"),
+    "lodes_rac": ("residence block to tract", "integrated"),
+    "acs_context": ("tract estimates and margins from full national files", "integrated"),
+    "subway_entrances": ("entrance point to tract-centroid proximity", "integrated"),
+    "taxi_zone_geometry": ("taxi-zone/tract polygon intersection", "integrated"),
     "osm": ("OSM object and tract", "integrated"),
     "restaurants": ("establishment and tract", "integrated"),
     "mta_subway": ("station and tract", "integrated"),
     "citibike": ("trip, station, and tract", "integrated"),
-    "pedestrians": ("monitor and nearest tract", "baseline transform pending"),
-    "tlc_hvfhv": ("taxi zone inherited by tract", "integrated"),
+    "pedestrians": ("monitor and nearest tract", "integrated with distance warning"),
+    "tlc_hvfhv": ("TLC zone context plus separately labeled area-allocated tract proxies", "integrated"),
     "pluto": ("tax lot and tract", "integrated"),
     "storefronts": ("property and tract", "integrated"),
     "storefront_rent_stats": ("published tract median", "integrated"),
     "epa_walkability": ("block-group polygon to 2020 tract", "integrated with area-weighted crosswalk"),
     "events": ("community district inherited by tract", "integrated"),
+    "events_historical": ("community district and event-year; not observed tract events", "integrated"),
+    "sla_active_context": ("active license; partial exact-address matching to NYC tracts", "integrated"),
     "weather": ("citywide day; never copied to every tract", "integrated separately"),
-    "business_patterns": ("ZIP; not a tract feature", "baseline transform pending"),
+    "business_patterns": ("ZIP and NAICS; kept at native geography", "integrated separately"),
+    "business_patterns_2015": ("ZIP and NAICS; historical comparison at source geography", "integrated separately"),
     "tract_geography_2020": ("fixed 2020 tract boundaries", "fixed geography"),
     "mobile_food_vending": ("violation record; not current vendor inventory", "reference only"),
 }
@@ -69,7 +77,7 @@ def period(today, frequency):
 
 
 def due_sources(today, state, selected=None, force=False):
-    selected = selected or tuple(SOURCES)
+    selected = selected or tuple(name for name in SOURCES if name not in {"acs_demographics", "acs_income"})
     return [name for name in selected if force or state.get("sources", {}).get(name, {}).get("period") !=
             period(today, FREQUENCY[name])]
 
@@ -136,16 +144,17 @@ def training_inventory(now=None):
     lineage = release_lineage()
     sources = {}
     for name, source in SOURCES.items():
-        revision = raw_latest(name)
+        provider = "acs_context" if name in {"acs_demographics", "acs_income"} else name
+        revision = raw_latest(provider)
         file_records = revision.get("files", []) if revision else []
-        paths = [DESTINATION / name / revision["directory"] / item["file"] for item in file_records] if revision else []
+        paths = [DESTINATION / provider / revision["directory"] / item["file"] for item in file_records] if revision else []
         if any("sample" in path.name.lower() for path in paths):
             issues.append(f"Sample file entered raw source manifest: {name}")
         for path, item in zip(paths, file_records):
             if not path.is_file() or path.stat().st_size != item["bytes"]:
                 issues.append(f"Raw source file missing or wrong size: {name} / {path.name}")
-        integrated = lineage.get(name, {})
-        if name in SUPPORTED:
+        integrated = lineage.get(provider, {})
+        if provider in SUPPORTED:
             status = "integrated_current" if revision and integrated.get("revision") == revision["directory"] else "integration_pending"
         elif revision:
             status = SOURCE_ROLE[name][1].replace(" ", "_")
@@ -153,6 +162,7 @@ def training_inventory(now=None):
             status = "raw_missing"
         sources[name] = {
             "label": source.label, "check_frequency": FREQUENCY[name], "grain": SOURCE_ROLE[name][0],
+            "provider_source": provider,
             "role": SOURCE_ROLE[name][1], "status": status,
             "raw_version": revision.get("publisher_version") if revision else None,
             "raw_revision": revision.get("directory") if revision else None,
@@ -172,7 +182,7 @@ def training_inventory(now=None):
         "sources": sources, "structural_issues": issues,
         "feature_matrix_structurally_valid": not issues,
         "success_model_training_ready": False,
-        "success_model_limitation": "Verified longitudinal business outcomes and leakage-safe historical feature snapshots are not yet available.",
+        "success_model_limitation": "Verified business outcomes are missing. Four dated historical predictors are available separately; current-context additions must not enter historical cohorts without matching vintage reconstruction.",
     }
 
 
@@ -218,9 +228,17 @@ def check_and_refresh(today, selected=None, force=False, publish=True):
                 failed[name] = message.replace(secret, "[REDACTED]") if secret else message
         write_json(STATE, state)
 
+        permit_presence = None
+        if "restaurants" in downloaded or ("restaurants" in checked and
+                                           not (DATA / "evaluation/permit_presence/status.json").exists()):
+            try:
+                permit_presence = refresh_permit_presence()
+            except Exception as error:
+                failed["permit_presence"] = f"{type(error).__name__}: {error}"
+
         refresh = None
         pending = pending_integrations(today)
-        if pending and publish:
+        if pending and publish and "permit_presence" not in failed:
             tests = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "demo",
                                     "-p", "test_*.py", "-q"], cwd=ROOT, capture_output=True, text=True,
                                    timeout=300, check=False)
@@ -243,6 +261,9 @@ def check_and_refresh(today, selected=None, force=False, publish=True):
         report = {"run_at": datetime.now(timezone.utc).isoformat(), "status": status,
                   "checked": checked, "downloaded": downloaded, "blocked": blocked, "failed": failed,
                   "pending_integrations": pending_integrations(today),
+                  "permit_presence": ({key: permit_presence[key] for key in
+                                       ("status", "latest_record_date", "review_leads", "one_year_training_ready")}
+                                      if permit_presence else None),
                   "published_release": refresh.get("published_release") if refresh else None,
                   "raw_only_changes": raw_only_changes,
                   "inventory": str(INVENTORY)}

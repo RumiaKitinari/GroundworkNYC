@@ -25,6 +25,13 @@ data/osm/
 data/listings/
 data/evaluation/
 data/c_rest_AI/
+team_exports/
+# Private handoff exports and trained/native artifacts
+/deliverables/
+*.ubj
+*.pkl
+*.joblib
+*.parquet
 .DS_Store
 
 # Optional spatial backend tooling

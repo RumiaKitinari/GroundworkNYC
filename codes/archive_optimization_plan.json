@@ -1,0 +1,23 @@
+{
+  "schema": "archive-optimization-plan-v1",
+  "seed": 440,
+  "assessment_group_rule": "SHA256('groundwork-opt-v1|' + NTA) mod 5 == 0",
+  "development_folds": 3,
+  "selection_metric": "Minimum pooled development-fold interval negative log likelihood; ties use candidate ID",
+  "feature_policies": ["context_only", "context_without_current_supply"],
+  "diagnostics": ["corrected_full", "without_open_year", "without_chain", "without_both", "without_competition", "opening_year_only", "chain_only", "competition_only"],
+  "parameter_candidates": [
+    {"id":"base", "max_depth":5, "min_child_weight":25, "lambda":2, "learning_rate":0.03, "rounds":200},
+    {"id":"shallow", "max_depth":3, "min_child_weight":25, "lambda":5, "learning_rate":0.03, "rounds":200},
+    {"id":"regularized", "max_depth":3, "min_child_weight":50, "lambda":10, "learning_rate":0.03, "rounds":300},
+    {"id":"moderate", "max_depth":4, "min_child_weight":50, "lambda":5, "learning_rate":0.05, "rounds":200},
+    {"id":"small_trees", "max_depth":2, "min_child_weight":50, "lambda":10, "learning_rate":0.03, "rounds":400},
+    {"id":"faster", "max_depth":3, "min_child_weight":25, "lambda":5, "learning_rate":0.05, "rounds":150}
+  ],
+  "closure_sensitivity": ["one_later_capture", "two_later_captures", "three_later_captures", "two_later_captures_and_180_days"],
+  "assessment_evaluations_after_lock": 1,
+  "globally_untouched_test": false,
+  "prior_exposure": "All source cohort rows appeared in the preceding research CV; the reserved split is excluded from this tuning only, not independent external validation.",
+  "current_context_historical_availability_verified": false,
+  "production_deployment_allowed": false
+}

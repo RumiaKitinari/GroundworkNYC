@@ -1,58 +1,52 @@
 # GroundworkNYC
 
-The Flask dashboard remains in `demo/`. The optional [FastAPI spatial backend](backend/README.md)
-mounts that dashboard at `/` and adds PostGIS vector tiles with Redis caching.
-It does not replace the existing routes or publish an unvalidated survival model.
-Private integrated data, accounts, and model artifacts stay outside Git.
-Run the backend locally using the instructions in `backend/README.md`.
+## Integrated dashboard
 
-## Run the dashboard
-
-From the repository root, using Python 3.11 or 3.12:
+This checkout integrates Otis's Week 10 update at `11aaece` with the existing
+frontend, explorers and reliability fixes. Start with the verified
+[local setup and artifact requirements](demo/OTIS_LOCAL_SETUP.md).
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r demo/requirements.txt
+.venv/bin/python -m pip install -r demo/requirements.txt -r codes/requirements-access.txt
 .venv/bin/python -m flask --app demo/app.py run --host 127.0.0.1 --port 5001 --no-reload
 ```
 
-Open http://localhost:5001. The root `requirements.txt` belongs to the older
-Django/data-tool setup; use `demo/requirements.txt` for this dashboard.
+Python 3.11 is verified locally. Open http://localhost:5001. The active local
+results are concept screening and newly generated network customer-access
+indices over the installed tract release and synthetic property scenarios.
+**No validated Otis survival model is installed.** The older Atharv export is
+preserved but not selected by default. Missing predictions are never replaced
+with screening scores.
 
-The dashboard, resident/worker and transit profiles, competition explorer,
-storefront research, 3D restaurant overlay, saved workspaces and menu tools
-are combined in `demo/`. Read [the app README](demo/README.md) for setup and
-[the architecture note](demo/FRONTEND_ARCHITECTURE.md) for the API boundaries.
-The legacy Django/MongoDB starter was removed from main. The team's `codes/`
-model pipeline remains separate; its instructions are in `Readme/README.md`.
+[Week 10 Changes](WEEK_10_README.md) and [Otis's integration notes](demo/MAIN_INTEGRATION_20261029.md)
+describe the upstream work. Their data counts and research results refer to
+Otis's machine; see the local setup document for the actual 107-column release,
+new access bundles, missing artifacts, and verification limitations here.
 
-## Local data and optional services
+The optional combined FastAPI/PostGIS/Redis runtime uses `run_local.py` after
+installing `backend/requirements-dashboard.txt`, configuring private database
+settings, and starting services. Run `run_local.py --check` first. See
+[backend setup](backend/README.md). Private data, model files, account databases,
+and generated route bundles remain outside Git.
 
-The private integrated package is required for dashboard results. Selection
-order is `GROUNDWORK_DATA_DIR`, `data/integrated/current/`, then
-`data/integrated/restaurant_bar_location_data_ready/`. All explorer readers
-follow that selection; keep the full `features/` and `entities/` directories.
-The concept-demand map and city boundary require the complete tract GeoJSON
-under `geography/`. All five boroughs are supported. Missing boundary data
-returns 503 without blocking the dashboard.
+## Frontend Lineage And Current Status
 
-Local MBTiles enable Streets. Aerial and 3D use online providers. The walking
-network and verified property sources are optional. This checkout has no
-optional rent benchmark snapshot or public leasing CSV: those views show
-unavailable data, and the two existing tests requiring those files cannot pass
-until the sources are supplied. Storefront filings do not establish current
-lease availability.
+This branch preserves Jas's dashboard design, login/guest entry, restaurant
+brief, top navigation, themes and separate 3D map concept. It integrates the
+newer local property, menu, economics, account persistence and backend work
+into that design instead of maintaining two competing frontends.
 
-Flask runs without PostGIS or Redis. The optional FastAPI wrapper serves the
-same dashboard on port 8000; follow [backend/README.md](backend/README.md).
-A real local Atharv model run now supplies the dashboard's three-year tract
-estimates via its generated CSV. See [demo steps and reproduction](demo/ATHARV_DEMO.md).
-These archive-based research estimates are separate from screening rankings.
-Artifacts and the private activation pointer are ignored; a fresh clone must
-restore or regenerate them. Otis's dated-model contract remains a separate
-optional path in [the survival setup](demo/SURVIVAL_DASHBOARD.md).
-Keep private data, account databases, signing keys, virtual environments,
-checkpoints and generated caches outside commits.
+The UI currently uses Flask templates, vanilla JavaScript, MapLibre GL and
+locally bundled Chart.js. It is not a React migration. Streets uses local OSM
+vector tiles, Aerial uses online imagery, and 3D uses a separate OpenFreeMap
+style with interactive buildings/POIs. Recommendation markers remain visible
+in every mode; existing-restaurant overlays remain optional and 3D-only.
+Map interactions are local-app features, not a claim that imagery and 3D tiles
+are fully offline.
+
+See [Frontend Architecture](demo/FRONTEND_ARCHITECTURE.md),
+[Dashboard Integration](demo/DASHBOARD_INTEGRATION_20261028.md), and
+[Connected Account Workspace](demo/CONNECTED_WORKSPACE.md).
 
 ## Data Folder
 

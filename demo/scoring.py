@@ -5,9 +5,10 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from math import isfinite
 import re
+from evidence_policy import cuisine_support, location_policy
 
 
-MODEL_VERSION = "concept-screening-0.2"
+MODEL_VERSION = "concept-screening-0.3"
 CUISINES = {
     "any": (), "korean": ("Korean",), "chinese": ("Chinese", "Chinese/Japanese"),
     "japanese": ("Japanese", "Chinese/Japanese"), "indian": ("Indian",),
@@ -168,6 +169,8 @@ def resolve_concept(args):
             "price": "entered" if concept.price_mode == "exact" and args.get("average_check") else "tier_assumption" if concept.price_mode == "tier" else "default",
         },
         "cuisine_evidence": "unspecified" if concept.cuisine == "any" else "separately_classified" if CUISINES[concept.cuisine] else "not_separately_classified",
+        "cuisine_assessment_scope": "general_concept_suitability" if not CUISINES[concept.cuisine] else "requires_inventory_support_check",
+        "dietary_customer_demand_measured": False,
     }
 
 
@@ -263,16 +266,18 @@ class ScreeningModel:
         nearby_known = sum(nearby.values()) - nearby["unknown"]
         city_known = sum(self.city.values()) - self.city["unknown"]
         city_share = sum(self.city[label] for label in labels) / max(1, city_known)
-        expected = known * city_share
+        support = cuisine_support(concept.cuisine, labels, local, nearby, self.city)
+        expected = support["expected_local_supply"]
+        expected = expected if expected is not None else 0
         affinity = (nearby_same / nearby_known / city_share) if nearby_known and city_share else None
         # Shrink small inventories and incomplete cuisine labels before rewarding scarcity.
-        cuisine_evidence = catalog_coverage * min(1, known / 10) if labels else 0
+        cuisine_evidence = support["score_evidence_cap"]
         scarcity = max(0, min(100, 50 + 50 * (expected - same) / (expected + 2))) if labels else 50
         feasibility = min(demand[0], customer_fit[0])
         gap_value = scarcity * feasibility / 100
         ecosystem_support = min(100, 50 * affinity) * min(1, nearby_same / 5) if affinity is not None else 0
         ecosystem_value = ecosystem_support * feasibility / 100
-        ecosystem_evidence = (nearby_known / max(1, sum(nearby.values()))) * min(1, nearby_same / 5) if labels else 0
+        ecosystem_evidence = min(cuisine_evidence, (nearby_known / max(1, sum(nearby.values()))) * min(1, nearby_same / 5)) if labels else 0
         opportunity_value, opportunity_evidence = (ecosystem_value, ecosystem_evidence) if ecosystem_value > gap_value else (gap_value, cuisine_evidence)
         market_gap = (opportunity_value, min(demand[1], customer_fit[1], opportunity_evidence)) if labels else (50, 0)
         dietary_positioning = None
@@ -282,7 +287,7 @@ class ScreeningModel:
             dietary_city_share = sum(self.city[label] for label in dietary_labels) / max(1, city_known)
             dietary_expected = known * dietary_city_share
             dietary_gap = max(0, min(100, 50 + 50 * (dietary_expected - dietary_same) / (dietary_expected + 2)))
-            dietary_evidence = catalog_coverage * min(1, known / 10) * .45
+            dietary_evidence = catalog_coverage * min(1, known / 10) * .45 if dietary_city_share>0 else 0
             dietary_score = (dietary_gap * feasibility / 100, dietary_evidence)
             market_gap = self.mix([(dietary_score, .7), (market_gap, .3)])
             dietary_positioning = f"{concept.dietary.title()} Supply: {dietary_same} Recorded In Tract"
@@ -300,7 +305,7 @@ class ScreeningModel:
             positioning = "Cuisine Not Separately Classified" if concept.cuisine != "any" else "Cuisine Not Specified"
         elif cuisine_evidence < .5:
             positioning = "Limited Cuisine Evidence"
-        elif feasibility >= 65 and same < expected:
+        elif support["mode"] == "cuisine_supply_supported" and feasibility >= 65 and same < expected:
             positioning = "Potential Cuisine Gap"
         elif nearby_same >= 3 and affinity is not None and affinity >= 1.25:
             positioning = "Established Cuisine Market"
@@ -330,7 +335,9 @@ class ScreeningModel:
             "business_draw": bounded(draw[0]), "business_draw_coverage": bounded(draw[1] * 100),
             "components": {key: {"score": bounded(value), "coverage": bounded(coverage * 100)} for key, (value, coverage) in components.items()},
             "risk_flags": risks,
+            "assessment_policy": location_policy(overall[1], support, concept.dietary, bool(income)),
             "concept_evidence": {
+                "support": support,
                 "positioning": positioning, "cuisine": concept.cuisine, "same_cuisine_count": same if labels else None,
                 "neighborhood_same_cuisine_count": nearby_same if labels else None,
                 "cuisine_inventory_count": total, "cuisine_label_coverage": bounded(catalog_coverage * 100),

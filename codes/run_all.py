@@ -42,9 +42,8 @@ STEPS = [
     ("matrix", "cuisine_matrix.py", []),
     ("heatmaps", "make_heatmaps.py", ["restaurants_labeled.csv"]),
     ("lifespans", "build_lifespans.py", ["restaurants_raw.parquet"]),
-    ("train", "train_survival.py", ["master_tract_features.csv", "restaurant_lifespans.csv"]),
-    ("recommend", "recommend.py", ["synthetic_properties.csv", "master_tract_features.csv",
-                                   "restaurant_lifespans.csv", "hex_cuisine_scores.csv"]),
+    ("train", "train_survival.py", []),  # explicit verified evidence, not the lifespan summary
+    ("recommend", "recommend.py", ["synthetic_properties.csv", "hex_cuisine_scores.csv"]),
 ]
 NAMES = [s[0] for s in STEPS]
 
@@ -72,6 +71,13 @@ def main():
     ap.add_argument("--only", choices=NAMES, help="run just this step")
     ap.add_argument("--list", action="store_true", help="list the steps and exit")
     ap.add_argument("--cuisine", help="also run recommend.py for this cuisine")
+    ap.add_argument("--baselines", type=Path)
+    ap.add_argument("--observations", type=Path)
+    ap.add_argument("--snapshots", type=Path, action="append")
+    ap.add_argument("--data-dir", type=Path, default=DATA)
+    ap.add_argument("--as-of")
+    ap.add_argument("--cutoff")
+    ap.add_argument("--model-dir", type=Path)
     a, rec_args = ap.parse_known_args()
 
     if a.list:
@@ -88,6 +94,14 @@ def main():
             todo.append(STEPS[5])                    # + recommend
     if any(s[0] == "recommend" for s in todo) and not a.cuisine:
         sys.exit("The recommend step needs --cuisine.")
+    names = {step[0] for step in todo}
+    if "train" in names and not all((a.baselines, a.observations, a.snapshots,
+                                     a.as_of, a.cutoff, a.model_dir)):
+        sys.exit("Temporal training requires --baselines, --observations, --snapshots, "
+                 "--as-of, --cutoff and a new --model-dir. See TEMPORAL_SURVIVAL.md. "
+                 "Legacy lifespan summaries are not training evidence.")
+    if "recommend" in names and not all((a.snapshots, a.model_dir)):
+        sys.exit("Temporal recommendations require --snapshots and --model-dir.")
 
     ensure_dirs()
     print(f"Data:    {DATA}\nOutputs: {OUTPUTS}\n")
@@ -106,8 +120,15 @@ def main():
                      f"Put raw inputs in {DATA}, or run the earlier steps first.")
 
         cmd = [sys.executable, str(CODES / script)]
+        if name in {"train", "recommend"}:
+            cmd += ["--data-dir", str(a.data_dir.resolve())]
+            for manifest in a.snapshots:
+                cmd += ["--snapshots", str(manifest.resolve())]
+        if name == "train":
+            cmd += ["--baselines", str(a.baselines.resolve()), "--observations", str(a.observations.resolve()),
+                    "--as-of", a.as_of, "--cutoff", a.cutoff, "--out-dir", str(a.model_dir.resolve())]
         if name == "recommend":
-            cmd += ["--cuisine", a.cuisine] + rec_args
+            cmd += ["--cuisine", a.cuisine, "--model-dir", str(a.model_dir.resolve())] + rec_args
         print(f"=== [{i}/{len(todo)}] {name}: {script} ===")
         t = time.time()
         result = subprocess.run(cmd, cwd=CODES)

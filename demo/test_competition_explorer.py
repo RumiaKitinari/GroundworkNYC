@@ -2,7 +2,12 @@ import csv
 import unittest
 from collections import Counter
 
-from app import integrated_directory, app, current_restaurant_records, integrated_package
+from app import (
+    app,
+    current_restaurant_records,
+    integrated_directory,
+    integrated_package,
+)
 
 
 class CompetitionExplorerTests(unittest.TestCase):

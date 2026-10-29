@@ -3,6 +3,7 @@
 import argparse
 import csv
 import fcntl
+import gzip
 import hashlib
 import json
 import math
@@ -17,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from download_sources import DESTINATION as RAW_ROOT, SOURCES, download_source, resolve
+from master_tract_spec import FIELD_DEFINITIONS as SPEC_FIELDS, enrich as enrich_master_spec
 from rebuild_epa import EPA_FIELDS, rebuild as rebuild_epa
 from rebuild_osm import MASTER_FIELDS as OSM_MASTER_FIELDS, rebuild as rebuild_osm
 from rent_benchmarks import parse_snapshot
@@ -26,7 +28,8 @@ ROOT = Path(__file__).resolve().parents[1]
 INTEGRATED_ROOT = ROOT / "data" / "integrated"
 BASELINE = INTEGRATED_ROOT / "restaurant_bar_location_data_ready"
 CURRENT = INTEGRATED_ROOT / "current"
-SUPPORTED = ("restaurants", "events", "mta_subway", "tlc_hvfhv", "osm", "pluto", "citibike", "storefronts", "storefront_rent_stats", "weather", "epa_walkability")
+ENRICHMENT_SOURCES = ("acs_context", "lodes_rac", "subway_entrances", "taxi_zone_geometry", "business_patterns", "business_patterns_2015", "events_historical", "sla_active_context")
+SUPPORTED = ("restaurants", "events", "mta_subway", "tlc_hvfhv", "osm", "pluto", "citibike", "storefronts", "storefront_rent_stats", "weather", "epa_walkability", "lodes", "pedestrians", *ENRICHMENT_SOURCES)
 COUNTY = {"Bronx": "005", "Brooklyn": "047", "Manhattan": "061", "Queens": "081", "Staten Island": "085"}
 BOROUGH_NUMBER = {"Manhattan": 1, "Bronx": 2, "Brooklyn": 3, "Queens": 4, "Staten Island": 5}
 QUALITY_FIELDS = ("geoid", "active_restaurant_count", "restaurants_with_current_score",
@@ -47,7 +50,8 @@ TAXI_FIELDS = ("location_id", "pickups_latest_month", "dropoffs_latest_month",
 PLUTO_FIELDS = ("geoid", "relevant_parcel_count", "commercial_office_parcel_count",
                 "mixed_use_parcel_count", "vacant_land_parcel_count", "relevant_lot_area_sqft",
                 "commercial_area_sqft", "retail_area_sqft", "office_area_sqft",
-                "vacant_land_parcel_share")
+                "vacant_land_parcel_share", "total_lot_count", "commercial_mixed_lot_share_all",
+                "vacant_land_share_all_lots", "mean_commercial_mixed_num_floors")
 BIKE_FIELDS = ("geoid", "citibike_station_count", "citibike_departures_latest_month",
                "citibike_arrivals_latest_month", "citibike_evening_departures_latest_month",
                "citibike_weekend_departures_latest_month", "nearest_citibike_distance_miles",
@@ -64,6 +68,23 @@ WEATHER_FLAGS = dict(zip(("fog_ice_fog", "heavy_fog", "thunder", "ice_pellets", 
                          ("WT01", "WT02", "WT03", "WT04", "WT05", "WT06", "WT07", "WT08", "WT09",
                           "WT11", "WT13", "WT14", "WT15", "WT16", "WT17", "WT18", "WT19", "WT21", "WT22")))
 COUNTY_BY_BOROUGH_NUMBER = {str(number): COUNTY[borough] for borough, number in BOROUGH_NUMBER.items()}
+LODES_COLUMNS = {
+    "CA01": "jobs_age_29_or_younger", "CA02": "jobs_age_30_to_54", "CA03": "jobs_age_55_or_older",
+    "CE01": "jobs_earn_1250_or_less_monthly", "CE02": "jobs_earn_1251_to_3333_monthly",
+    "CE03": "jobs_earn_more_than_3333_monthly",
+    **dict(zip((f"CNS{i:02d}" for i in range(1, 21)), (
+        "jobs_agriculture_forestry_fishing_hunting", "jobs_mining_quarrying_oil_gas", "jobs_utilities",
+        "jobs_construction", "jobs_manufacturing", "jobs_wholesale_trade", "jobs_retail_trade",
+        "jobs_transportation_warehousing", "jobs_information", "jobs_finance_insurance",
+        "jobs_real_estate_rental_leasing", "jobs_professional_scientific_technical", "jobs_management",
+        "jobs_admin_support_waste_management", "jobs_educational_services",
+        "jobs_health_care_social_assistance", "jobs_arts_entertainment_recreation",
+        "jobs_accommodation_food_services", "jobs_other_services", "jobs_public_administration")))
+}
+WORKER_FIELDS = ("geoid", "land_area_sq_miles", *LODES_COLUMNS.values(), "total_jobs", "job_density_per_sq_mile")
+PEDESTRIAN_FIELDS = ("geoid", "nearest_pedestrian_count_site_distance_miles",
+                     "nearest_pedestrian_count_site_objectid", "nearest_pedestrian_count_site_loc",
+                     "nearest_pedestrian_count_site_latest_pedestrian_count_total")
 
 
 def read_csv(path):
@@ -80,6 +101,12 @@ def write_csv(path, rows, fields):
 
 def sha256(path):
     digest = hashlib.sha256()
+    if path.is_dir():
+        for child in sorted(path.iterdir()):
+            if child.is_file():
+                digest.update(child.name.encode())
+                digest.update(sha256(child).encode())
+        return digest.hexdigest()
     with path.open("rb") as stream:
         while chunk := stream.read(1024 * 1024):
             digest.update(chunk)
@@ -104,8 +131,15 @@ def raw_revision(name, revision_name=None):
     manifest = json.loads((RAW_ROOT / name / "manifest.json").read_text())
     revisions = manifest["revisions"]
     revision = next((item for item in revisions if item["directory"] == revision_name), None) if revision_name else revisions[-1]
-    if revision is None or len(revision["files"]) != 1:
+    if revision is None or (len(revision["files"]) != 1 and name != "acs_context"):
         raise ValueError(f"Unknown or unsupported raw revision for {name}")
+    if name == "acs_context":
+        directory = RAW_ROOT / name / revision["directory"]
+        for item in revision["files"]:
+            path = directory / item["file"]
+            if not path.is_file() or sha256(path) != item["sha256"]:
+                raise ValueError("ACS context source failed checksum validation")
+        return directory, revision
     file = revision["files"][0]
     path = RAW_ROOT / name / revision["directory"] / file["file"]
     if not path.is_file() or sha256(path) != file["sha256"]:
@@ -313,6 +347,93 @@ def miles(lat1, lon1, lat2, lon2):
     return 3958.7613 * 2 * math.asin(math.sqrt(math.sin(dr / 2) ** 2 + math.cos(r1) * math.cos(r2) * math.sin(dc / 2) ** 2))
 
 
+def rebuild_lodes(stage, raw, master, minimum_blocks=10000):
+    known = {row["geoid"] for row in master}
+    totals = defaultdict(lambda: defaultdict(int))
+    blocks = 0
+    with gzip.open(raw, "rt", newline="", encoding="utf-8-sig") as stream:
+        reader = csv.DictReader(stream)
+        required = {"w_geocode", "C000", *LODES_COLUMNS}
+        if not required <= set(reader.fieldnames or []):
+            raise ValueError("LODES source lacks required workplace columns")
+        for record in reader:
+            block = record["w_geocode"]
+            geoid = block[:11]
+            if len(block) != 15 or geoid not in known:
+                continue
+            jobs = int(record["C000"])
+            if any(sum(int(record[f"{prefix}{index:02d}"]) for index in range(1, count + 1)) != jobs
+                   for prefix, count in (("CA", 3), ("CE", 3), ("CNS", 20))):
+                raise ValueError(f"LODES job categories do not reconcile for block {block}")
+            blocks += 1
+            values = totals[geoid]
+            values["total_jobs"] += jobs
+            for source, field in LODES_COLUMNS.items():
+                values[field] += int(record[source])
+    if blocks < minimum_blocks:
+        raise ValueError(f"LODES NYC block coverage too low: {blocks}")
+    features = []
+    for row in master:
+        geoid = row["geoid"]
+        jobs = totals[geoid]["total_jobs"]
+        area = float(row["land_area_sq_miles"])
+        population = float(row["population_2024"]) if row.get("population_2024") else 0
+        feature = {"geoid": geoid, "land_area_sq_miles": row["land_area_sq_miles"],
+                   **{field: totals[geoid][field] for field in LODES_COLUMNS.values()},
+                   "total_jobs": jobs, "job_density_per_sq_mile": jobs / area if area > 0 else ""}
+        features.append(feature)
+        row.update(feature)
+        row["jobs_per_1000_residents"] = 1000 * jobs / population if population > 0 else ""
+    write_csv(stage / "features" / "tract_workers.csv", features, WORKER_FIELDS)
+    return {"blocks": blocks, "tracts_with_jobs": sum(row["total_jobs"] > 0 for row in features),
+            "nyc_jobs": sum(row["total_jobs"] for row in features)}
+
+
+def rebuild_pedestrians(stage, raw, master, minimum_sites=100):
+    sites = []
+    with raw.open(newline="", encoding="utf-8-sig") as stream:
+        reader = csv.DictReader(stream)
+        if not {"objectid", "loc", "the_geom"} <= set(reader.fieldnames or []):
+            raise ValueError("DOT pedestrian source lacks monitor identifiers or geometry")
+        periods = defaultdict(dict)
+        for field in reader.fieldnames:
+            match = re.fullmatch(r"(may|june|sept|oct)_?(\d{2})_(am|md|pm|p_m)", field)
+            if match:
+                month, year, daypart = match.groups()
+                key = (2000 + int(year), {"may": 5, "june": 6, "sept": 9, "oct": 10}[month])
+                periods[key]["pm" if daypart == "p_m" else daypart] = field
+        for record in reader:
+            point = re.fullmatch(r"POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)", record["the_geom"] or "")
+            if not point:
+                continue
+            latest = next(((period, fields) for period, fields in sorted(periods.items(), reverse=True)
+                           if len(fields) == 3 and all(record.get(fields[part], "").isdigit()
+                                                        for part in ("am", "md", "pm"))), None)
+            if latest is None:
+                continue
+            period, fields = latest
+            sites.append({"objectid": record["objectid"], "loc": record["loc"],
+                          "longitude": float(point[1]), "latitude": float(point[2]),
+                          "period": f"{period[0]}-{period[1]:02d}",
+                          "count_total": sum(int(record[fields[part]]) for part in ("am", "md", "pm"))})
+    if len(sites) < minimum_sites or len({site["objectid"] for site in sites}) != len(sites):
+        raise ValueError(f"DOT pedestrian monitor coverage or uniqueness failed: {len(sites)}")
+    write_csv(stage / "entities" / "pedestrian_count_sites_latest.csv", sites,
+              ("objectid", "loc", "latitude", "longitude", "period", "count_total"))
+    features = []
+    for row in master:
+        lat, lon = float(row["centroid_latitude"]), float(row["centroid_longitude"])
+        nearest = min(sites, key=lambda site: miles(lat, lon, site["latitude"], site["longitude"]))
+        feature = dict(zip(PEDESTRIAN_FIELDS, (row["geoid"],
+            miles(lat, lon, nearest["latitude"], nearest["longitude"]),
+            nearest["objectid"], nearest["loc"], nearest["count_total"])))
+        features.append(feature)
+        row.update(feature)
+    write_csv(stage / "features" / "tract_pedestrian_access.csv", features, PEDESTRIAN_FIELDS)
+    return {"sites": len(sites), "latest_period": max(site["period"] for site in sites),
+            "tracts_with_monitor_within_half_mile": sum(float(row[PEDESTRIAN_FIELDS[1]]) <= .5 for row in features)}
+
+
 def rebuild_subway(stage, raw, master):
     old = {row["station_complex_id"]: row for row in read_csv(stage / "entities" / "subway_stations_weekly_activity.csv")}
     stations = {}
@@ -423,8 +544,6 @@ def rebuild_pluto(stage, raw, master, minimum=80000):
     with raw.open(newline="", encoding="utf-8-sig") as stream:
         for parcel in csv.DictReader(stream):
             landuse = parcel.get("landuse", "").strip().zfill(2)
-            if landuse not in {"04", "05", "11"}:
-                continue
             version = parcel.get("version", "").strip()
             if version:
                 versions.add(version)
@@ -437,12 +556,24 @@ def rebuild_pluto(stage, raw, master, minimum=80000):
             bct = parcel.get("bct2020", "").strip()
             geoid = "36" + COUNTY_BY_BOROUGH_NUMBER.get(bct[:1], "") + bct[1:]
             if len(bct) != 7 or geoid not in known:
-                unassigned += 1
+                unassigned += landuse in {"04", "05", "11"}
                 continue
             values = totals[geoid]
+            if landuse.isdigit() and landuse != "00":
+                values["total_lot_count"] += 1
+            if landuse not in {"04", "05", "11"}:
+                continue
             values["relevant_parcel_count"] += 1
             values[{"04": "mixed_use_parcel_count", "05": "commercial_office_parcel_count",
                     "11": "vacant_land_parcel_count"}[landuse]] += 1
+            if landuse in {"04", "05"}:
+                try:
+                    floors = float(parcel.get("numfloors", "") or 0)
+                except ValueError:
+                    floors = 0
+                if math.isfinite(floors) and floors > 0:
+                    values["commercial_mixed_floors_sum"] += floors
+                    values["commercial_mixed_floors_observed"] += 1
             for source, target in (("lotarea", "relevant_lot_area_sqft"),
                                    ("comarea", "commercial_area_sqft"),
                                    ("retailarea", "retail_area_sqft"),
@@ -464,7 +595,13 @@ def rebuild_pluto(stage, raw, master, minimum=80000):
         feature = {"geoid": row["geoid"]}
         for field in PLUTO_FIELDS[1:]:
             if field == "vacant_land_parcel_share":
-                value = round(values["vacant_land_parcel_count"] / values["relevant_parcel_count"], 6) if values else ""
+                value = round(values["vacant_land_parcel_count"] / values["relevant_parcel_count"], 6) if values and values["relevant_parcel_count"] else ""
+            elif field == "commercial_mixed_lot_share_all":
+                value = round((values["mixed_use_parcel_count"] + values["commercial_office_parcel_count"]) / values["total_lot_count"], 6) if values and values["total_lot_count"] else ""
+            elif field == "vacant_land_share_all_lots":
+                value = round(values["vacant_land_parcel_count"] / values["total_lot_count"], 6) if values and values["total_lot_count"] else ""
+            elif field == "mean_commercial_mixed_num_floors":
+                value = round(values["commercial_mixed_floors_sum"] / values["commercial_mixed_floors_observed"], 3) if values and values["commercial_mixed_floors_observed"] else ""
             elif values:
                 value = int(values[field]) if field.endswith("_count") else values[field]
             else:
@@ -475,7 +612,8 @@ def rebuild_pluto(stage, raw, master, minimum=80000):
     write_csv(stage / "features" / "tract_land_use.csv", features, PLUTO_FIELDS)
     return {"source_version": next(iter(versions), "unknown"), "relevant_parcels": assigned,
             "unassigned_parcels": unassigned, "duplicate_bbl_rows": duplicates,
-            "tracts_with_relevant_parcels": len(totals),
+            "tracts_with_relevant_parcels": sum(bool(values["relevant_parcel_count"]) for values in totals.values()),
+            "total_lots_with_land_use": sum(int(values["total_lot_count"]) for values in totals.values()),
             "vacant_land_parcels": sum(int(values["vacant_land_parcel_count"]) for values in totals.values())}
 
 
@@ -492,16 +630,32 @@ def rebuild_storefronts(stage, raw, master, minimum=1800):
     eligible_years = [year for year, count in year_counts.items() if year.isdigit() and count >= minimum]
     if not eligible_years:
         raise ValueError(f"No complete storefront reporting year: {dict(year_counts)}")
-    year = max(eligible_years)
-    latest = {}
+    complete_years = []
+    reference_rows = max(year_counts[candidate] for candidate in eligible_years)
+    for candidate in eligible_years:
+        rows = [record for record in records if record.get("reporting_year", "").strip() == candidate]
+        not_vacant = sum(record.get("vacant_on_12_31", "").strip().upper() in {"NO", "N"} for record in rows)
+        if len(rows) >= reference_rows * 0.8 and not_vacant >= minimum and not_vacant >= len(rows) * 0.1:
+            complete_years.append(candidate)
+    year = max(complete_years or eligible_years)
+    grouped = defaultdict(list)
     for record in records:
         if record.get("reporting_year", "").strip() != year:
             continue
         bbl = record.get("borough_block_lot", "").strip() or record.get("bbl", "").strip()
         if not bbl:
             continue
-        if bbl not in latest or record.get("filing_due_date", "") > latest[bbl].get("filing_due_date", ""):
-            latest[bbl] = record
+        grouped[bbl].append(record)
+    latest = {}
+    for bbl, filings in grouped.items():
+        last_date = max(record.get("filing_due_date", "") for record in filings)
+        current_filings = [record for record in filings if record.get("filing_due_date", "") == last_date]
+        item = dict(current_filings[0])
+        item["vacant_current"] = str(any(
+            record.get(field, "").strip().upper() in {"YES", "Y"}
+            for record in current_filings for field in ("vacant_on_12_31", "vacant_6_30_or_date_sold")
+        ))
+        latest[bbl] = item
     if len(latest) < minimum or len(latest) < len(prior) * 0.8:
         raise ValueError(f"Storefront property coverage dropped: {len(latest)} vs {len(prior)} prior")
     polygons = polygon_index(stage / "geography" / "nyc_2020_census_tracts.geojson")
@@ -521,8 +675,6 @@ def rebuild_storefronts(stage, raw, master, minimum=1800):
             geoid = ""
             unlocated += 1
         item["geoid"] = geoid
-        item["vacant_current"] = str(any(record.get(field, "").strip().lower() == "yes" for field in
-                                         ("vacant_on_12_31", "vacant_6_30_or_date_sold")))
         entities.append(item)
     if unlocated > max(100, len(entities) * 0.05):
         raise ValueError(f"Too many storefronts lack a 2020 tract: {unlocated}/{len(entities)}")
@@ -540,13 +692,14 @@ def rebuild_storefronts(stage, raw, master, minimum=1800):
         vacant = sum(item["vacant_current"] == "True" for item in items)
         feature = {"geoid": row["geoid"], "reported_storefront_property_count": len(items),
                    "reported_vacant_storefront_count": vacant,
-                   "reported_storefront_vacancy_share": round(vacant / len(items), 6) if items else ""}
+                   "reported_storefront_vacancy_share": ""}
         row.update(feature)
         features.append(feature)
     write_csv(stage / "features" / "tract_storefront_availability.csv", features, STOREFRONT_FIELDS)
-    return {"reporting_year": year, "properties": len(entities), "unlocated": unlocated,
+    return {"reporting_year": year, "reporting_coverage": "mixed occupied and vacant" if complete_years else "vacant-only or incomplete",
+            "properties": len(entities), "unlocated": unlocated,
             "prior_geocodes_carried": carried, "tracts_with_reports": occupied_tracts,
-            "reported_vacant": sum(item["vacant_current"] == "True" for item in entities)}
+            "properties_with_reported_vacancy": sum(item["vacant_current"] == "True" for item in entities)}
 
 
 def rebuild_rent_stats(stage, raw, master, minimum=1000):
@@ -725,14 +878,14 @@ def update_catalog(stage, revisions, as_of, results):
             row["url"] = revisions["osm"]["source_url"]
         elif row["source"] == "PLUTO" and "pluto" in revisions:
             row["vintage"] = results["pluto"]["source_version"]
-            row["coverage"] = "full mixed-use, commercial-office, and vacant-land parcels assigned to 2020 tracts"
+            row["coverage"] = "full land-use lots for denominators; mixed-use, commercial-office, and vacant-land parcels for relevant floor-area measures"
         elif row["source"] == "Citi Bike" and "citibike" in revisions:
             row["vintage"] = results["citibike"]["month"] + " trip data"
             row["coverage"] = "full monthly archive aggregated by station and 2020 tract"
             row["url"] = revisions["citibike"]["source_url"]
         elif row["source"] == "Storefront registry" and "storefronts" in revisions:
             row["vintage"] = results["storefronts"]["reporting_year"] + " filings"
-            row["coverage"] = "latest filing per BBL; reported vacancy is not confirmed market availability"
+            row["coverage"] = results["storefronts"]["reporting_coverage"] + "; one row per BBL; any reported vacancy at the parcel is not confirmed market availability"
             row["url"] = revisions["storefronts"]["source_url"]
         elif row["source"] == "NYC Storefront Rent Statistics" and "storefront_rent_stats" in revisions:
             row["vintage"] = str(results["storefront_rent_stats"]["reporting_year"])
@@ -746,6 +899,14 @@ def update_catalog(stage, revisions, as_of, results):
             row["vintage"] = "SLD v3; underlying population circa 2018"
             row["coverage"] = "full NYC block groups spatially crosswalked to 2020 tracts; area allocation is estimated"
             row["url"] = revisions["epa_walkability"]["source_url"]
+        elif row["source"] == "LODES" and "lodes" in revisions:
+            row["vintage"] = revisions["lodes"]["publisher_version"] + " WAC S000 JT00"
+            row["coverage"] = f"{results['lodes']['blocks']} NYC workplace blocks aggregated to 2020 tracts"
+            row["url"] = revisions["lodes"]["source_url"]
+        elif row["source"] == "DOT pedestrian counts" and "pedestrians" in revisions:
+            row["vintage"] = f"Latest complete AM/midday/PM monitor counts; newest {results['pedestrians']['latest_period']}"
+            row["coverage"] = f"{results['pedestrians']['sites']} monitored sites; nearest-site proxy, not tract foot traffic"
+            row["url"] = revisions["pedestrians"]["source_url"]
     if "storefront_rent_stats" in revisions and not any(row["source"] == "NYC Storefront Rent Statistics" for row in rows):
         rows.append({"source": "NYC Storefront Rent Statistics",
                      "vintage": str(results["storefront_rent_stats"]["reporting_year"]),
@@ -788,11 +949,21 @@ def update_catalog(stage, revisions, as_of, results):
     if "pluto" in revisions:
         path = stage / "data_dictionary.csv"
         rows = read_csv(path)
+        definitions = {
+            "total_lot_count": ("All PLUTO lots with a nonzero land-use code assigned to the 2020 tract.", "lots"),
+            "commercial_mixed_lot_share_all": ("PLUTO codes 04 and 05 parcels divided by all tract lots with a nonzero land-use code.", "share"),
+            "vacant_land_share_all_lots": ("PLUTO code 11 vacant-land parcels divided by all tract lots with a nonzero land-use code; not storefront vacancy.", "share"),
+            "mean_commercial_mixed_num_floors": ("Arithmetic mean of positive reported PLUTO building floors on code 04 and 05 lots; missing and zero values excluded.", "floors"),
+        }
         for row in rows:
             if row.get("file") == "master_tract_features.csv" and row.get("column") == "vacant_land_parcel_count":
                 row["definition"] = "PLUTO land-use code 11 (vacant land) parcels in the 2020 tract."
             elif row.get("file") == "master_tract_features.csv" and row.get("column") == "vacant_land_parcel_share":
                 row["definition"] = "Code 11 vacant land parcels divided by code 04, 05, and 11 relevant parcels in the tract."
+        for column, (definition, unit) in definitions.items():
+            for file in ("master_tract_features.csv", "features/tract_land_use.csv"):
+                if not any(row["file"] == file and row["column"] == column for row in rows):
+                    rows.append({"file": file, "column": column, "definition": definition, "unit": unit})
         write_csv(path, rows, rows[0].keys())
     if "citibike" in revisions:
         path = stage / "data_dictionary.csv"
@@ -872,6 +1043,26 @@ def update_catalog(stage, revisions, as_of, results):
         for row in rows:
             if row.get("use") == "Walkability":
                 row["limitation"] = "EPA SLD v3 reflects older built-environment data; 2020 tract values use area-allocated block-group population and require crosswalk sensitivity testing."
+        write_csv(path, rows, rows[0].keys())
+    if "lodes" in revisions or "pedestrians" in revisions:
+        path = stage / "data_dictionary.csv"
+        rows = read_csv(path)
+        for row in rows:
+            if row.get("file") != "master_tract_features.csv":
+                continue
+            if "lodes" in revisions and (row["column"].startswith("jobs_") or row["column"] in {"total_jobs", "job_density_per_sq_mile"}):
+                row["definition"] = f"2023 LODES WAC S000 JT00 workplace jobs aggregated from full New York block records to 2020 NYC tracts; {row['column']}." if row["column"] != "jobs_per_1000_residents" else "2023 LODES workplace jobs per 1,000 ACS 2024 tract residents; cross-vintage context only."
+            elif "pedestrians" in revisions and row["column"].startswith("nearest_pedestrian_count_site_"):
+                row["definition"] = "Nearest NYC DOT monitored point to tract centroid; latest complete AM, midday and PM count at that point, not observed tract-wide foot traffic." if row["column"].endswith("total") else "Nearest NYC DOT monitored point to tract centroid; see source_catalog.csv for vintage and spatial coverage."
+        write_csv(path, rows, rows[0].keys())
+        path = stage / "feature_readiness.csv"
+        rows = read_csv(path)
+        for row in rows:
+            if "lodes" in revisions and row.get("use") == "Nearby worker population":
+                row["limitation"] = "Full 2023 LODES workplace blocks; distinct from resident population and not current-year employment."
+            elif "pedestrians" in revisions and row.get("use") == "Estimated pedestrian activity":
+                row["status"] = "ready with coverage warning"
+                row["limitation"] = f"Only {results['pedestrians']['sites']} DOT monitor points; counts are nearest-site observations, not tract-wide estimates. Distance is provided."
         write_csv(path, rows, rows[0].keys())
 
 
@@ -958,6 +1149,39 @@ def validate_release(stage, baseline_rows, changed):
             "rebuilt_tables_checked": len(changed), "documented_columns": len(documented)}
 
 
+def rebuild_master_spec_context(stage, master):
+    result = enrich_master_spec(master, stage / "geography" / "nyc_2020_census_tracts.geojson")
+    fields = ("geoid", *SPEC_FIELDS)
+    write_csv(stage / "features" / "tract_master_spec_context.csv", master, fields)
+    path = stage / "data_dictionary.csv"
+    dictionary = read_csv(path)
+    existing = {(row["file"], row["column"]) for row in dictionary}
+    for file in ("master_tract_features.csv", "features/tract_master_spec_context.csv"):
+        for column, (definition, unit) in SPEC_FIELDS.items():
+            if (file, column) not in existing:
+                dictionary.append({"file": file, "column": column, "definition": definition, "unit": unit})
+    for row in dictionary:
+        if row["file"] in {"master_tract_features.csv", "features/tract_master_spec_context.csv"} and row["column"] in SPEC_FIELDS:
+            row["definition"], row["unit"] = SPEC_FIELDS[row["column"]]
+    corrections = {
+        "reported_storefront_property_count": "Distinct BBL parcels with a DOF storefront report in the selected year; not a count of distinct storefront spaces.",
+        "reported_vacant_storefront_count": "Distinct reported BBL parcels with at least one vacant storefront in the latest filing date; not a count of vacant spaces.",
+        "reported_storefront_vacancy_share": "Unavailable: BBL-level filings do not identify all individual spaces consistently enough for a storefront-level vacancy denominator.",
+    }
+    for row in dictionary:
+        if row["file"] == "master_tract_features.csv" and row["column"] in corrections:
+            row["definition"] = corrections[row["column"]]
+    write_csv(path, dictionary, dictionary[0].keys())
+    path = stage / "feature_readiness.csv"
+    readiness = read_csv(path)
+    if not any(row["use"] == "Normalized current tract context" for row in readiness):
+        readiness.append({"use": "Normalized current tract context", "primary_output": "features/tract_master_spec_context.csv",
+                          "analysis_grain": "2020 census tract", "status": "current context only",
+                          "limitation": "Mixes 2023 LODES, 2024 ACS/DOF, and latest mobility/OSM/PLUTO vintages; do not use as retrospective restaurant survival predictors."})
+    write_csv(path, readiness, readiness[0].keys())
+    return result
+
+
 def run(selected, as_of, publish=False, download=False, pinned=None):
     pinned = pinned or {}
     INTEGRATED_ROOT.mkdir(parents=True, exist_ok=True)
@@ -975,6 +1199,7 @@ def run(selected, as_of, publish=False, download=False, pinned=None):
             master = read_csv(stage / "master_tract_features.csv")
             old_count = len(master)
             results, changed, revisions = {}, [], {}
+            extra_qa = []
             for name in selected:
                 path, revision = raw[name]
                 revisions[name] = revision
@@ -989,6 +1214,11 @@ def run(selected, as_of, publish=False, download=False, pinned=None):
                 elif name == "mta_subway":
                     results[name] = rebuild_subway(stage, path, master)
                     changed.append(("features/tract_subway_access.csv", SUBWAY_FIELDS))
+                    from enrich_location_data import rebuild_subway_patterns
+                    patterns = rebuild_subway_patterns(stage, path, master, revision)
+                    changed.extend(patterns.pop("_tables"))
+                    extra_qa.extend(patterns.pop("_qa_files"))
+                    results[name]["time_patterns"] = patterns
                 elif name == "tlc_hvfhv":
                     results[name] = rebuild_tlc(stage, path, master, revision["publisher_version"])
                     changed.append(("features/tract_taxi_activity.csv", ("geoid", *TAXI_FIELDS[1:])))
@@ -1012,11 +1242,39 @@ def run(selected, as_of, publish=False, download=False, pinned=None):
                 elif name == "epa_walkability":
                     results[name] = rebuild_epa(stage, path, master, write_csv)
                     changed.append(("features/tract_walkability.csv", EPA_FIELDS))
+                elif name == "lodes":
+                    results[name] = rebuild_lodes(stage, path, master)
+                    changed.append(("features/tract_workers.csv", WORKER_FIELDS))
+                elif name == "pedestrians":
+                    results[name] = rebuild_pedestrians(stage, path, master)
+                    changed.append(("features/tract_pedestrian_access.csv", PEDESTRIAN_FIELDS))
+                elif name in ENRICHMENT_SOURCES:
+                    from enrich_location_data import rebuild
+                    result = rebuild(name, stage, path, master, revision)
+                    changed.extend(result.pop("_tables"))
+                    extra_qa.extend(result.pop("_qa_files"))
+                    results[name] = result
+            if set(selected) & {"lodes", "lodes_rac"}:
+                from enrich_location_data import synchronize_resident_ratio
+                workplace_year = (revisions["lodes"]["publisher_version"] if "lodes" in revisions else
+                                  next(row["vintage"].split()[0] for row in read_csv(stage / "source_catalog.csv") if row["source"] == "LODES"))
+                ratio_table = synchronize_resident_ratio(stage, master, workplace_year)
+                if ratio_table:
+                    changed.append(ratio_table)
+                    extra_qa.append(ratio_table[0])
+            results["master_spec_context"] = rebuild_master_spec_context(stage, master)
+            changed.append(("features/tract_master_spec_context.csv", ("geoid", *SPEC_FIELDS)))
+            from complete_master import complete
+            completion = complete(stage, master, ROOT / "data")
+            changed.extend(completion.pop("_tables"))
+            extra_qa.extend(completion.pop("_qa_files"))
+            results["master_completion"] = completion
             master_fields = list(master[0])
             write_csv(stage / "master_tract_features.csv", master, master_fields)
             update_catalog(stage, revisions, as_of, results)
             update_validation_checks(stage, results)
-            qa_files = ["master_tract_features.csv", "source_catalog.csv", "validation_checks.csv"]
+            qa_files = ["master_tract_features.csv", "source_catalog.csv", "validation_checks.csv",
+                        "features/tract_master_spec_context.csv", "data_dictionary.csv", "feature_readiness.csv"]
             if "restaurants" in selected:
                 qa_files += ["entities/current_restaurants.csv", "features/tract_restaurant_quality.csv"]
             if "events" in selected:
@@ -1042,8 +1300,26 @@ def run(selected, as_of, publish=False, download=False, pinned=None):
                 qa_files.append("features/daily_weather_central_park.csv")
             if "epa_walkability" in selected:
                 qa_files += ["features/tract_walkability.csv", "data_dictionary.csv", "feature_readiness.csv"]
-            update_qa(stage, qa_files)
+            if "lodes" in selected:
+                qa_files += ["features/tract_workers.csv", "data_dictionary.csv", "feature_readiness.csv"]
+            if "pedestrians" in selected:
+                qa_files += ["entities/pedestrian_count_sites_latest.csv", "features/tract_pedestrian_access.csv",
+                             "data_dictionary.csv", "feature_readiness.csv"]
+            update_qa(stage, list(dict.fromkeys(qa_files + extra_qa)))
             validation = validate_release(stage, old_count, changed)
+            if results["master_completion"].get("tracts"):
+                from audit_training_data import quality_audit
+                dictionary = {r["column"]: r for r in read_csv(stage / "data_dictionary.csv")
+                              if r["file"] == "master_tract_features.csv"}
+                checked_master = read_csv(stage / "master_tract_features.csv")
+                profiles, issues = quality_audit(checked_master, list(checked_master[0]), dictionary)
+                if issues:
+                    raise ValueError(f"Completed master failed quality checks: {issues[:3]}")
+                write_csv(stage / "master_feature_quality.csv", profiles, profiles[0].keys())
+                validation["master_quality_issues"] = len(issues)
+            if set(selected) & set(ENRICHMENT_SOURCES):
+                from enrich_location_data import validate_enrichment
+                validation["enrichment"] = validate_enrichment(stage)
             if "osm" in selected:
                 for row in master:
                     count = row.get("food_nightlife_poi_count", "")
@@ -1052,7 +1328,7 @@ def run(selected, as_of, publish=False, download=False, pinned=None):
                     if count and people and float(people) > 0 and abs(float(rate) - 1000 * float(count) / float(people)) > 1e-8:
                         raise ValueError(f"OSM per-resident density mismatch: {row['geoid']}")
             audit_summary = None
-            if set(selected) & {"osm", "restaurants", "mta_subway", "pluto", "citibike", "storefronts", "epa_walkability"}:
+            if set(selected) & {"osm", "restaurants", "mta_subway", "pluto", "citibike", "storefronts", "epa_walkability", "lodes", "pedestrians", "acs_context"}:
                 from audit_scoring import audit_releases
                 audit = audit_releases(active, stage)
                 (stage / "score_audit.json").write_text(json.dumps(audit, indent=2) + "\n")

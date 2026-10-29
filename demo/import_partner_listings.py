@@ -23,7 +23,8 @@ DESTINATION = ROOT / "data/listings/authorized"
 OUTPUT_FIELDS = (
     "listing_id", "geoid", "transaction", "address", "borough", "asking_rent_monthly",
     "asking_price", "source_url", "checked_at", "title", "sqft", "frontage",
-    "condition", "availability", "image_url", "photo_display_permission", "latitude", "longitude",
+    "condition", "availability", "image_url", "photo_display_permission", "image_rights_reference",
+    "latitude", "longitude",
     "broker_name", "broker_contact", "notes", "source_type",
 )
 
@@ -80,6 +81,9 @@ def prepare_rows(input_path, geography_path=GEOGRAPHY, master_path=MASTER):
             price_field = "asking_rent_monthly" if row["transaction"] == "lease" else "asking_price"
             if positive_number(row[price_field]) is None:
                 raise ValueError(f"Row {number}: positive {price_field} required")
+            other_price = "asking_price" if row["transaction"] == "lease" else "asking_rent_monthly"
+            if row[other_price]:
+                raise ValueError(f"Row {number}: {other_price} must be blank for a {row['transaction']} listing")
             if not row["address"] or not https_url(row["source_url"]):
                 raise ValueError(f"Row {number}: address and HTTPS source_url required")
             try:
@@ -103,8 +107,9 @@ def prepare_rows(input_path, geography_path=GEOGRAPHY, master_path=MASTER):
                 row["geoid"] = mapped
             if row["geoid"] not in valid_tracts:
                 raise ValueError(f"Row {number}: geoid is not in the integrated tract table")
-            if row["image_url"] and (not https_url(row["image_url"]) or row["photo_display_permission"].lower() != "yes"):
-                raise ValueError(f"Row {number}: image_url requires HTTPS and photo_display_permission=yes")
+            if row["image_url"] and (not https_url(row["image_url"]) or row["photo_display_permission"].lower() != "yes"
+                                     or not row["image_rights_reference"]):
+                raise ValueError(f"Row {number}: image_url requires HTTPS, photo_display_permission=yes, and image_rights_reference")
             if row["sqft"] and positive_number(row["sqft"]) is None:
                 raise ValueError(f"Row {number}: sqft must be positive when supplied")
             row["availability"] = row["availability"] or "Source-Reported; Confirm With Provider"

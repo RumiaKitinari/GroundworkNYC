@@ -65,6 +65,10 @@ class PartnerListingImportTests(unittest.TestCase):
             self.parse()
         self.write_rows([{**self.base, "image_url": "https://broker.example/photo.jpg",
                           "photo_display_permission": "yes"}])
+        with self.assertRaisesRegex(ValueError, "image_rights_reference"):
+            self.parse()
+        self.write_rows([{**self.base, "image_url": "https://broker.example/photo.jpg",
+                          "photo_display_permission": "yes", "image_rights_reference": "provider-photo-grant"}])
         self.assertEqual(self.parse()[0]["image_url"], "https://broker.example/photo.jpg")
         self.assertEqual(self.parse()[0]["photo_display_permission"], "yes")
 
@@ -79,6 +83,11 @@ class PartnerListingImportTests(unittest.TestCase):
             self.parse()
         self.write_rows([{**self.base, "checked_at": "2020-01-01"}])
         with self.assertRaisesRegex(ValueError, "90-day"):
+            self.parse()
+
+    def test_lease_cannot_carry_a_sale_price(self):
+        self.write_rows([{**self.base, "asking_price": "2000000"}])
+        with self.assertRaisesRegex(ValueError, "asking_price must be blank"):
             self.parse()
 
 

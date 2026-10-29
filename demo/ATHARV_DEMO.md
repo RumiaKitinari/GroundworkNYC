@@ -1,3 +1,8 @@
+> Historical run: preserved for provenance, but not selected by the integrated
+> Otis runtime. Reproduction commands below refer to the original run code at
+> `ad5d229`, not the updated temporal training pipeline. See
+> [current setup](OTIS_LOCAL_SETUP.md).
+
 # Atharv model demo: real tract predictions
 
 Source handoff: `origin/ADM6112-complete-v1`, commit
