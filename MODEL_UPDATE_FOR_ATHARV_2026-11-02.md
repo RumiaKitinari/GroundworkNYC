@@ -17,7 +17,7 @@ The important remaining weakness is evidence quality, not just hyperparameters. 
 
 The existing first-stage result remains approximately 0.545 concordance on 2,234 reserved restaurants; the conditional neighborhood-bootstrap interval is 0.487-0.584. Capped walkability and wider training did not demonstrate an improvement. These are archive-disappearance proxy results, not verified permanent-closure survival, and the reserved records had earlier project exposure. We should not describe tonight's scenario outputs as improved survival accuracy. The next material improvement requires verified business episodes/outcomes and a new point-in-time evaluation, alongside better competition-label coverage.
 
-All calculations were conducted locally. The scripts and an allowlisted portable results handoff are being shared on Otis's branch. No dashboard changes, deployment or production model replacement were made; main is not part of this push.
+All calculations were conducted locally. The scripts and an allowlisted portable results handoff are shared through Git. Publication adds only offline scripts, saved results and documentation; it does not alter the dashboard, backend runtime or production model selection.
 
 ## Where To Look
 

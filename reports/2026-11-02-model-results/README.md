@@ -52,7 +52,7 @@ The saved first-stage model predicts an archive-disappearance proxy, not indepen
 
 The uncertain-competition stress is intentionally conservative: all 4,799 weakly classified, tract-matched active establishments are counted as full competitors, separately for each cuisine. That does not mean these establishments actually serve every cuisine. It is not a statistical confidence interval. Some selection changes reflect additional routing-related withholding. Better labels and defensible uncertainty handling are the next priority, not interpreting recorded scarcity as proven demand.
 
-These exports do not contain raw restaurant training cohorts, account data, credentials, native model files or large routing matrices. The [separate scripts](../../codes/CUISINE_BATCH.md) are included, but rerunning calculations still requires the private pinned input bundles. Viewing and inspecting saved results does not require those bundles. Production model pointers, dashboard code and main are unchanged by this handoff.
+These exports do not contain raw restaurant training cohorts, account data, credentials, native model files or large routing matrices. The [separate scripts](../../codes/CUISINE_BATCH.md) are included, but rerunning calculations still requires the private pinned input bundles. Viewing and inspecting saved results does not require those bundles. Publication changes only offline scripts, results and documentation; production model pointers, dashboard code and backend runtime are unchanged.
 
 ## Verify The Downloaded Artifacts
 
