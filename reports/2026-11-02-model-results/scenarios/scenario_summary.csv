@@ -1,0 +1,301 @@
+scenario_id,cuisine,cuisine_key,price_tier,average_check,method,assessed,unassessed,selected,city_cuisine_classified,huff_calibrated,label_excluded_rows,choice_conservation_error,tied_at_cutoff
+01_1,American,american,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+01_1,American,american,$,18,huff,851,149,5,True,False,5587,2.220446049250313e-16,1
+01_2,American,american,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+01_2,American,american,$$,35,huff,851,149,5,True,False,5587,2.220446049250313e-16,1
+01_3,American,american,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+01_3,American,american,$$$,65,huff,851,149,5,True,False,5587,2.220446049250313e-16,1
+02_1,Southern / Soul Food,southern_soul,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,9
+02_1,Southern / Soul Food,southern_soul,$,18,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+02_2,Southern / Soul Food,southern_soul,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+02_2,Southern / Soul Food,southern_soul,$$,35,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+02_3,Southern / Soul Food,southern_soul,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+02_3,Southern / Soul Food,southern_soul,$$$,65,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+03_1,Cajun / Creole,cajun_creole,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+03_1,Cajun / Creole,cajun_creole,$,18,huff,930,70,5,True,False,5587,2.220446049250313e-16,1
+03_2,Cajun / Creole,cajun_creole,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,10
+03_2,Cajun / Creole,cajun_creole,$$,35,huff,930,70,5,True,False,5587,2.220446049250313e-16,1
+03_3,Cajun / Creole,cajun_creole,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+03_3,Cajun / Creole,cajun_creole,$$$,65,huff,930,70,5,True,False,5587,2.220446049250313e-16,1
+04_1,Italian,italian,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+04_1,Italian,italian,$,18,huff,742,258,5,True,False,5587,2.220446049250313e-16,1
+04_2,Italian,italian,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+04_2,Italian,italian,$$,35,huff,742,258,5,True,False,5587,2.220446049250313e-16,1
+04_3,Italian,italian,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+04_3,Italian,italian,$$$,65,huff,742,258,5,True,False,5587,2.220446049250313e-16,1
+05_1,French,french,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+05_1,French,french,$,18,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+05_2,French,french,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+05_2,French,french,$$,35,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+05_3,French,french,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+05_3,French,french,$$$,65,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+06_1,Spanish,spanish,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+06_1,Spanish,spanish,$,18,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+06_2,Spanish,spanish,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,11
+06_2,Spanish,spanish,$$,35,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+06_3,Spanish,spanish,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+06_3,Spanish,spanish,$$$,65,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+07_1,Portuguese,portuguese,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+07_1,Portuguese,portuguese,$,18,huff,970,30,5,True,False,5587,2.220446049250313e-16,1
+07_2,Portuguese,portuguese,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+07_2,Portuguese,portuguese,$$,35,huff,970,30,5,True,False,5587,2.220446049250313e-16,1
+07_3,Portuguese,portuguese,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+07_3,Portuguese,portuguese,$$$,65,huff,970,30,5,True,False,5587,2.220446049250313e-16,1
+08_1,Greek,greek,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,2
+08_1,Greek,greek,$,18,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+08_2,Greek,greek,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,2
+08_2,Greek,greek,$$,35,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+08_3,Greek,greek,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+08_3,Greek,greek,$$$,65,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+09_1,German / Central European,german_central,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+09_1,German / Central European,german_central,$,18,huff,922,78,5,True,False,5587,2.220446049250313e-16,1
+09_2,German / Central European,german_central,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+09_2,German / Central European,german_central,$$,35,huff,922,78,5,True,False,5587,2.220446049250313e-16,1
+09_3,German / Central European,german_central,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+09_3,German / Central European,german_central,$$$,65,huff,922,78,5,True,False,5587,2.220446049250313e-16,1
+10_1,Eastern European,eastern_european,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+10_1,Eastern European,eastern_european,$,18,huff,922,78,5,True,False,5587,2.220446049250313e-16,1
+10_2,Eastern European,eastern_european,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+10_2,Eastern European,eastern_european,$$,35,huff,922,78,5,True,False,5587,2.220446049250313e-16,1
+10_3,Eastern European,eastern_european,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+10_3,Eastern European,eastern_european,$$$,65,huff,922,78,5,True,False,5587,2.220446049250313e-16,1
+11_1,Mexican,mexican,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+11_1,Mexican,mexican,$,18,huff,963,37,5,True,False,5587,2.220446049250313e-16,1
+11_2,Mexican,mexican,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+11_2,Mexican,mexican,$$,35,huff,963,37,5,True,False,5587,2.220446049250313e-16,1
+11_3,Mexican,mexican,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+11_3,Mexican,mexican,$$$,65,huff,963,37,5,True,False,5587,2.220446049250313e-16,1
+12_1,Peruvian,peruvian,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+12_1,Peruvian,peruvian,$,18,huff,963,37,5,True,False,5587,2.220446049250313e-16,1
+12_2,Peruvian,peruvian,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+12_2,Peruvian,peruvian,$$,35,huff,963,37,5,True,False,5587,2.220446049250313e-16,1
+12_3,Peruvian,peruvian,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+12_3,Peruvian,peruvian,$$$,65,huff,963,37,5,True,False,5587,2.220446049250313e-16,1
+13_1,Brazilian,brazilian,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+13_1,Brazilian,brazilian,$,18,huff,970,30,5,True,False,5587,2.220446049250313e-16,1
+13_2,Brazilian,brazilian,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+13_2,Brazilian,brazilian,$$,35,huff,970,30,5,True,False,5587,2.220446049250313e-16,1
+13_3,Brazilian,brazilian,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+13_3,Brazilian,brazilian,$$$,65,huff,970,30,5,True,False,5587,2.220446049250313e-16,1
+14_1,Colombian,colombian,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+14_1,Colombian,colombian,$,18,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+14_2,Colombian,colombian,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+14_2,Colombian,colombian,$$,35,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+14_3,Colombian,colombian,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+14_3,Colombian,colombian,$$$,65,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+15_1,Venezuelan,venezuelan,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+15_1,Venezuelan,venezuelan,$,18,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+15_2,Venezuelan,venezuelan,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+15_2,Venezuelan,venezuelan,$$,35,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+15_3,Venezuelan,venezuelan,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+15_3,Venezuelan,venezuelan,$$$,65,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+16_1,Cuban,cuban,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+16_1,Cuban,cuban,$,18,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+16_2,Cuban,cuban,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+16_2,Cuban,cuban,$$,35,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+16_3,Cuban,cuban,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+16_3,Cuban,cuban,$$$,65,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+17_1,Dominican,dominican,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+17_1,Dominican,dominican,$,18,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+17_2,Dominican,dominican,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+17_2,Dominican,dominican,$$,35,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+17_3,Dominican,dominican,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+17_3,Dominican,dominican,$$$,65,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+18_1,Puerto Rican,puerto_rican,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+18_1,Puerto Rican,puerto_rican,$,18,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+18_2,Puerto Rican,puerto_rican,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+18_2,Puerto Rican,puerto_rican,$$,35,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+18_3,Puerto Rican,puerto_rican,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+18_3,Puerto Rican,puerto_rican,$$$,65,huff,963,37,5,False,False,5587,2.220446049250313e-16,1
+19_1,Jamaican,jamaican,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+19_1,Jamaican,jamaican,$,18,huff,955,45,5,False,False,5587,2.220446049250313e-16,1
+19_2,Jamaican,jamaican,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+19_2,Jamaican,jamaican,$$,35,huff,955,45,5,False,False,5587,2.220446049250313e-16,1
+19_3,Jamaican,jamaican,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+19_3,Jamaican,jamaican,$$$,65,huff,955,45,5,False,False,5587,2.220446049250313e-16,1
+20_1,Haitian,haitian,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+20_1,Haitian,haitian,$,18,huff,981,19,5,False,False,5587,2.220446049250313e-16,1
+20_2,Haitian,haitian,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+20_2,Haitian,haitian,$$,35,huff,981,19,5,False,False,5587,2.220446049250313e-16,1
+20_3,Haitian,haitian,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+20_3,Haitian,haitian,$$$,65,huff,981,19,5,False,False,5587,2.220446049250313e-16,1
+21_1,Ethiopian / Eritrean,ethiopian,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,9
+21_1,Ethiopian / Eritrean,ethiopian,$,18,huff,981,19,5,True,False,5587,2.220446049250313e-16,1
+21_2,Ethiopian / Eritrean,ethiopian,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+21_2,Ethiopian / Eritrean,ethiopian,$$,35,huff,981,19,5,True,False,5587,2.220446049250313e-16,1
+21_3,Ethiopian / Eritrean,ethiopian,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+21_3,Ethiopian / Eritrean,ethiopian,$$$,65,huff,981,19,5,True,False,5587,2.220446049250313e-16,1
+22_1,West African,west_african,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+22_1,West African,west_african,$,18,huff,955,45,5,False,False,5587,2.220446049250313e-16,1
+22_2,West African,west_african,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+22_2,West African,west_african,$$,35,huff,955,45,5,False,False,5587,2.220446049250313e-16,1
+22_3,West African,west_african,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+22_3,West African,west_african,$$$,65,huff,955,45,5,False,False,5587,2.220446049250313e-16,1
+23_1,Indian,indian,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+23_1,Indian,indian,$,18,huff,959,41,5,True,False,5587,2.220446049250313e-16,1
+23_2,Indian,indian,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+23_2,Indian,indian,$$,35,huff,959,41,5,True,False,5587,2.220446049250313e-16,1
+23_3,Indian,indian,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,1
+23_3,Indian,indian,$$$,65,huff,959,41,5,True,False,5587,2.220446049250313e-16,1
+24_1,Pakistani / Bangladeshi,pakistani_bangladeshi,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+24_1,Pakistani / Bangladeshi,pakistani_bangladeshi,$,18,huff,959,41,5,True,False,5587,2.220446049250313e-16,1
+24_2,Pakistani / Bangladeshi,pakistani_bangladeshi,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+24_2,Pakistani / Bangladeshi,pakistani_bangladeshi,$$,35,huff,959,41,5,True,False,5587,2.220446049250313e-16,1
+24_3,Pakistani / Bangladeshi,pakistani_bangladeshi,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+24_3,Pakistani / Bangladeshi,pakistani_bangladeshi,$$$,65,huff,959,41,5,True,False,5587,2.220446049250313e-16,1
+25_1,Chinese,chinese,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+25_1,Chinese,chinese,$,18,huff,897,103,5,True,False,5587,2.220446049250313e-16,1
+25_2,Chinese,chinese,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+25_2,Chinese,chinese,$$,35,huff,897,103,5,True,False,5587,2.220446049250313e-16,1
+25_3,Chinese,chinese,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+25_3,Chinese,chinese,$$$,65,huff,897,103,5,True,False,5587,2.220446049250313e-16,1
+26_1,Japanese,japanese,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+26_1,Japanese,japanese,$,18,huff,910,90,5,True,False,5587,2.220446049250313e-16,1
+26_2,Japanese,japanese,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+26_2,Japanese,japanese,$$,35,huff,910,90,5,True,False,5587,2.220446049250313e-16,1
+26_3,Japanese,japanese,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+26_3,Japanese,japanese,$$$,65,huff,910,90,5,True,False,5587,2.220446049250313e-16,1
+27_1,Korean,korean,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+27_1,Korean,korean,$,18,huff,910,90,5,True,False,5587,2.220446049250313e-16,1
+27_2,Korean,korean,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,2
+27_2,Korean,korean,$$,35,huff,910,90,5,True,False,5587,2.220446049250313e-16,1
+27_3,Korean,korean,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+27_3,Korean,korean,$$$,65,huff,910,90,5,True,False,5587,2.220446049250313e-16,1
+28_1,Taiwanese,taiwanese,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+28_1,Taiwanese,taiwanese,$,18,huff,736,264,5,False,False,5587,2.220446049250313e-16,1
+28_2,Taiwanese,taiwanese,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+28_2,Taiwanese,taiwanese,$$,35,huff,736,264,5,False,False,5587,2.220446049250313e-16,1
+28_3,Taiwanese,taiwanese,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+28_3,Taiwanese,taiwanese,$$$,65,huff,736,264,5,False,False,5587,2.220446049250313e-16,1
+29_1,Thai,thai,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+29_1,Thai,thai,$,18,huff,909,91,5,True,False,5587,2.220446049250313e-16,1
+29_2,Thai,thai,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+29_2,Thai,thai,$$,35,huff,909,91,5,True,False,5587,2.220446049250313e-16,1
+29_3,Thai,thai,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,2
+29_3,Thai,thai,$$$,65,huff,909,91,5,True,False,5587,2.220446049250313e-16,1
+30_1,Vietnamese,vietnamese,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,10
+30_1,Vietnamese,vietnamese,$,18,huff,909,91,5,True,False,5587,2.220446049250313e-16,1
+30_2,Vietnamese,vietnamese,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+30_2,Vietnamese,vietnamese,$$,35,huff,909,91,5,True,False,5587,2.220446049250313e-16,1
+30_3,Vietnamese,vietnamese,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+30_3,Vietnamese,vietnamese,$$$,65,huff,909,91,5,True,False,5587,2.220446049250313e-16,1
+31_1,Filipino,filipino,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+31_1,Filipino,filipino,$,18,huff,987,13,5,True,False,5587,2.220446049250313e-16,1
+31_2,Filipino,filipino,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+31_2,Filipino,filipino,$$,35,huff,987,13,5,True,False,5587,2.220446049250313e-16,1
+31_3,Filipino,filipino,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+31_3,Filipino,filipino,$$$,65,huff,987,13,5,True,False,5587,2.220446049250313e-16,1
+32_1,Indonesian / Malaysian,indonesian_malaysian,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+32_1,Indonesian / Malaysian,indonesian_malaysian,$,18,huff,909,91,5,False,False,5587,2.220446049250313e-16,1
+32_2,Indonesian / Malaysian,indonesian_malaysian,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+32_2,Indonesian / Malaysian,indonesian_malaysian,$$,35,huff,909,91,5,False,False,5587,2.220446049250313e-16,1
+32_3,Indonesian / Malaysian,indonesian_malaysian,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+32_3,Indonesian / Malaysian,indonesian_malaysian,$$$,65,huff,909,91,5,False,False,5587,2.220446049250313e-16,1
+33_1,Middle Eastern,middle_eastern,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+33_1,Middle Eastern,middle_eastern,$,18,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+33_2,Middle Eastern,middle_eastern,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+33_2,Middle Eastern,middle_eastern,$$,35,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+33_3,Middle Eastern,middle_eastern,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+33_3,Middle Eastern,middle_eastern,$$$,65,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+34_1,Mediterranean,mediterranean,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+34_1,Mediterranean,mediterranean,$,18,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+34_2,Mediterranean,mediterranean,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+34_2,Mediterranean,mediterranean,$$,35,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+34_3,Mediterranean,mediterranean,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+34_3,Mediterranean,mediterranean,$$$,65,huff,784,216,5,True,False,5587,2.220446049250313e-16,1
+35_1,Turkish,turkish,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,1
+35_1,Turkish,turkish,$,18,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+35_2,Turkish,turkish,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+35_2,Turkish,turkish,$$,35,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+35_3,Turkish,turkish,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+35_3,Turkish,turkish,$$$,65,huff,964,36,5,True,False,5587,2.220446049250313e-16,1
+36_1,Persian / Iranian,persian_iranian,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+36_1,Persian / Iranian,persian_iranian,$,18,huff,957,43,5,True,False,5587,2.220446049250313e-16,1
+36_2,Persian / Iranian,persian_iranian,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+36_2,Persian / Iranian,persian_iranian,$$,35,huff,957,43,5,True,False,5587,2.220446049250313e-16,1
+36_3,Persian / Iranian,persian_iranian,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+36_3,Persian / Iranian,persian_iranian,$$$,65,huff,957,43,5,True,False,5587,2.220446049250313e-16,1
+37_1,Steakhouse,steakhouse,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+37_1,Steakhouse,steakhouse,$,18,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+37_2,Steakhouse,steakhouse,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+37_2,Steakhouse,steakhouse,$$,35,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+37_3,Steakhouse,steakhouse,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+37_3,Steakhouse,steakhouse,$$$,65,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+38_1,Seafood,seafood,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,9
+38_1,Seafood,seafood,$,18,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+38_2,Seafood,seafood,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+38_2,Seafood,seafood,$$,35,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+38_3,Seafood,seafood,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+38_3,Seafood,seafood,$$$,65,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+39_1,Barbecue,barbecue,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,7
+39_1,Barbecue,barbecue,$,18,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+39_2,Barbecue,barbecue,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+39_2,Barbecue,barbecue,$$,35,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+39_3,Barbecue,barbecue,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+39_3,Barbecue,barbecue,$$$,65,huff,852,148,5,True,False,5587,2.220446049250313e-16,1
+40_1,Pizza,pizza,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,9
+40_1,Pizza,pizza,$,18,huff,705,295,5,True,False,5587,2.220446049250313e-16,1
+40_2,Pizza,pizza,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,6
+40_2,Pizza,pizza,$$,35,huff,705,295,5,True,False,5587,2.220446049250313e-16,1
+40_3,Pizza,pizza,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+40_3,Pizza,pizza,$$$,65,huff,705,295,5,True,False,5587,2.220446049250313e-16,1
+41_1,Burgers,burgers,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+41_1,Burgers,burgers,$,18,huff,851,149,5,True,False,5587,2.220446049250313e-16,1
+41_2,Burgers,burgers,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,2
+41_2,Burgers,burgers,$$,35,huff,851,149,5,True,False,5587,2.220446049250313e-16,1
+41_3,Burgers,burgers,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+41_3,Burgers,burgers,$$$,65,huff,851,149,5,True,False,5587,2.220446049250313e-16,1
+42_1,Sandwiches / Deli,sandwiches_deli,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+42_1,Sandwiches / Deli,sandwiches_deli,$,18,huff,705,295,5,True,False,5587,2.220446049250313e-16,1
+42_2,Sandwiches / Deli,sandwiches_deli,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,8
+42_2,Sandwiches / Deli,sandwiches_deli,$$,35,huff,705,295,5,True,False,5587,2.220446049250313e-16,1
+42_3,Sandwiches / Deli,sandwiches_deli,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+42_3,Sandwiches / Deli,sandwiches_deli,$$$,65,huff,705,295,5,True,False,5587,2.220446049250313e-16,1
+43_1,Bakery / Pastries,bakery_pastries,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+43_1,Bakery / Pastries,bakery_pastries,$,18,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+43_2,Bakery / Pastries,bakery_pastries,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+43_2,Bakery / Pastries,bakery_pastries,$$,35,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+43_3,Bakery / Pastries,bakery_pastries,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,3
+43_3,Bakery / Pastries,bakery_pastries,$$$,65,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+44_1,Coffee / Tea,coffee_tea,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+44_1,Coffee / Tea,coffee_tea,$,18,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+44_2,Coffee / Tea,coffee_tea,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+44_2,Coffee / Tea,coffee_tea,$$,35,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+44_3,Coffee / Tea,coffee_tea,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+44_3,Coffee / Tea,coffee_tea,$$$,65,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+45_1,Desserts / Ice Cream,desserts_ice_cream,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,5
+45_1,Desserts / Ice Cream,desserts_ice_cream,$,18,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+45_2,Desserts / Ice Cream,desserts_ice_cream,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+45_2,Desserts / Ice Cream,desserts_ice_cream,$$,35,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+45_3,Desserts / Ice Cream,desserts_ice_cream,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,4
+45_3,Desserts / Ice Cream,desserts_ice_cream,$$$,65,huff,743,257,5,True,False,5587,2.220446049250313e-16,1
+46_1,Salads / Bowls,salads_bowls,$,18,screening,1000,0,5,True,False,5587,2.220446049250313e-16,2
+46_1,Salads / Bowls,salads_bowls,$,18,huff,903,97,5,True,False,5587,2.220446049250313e-16,1
+46_2,Salads / Bowls,salads_bowls,$$,35,screening,1000,0,5,True,False,5587,2.220446049250313e-16,2
+46_2,Salads / Bowls,salads_bowls,$$,35,huff,903,97,5,True,False,5587,2.220446049250313e-16,1
+46_3,Salads / Bowls,salads_bowls,$$$,65,screening,1000,0,5,True,False,5587,2.220446049250313e-16,1
+46_3,Salads / Bowls,salads_bowls,$$$,65,huff,903,97,5,True,False,5587,2.220446049250313e-16,1
+47_1,Breakfast / Brunch,breakfast_brunch,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+47_1,Breakfast / Brunch,breakfast_brunch,$,18,huff,706,294,5,False,False,5587,2.220446049250313e-16,1
+47_2,Breakfast / Brunch,breakfast_brunch,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+47_2,Breakfast / Brunch,breakfast_brunch,$$,35,huff,706,294,5,False,False,5587,2.220446049250313e-16,1
+47_3,Breakfast / Brunch,breakfast_brunch,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+47_3,Breakfast / Brunch,breakfast_brunch,$$$,65,huff,706,294,5,False,False,5587,2.220446049250313e-16,1
+48_1,Noodles,noodles,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+48_1,Noodles,noodles,$,18,huff,897,103,5,False,False,5587,2.220446049250313e-16,1
+48_2,Noodles,noodles,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+48_2,Noodles,noodles,$$,35,huff,897,103,5,False,False,5587,2.220446049250313e-16,1
+48_3,Noodles,noodles,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+48_3,Noodles,noodles,$$$,65,huff,897,103,5,False,False,5587,2.220446049250313e-16,1
+49_1,Diner,custom,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+49_1,Diner,custom,$,18,huff,851,149,5,False,False,5587,2.220446049250313e-16,1
+49_2,Diner,custom,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+49_2,Diner,custom,$$,35,huff,851,149,5,False,False,5587,2.220446049250313e-16,1
+49_3,Diner,custom,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+49_3,Diner,custom,$$$,65,huff,851,149,5,False,False,5587,2.220446049250313e-16,1
+50_1,Health-Focused,health_focused,$,18,screening,1000,0,5,False,False,5587,2.220446049250313e-16,10
+50_1,Health-Focused,health_focused,$,18,huff,750,250,5,False,False,5587,2.220446049250313e-16,1
+50_2,Health-Focused,health_focused,$$,35,screening,1000,0,5,False,False,5587,2.220446049250313e-16,7
+50_2,Health-Focused,health_focused,$$,35,huff,750,250,5,False,False,5587,2.220446049250313e-16,1
+50_3,Health-Focused,health_focused,$$$,65,screening,1000,0,5,False,False,5587,2.220446049250313e-16,3
+50_3,Health-Focused,health_focused,$$$,65,huff,750,250,5,False,False,5587,2.220446049250313e-16,1

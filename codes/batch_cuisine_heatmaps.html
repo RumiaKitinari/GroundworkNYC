@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Groundwork | Offline scenario selections</title>
+<style>
+body{font:15px system-ui;margin:0;color:#203339;background:#f7f9f8}header,main{max-width:1160px;margin:auto;padding:20px}h1{font-size:26px;margin:0 0 8px}p{max-width:1000px;line-height:1.5}nav{display:flex;gap:16px;flex-wrap:wrap;margin:20px 0}label{display:grid;gap:5px}select{font:inherit;padding:8px;border:1px solid #aabbb9;border-radius:4px;background:white}canvas{width:100%;height:620px;background:white;border:1px solid #c9d4d1}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;text-align:left;border-bottom:1px solid #dde4e1}#status{min-height:24px}#detail{min-height:42px}small{color:#52666c} @media(max-width:650px){canvas{height:440px}header,main{padding:12px}td,th{padding:7px;font-size:12px}}
+</style>
+<header><h1>Restaurant scenario selections</h1><small>Offline analysis | Synthetic properties | Not a visit forecast or verified survival prediction</small>
+<p>Compare top-five selections for 50 concepts at $18, $35 and $65 per guest. Format, audience and daypart are held fixed. The overview colors H3 cells by how many concepts selected a property there; it does not measure observed demand. Select a concept to inspect its ranked locations.</p>
+<nav><label>Ranking<select id="method"><option value="screening">Location screening</option><option value="huff">Experimental walking Huff</option></select></label><label>Concept<select id="cuisine"><option value="all">All 50 concepts</option></select></label><label>Price per guest<select id="tier"><option>$</option><option>$$</option><option>$$$</option></select></label></nav>
+<div id="status"></div></header><main><canvas id="map" aria-label="NYC scenario selection map"></canvas><p id="detail"></p><table><thead><tr><th>Rank</th><th>Concept / location</th><th>Borough</th><th>Score</th><th>Cuisine evidence</th></tr></thead><tbody id="rows"></tbody></table></main>
+<script>
+const data=__SCENARIO_DATA__;
+const $=id=>document.getElementById(id),canvas=$('map'),ctx=canvas.getContext('2d');
+for(const name of data.cuisines){const o=document.createElement('option');o.textContent=name;o.value=name;$('cuisine').append(o)}
+let points=[];
+function render(){const ratio=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;canvas.width=w*ratio;canvas.height=h*ratio;ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,w,h);
+ const scale=Math.min((w-24)/(.57*Math.cos(40.7*Math.PI/180)),(h-24)/.44),project=([lon,lat])=>[w/2+(lon+73.975)*Math.cos(40.7*Math.PI/180)*scale,h/2-(lat-40.71)*scale];
+ ctx.fillStyle='#eef2f0';ctx.strokeStyle='#bdcac6';ctx.lineWidth=.5;for(const ring of data.land){ctx.beginPath();ring.forEach((p,i)=>{const q=project(p);i?ctx.lineTo(...q):ctx.moveTo(...q)});ctx.closePath();ctx.fill();ctx.stroke()}
+ ctx.fillStyle='white';for(const ring of data.holes){ctx.beginPath();ring.forEach((p,i)=>{const q=project(p);i?ctx.lineTo(...q):ctx.moveTo(...q)});ctx.closePath();ctx.fill();ctx.stroke()}
+ const method=$('method').value,tier=$('tier').value,cuisine=$('cuisine').value,all=data.selections.filter(r=>r.method===method&&r.price_tier===tier),shown=all.filter(r=>cuisine==='all'||r.cuisine===cuisine);
+ // Cell assignment is supplied by the Python H3 implementation, not approximated in the viewer.
+ const cells=data.frequency.filter(f=>f.properties.method===method&&f.properties.price_tier===tier),max=Math.max(1,...cells.map(f=>f.properties.scenario_count));
+ if(cuisine==='all'){for(const f of cells){ctx.beginPath();f.geometry.coordinates[0].forEach((p,i)=>{const q=project(p);i?ctx.lineTo(...q):ctx.moveTo(...q)});ctx.closePath();ctx.fillStyle=`hsl(${48-44*f.properties.scenario_count/max} 85% ${83-43*f.properties.scenario_count/max}%)`;ctx.fill();ctx.strokeStyle='#a77152';ctx.stroke()}}
+ points=[];if(cuisine!=='all')for(const r of [...shown].reverse()){const [x,y]=project([r.longitude,r.latitude]);ctx.beginPath();ctx.arc(x,y,12,0,7);ctx.fillStyle='#137b80';ctx.fill();ctx.strokeStyle='white';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='white';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='bold 12px system-ui';ctx.fillText(r.rank,x,y);points.push({x,y,r})}
+ $('status').textContent=cuisine==='all'?`${shown.length} selections across 50 scenarios. Pale yellow to red: 1 to ${max} scenarios per H3 cell.`:`${cuisine}: ${shown.length} selected properties. Price: $${tier.length===1?18:tier.length===2?35:65} per guest.`;
+ $('rows').replaceChildren();for(const r of (cuisine==='all'?[]:shown.sort((a,b)=>a.rank-b.rank))){const tr=document.createElement('tr');for(const value of [r.rank,r.neighborhood+' / '+r.property_id,r.borough,Number(r.selected_score).toFixed(method==='huff'?1:0),r.cuisine_support_mode]){const td=document.createElement('td');td.textContent=value;tr.append(td)}$('rows').append(tr)}
+ $('detail').textContent=cuisine==='all'?'Frequency is conditional on this 1,000-property synthetic inventory. Empty areas are not evidence of low demand.':'Huff scores are hypothetical opportunity mass, not visits. Screening scores are indices out of 100. Co-tract screening ties use property ID; see the saved CSV for cutoff ties.';
+}
+canvas.addEventListener('mousemove',e=>{const box=canvas.getBoundingClientRect(),p=points.find(p=>Math.hypot(p.x-e.clientX+box.left,p.y-e.clientY+box.top)<15);if(p)$('detail').textContent=`#${p.r.rank}: ${p.r.neighborhood}, ${p.r.borough} | ${p.r.property_id} | ${p.r.cuisine_support_mode}`});
+for(const id of ['method','cuisine','tier'])$(id).addEventListener('change',render);window.addEventListener('resize',render);render();
+</script></html>

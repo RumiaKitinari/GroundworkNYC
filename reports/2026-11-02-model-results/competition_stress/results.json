@@ -1,0 +1,18 @@
+{
+  "status": "completed",
+  "cuisines_tested": 50,
+  "price": 35,
+  "all_five_selections_retained": 0,
+  "at_least_one_selection_changed": 50,
+  "median_shared_top_five": 0.0,
+  "maximum_newly_withheld_candidates": 79,
+  "median_opportunity_change_pct_across_cuisines": -84.7716883091204,
+  "scope": "Unlabeled/weakly labeled matched active restaurants counted as full competitors, separately for every cuisine.",
+  "limitations": [
+    "Deliberately conservative scenario; not a claim that unknown restaurants serve every cuisine.",
+    "Not an uncertainty interval or evidence of predictive accuracy.",
+    "Active restaurants lacking usable tract matches remain outside this calculation.",
+    "Top-five changes can reflect coverage withholding as well as changed ordering.",
+    "No production ranking or trained model was changed."
+  ]
+}

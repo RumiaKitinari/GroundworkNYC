@@ -1,5 +1,28 @@
 # GroundworkNYC
 
+## Otis's November 2 Model Results
+
+**Atharv: start with the [model update](MODEL_UPDATE_FOR_ATHARV_2026-11-02.md)
+and [portable results handoff](reports/2026-11-02-model-results/README.md).**
+
+The handoff includes a standalone interactive heatmap, briefing image, all
+150,000 scenario/property scores, top-five selections, price-response tests,
+competition-label sensitivity and the saved first-stage research control.
+It covers 50 restaurant concepts at $18, $35 and $65 per guest over the pinned
+1,000-property synthetic inventory. GitHub displays the image; to interact
+with the heatmap, download this branch and open
+`reports/2026-11-02-model-results/maps/heatmaps.html` in a browser.
+No server, API key, local dataset installation or Python environment is
+needed to view those saved results.
+
+These are **offline scenario diagnostics, not an accuracy improvement or a
+production model replacement**. Screening and experimental Huff selections
+are exported separately. The first-stage archive-disappearance proxy remains
+unverified restaurant survival. The report identifies source-coverage and
+competition-label limitations rather than disguising them as measured demand.
+See the [runner documentation](codes/CUISINE_BATCH.md) for the exact commands
+and the private frozen inputs required to rerun the calculations.
+
 ## Integrated dashboard
 
 This checkout integrates Otis's Week 10 update at `11aaece` with the existing

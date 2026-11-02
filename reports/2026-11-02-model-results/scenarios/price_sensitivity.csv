@@ -1,0 +1,201 @@
+cuisine,method,from_tier,to_tier,common_assessed,top_k_shared,top_k_union,rank_spearman
+American,screening,$,$$,1000,4,6,0.9938438749266288
+American,huff,$,$$,851,3,7,0.968658656855768
+American,screening,$$,$$$,1000,4,6,0.9950754290272275
+American,huff,$$,$$$,851,1,9,0.970950010563137
+Southern / Soul Food,screening,$,$$,1000,4,6,0.9937535061281799
+Southern / Soul Food,huff,$,$$,852,5,5,0.9681240924732251
+Southern / Soul Food,screening,$$,$$$,1000,3,7,0.9946562609107491
+Southern / Soul Food,huff,$$,$$$,852,3,7,0.958329589412996
+Cajun / Creole,screening,$,$$,1000,3,7,0.9936510315963697
+Cajun / Creole,huff,$,$$,930,5,5,0.9460296482874803
+Cajun / Creole,screening,$$,$$$,1000,4,6,0.994829664817463
+Cajun / Creole,huff,$$,$$$,930,0,10,0.9008063928702618
+Italian,screening,$,$$,1000,5,5,0.9940062797327749
+Italian,huff,$,$$,742,0,10,0.9497706814430529
+Italian,screening,$$,$$$,1000,2,8,0.9949734743608293
+Italian,huff,$$,$$$,742,3,7,0.9668756519576017
+French,screening,$,$$,1000,5,5,0.994001846302332
+French,huff,$,$$,784,0,10,0.9651752127749116
+French,screening,$$,$$$,1000,3,7,0.9951311505311883
+French,huff,$$,$$$,784,4,6,0.9645749258045704
+Spanish,screening,$,$$,1000,2,8,0.9939291117680036
+Spanish,huff,$,$$,784,0,10,0.9632120906053321
+Spanish,screening,$$,$$$,1000,2,8,0.9948342942492632
+Spanish,huff,$$,$$$,784,4,6,0.9578941247778122
+Portuguese,screening,$,$$,1000,5,5,0.9936682094675532
+Portuguese,huff,$,$$,970,0,10,0.9570862010529677
+Portuguese,screening,$$,$$$,1000,3,7,0.9949290045875138
+Portuguese,huff,$$,$$$,970,1,9,0.8998837205518396
+Greek,screening,$,$$,1000,5,5,0.9938264868613542
+Greek,huff,$,$$,964,5,5,0.9828014986330488
+Greek,screening,$$,$$$,1000,4,6,0.9948808341262777
+Greek,huff,$$,$$$,964,5,5,0.9669572563808743
+German / Central European,screening,$,$$,1000,5,5,0.9937766346027449
+German / Central European,huff,$,$$,922,3,7,0.9783744582317334
+German / Central European,screening,$$,$$$,1000,2,8,0.9946178058530434
+German / Central European,huff,$$,$$$,922,4,6,0.9371035258588494
+Eastern European,screening,$,$$,1000,3,7,0.9936565812530053
+Eastern European,huff,$,$$,922,3,7,0.9809336213776834
+Eastern European,screening,$$,$$$,1000,5,5,0.9945952671087349
+Eastern European,huff,$$,$$$,922,5,5,0.9479115504921362
+Mexican,screening,$,$$,1000,3,7,0.994103939511066
+Mexican,huff,$,$$,963,4,6,0.9710251564868233
+Mexican,screening,$$,$$$,1000,2,8,0.9947687396261861
+Mexican,huff,$$,$$$,963,2,8,0.9265996654021629
+Peruvian,screening,$,$$,1000,4,6,0.9939072309409986
+Peruvian,huff,$,$$,963,3,7,0.9687247795596965
+Peruvian,screening,$$,$$$,1000,2,8,0.9946560672814737
+Peruvian,huff,$$,$$$,963,0,10,0.914390604021038
+Brazilian,screening,$,$$,1000,3,7,0.9938398069808485
+Brazilian,huff,$,$$,970,0,10,0.9723225132690878
+Brazilian,screening,$$,$$$,1000,4,6,0.9946056504620882
+Brazilian,huff,$$,$$$,970,0,10,0.9247434809632548
+Colombian,screening,$,$$,1000,4,6,0.9931538518489849
+Colombian,huff,$,$$,963,3,7,0.9581693311867431
+Colombian,screening,$$,$$$,1000,3,7,0.9946173598557465
+Colombian,huff,$$,$$$,963,0,10,0.9116880706247442
+Venezuelan,screening,$,$$,1000,4,6,0.9931538518489849
+Venezuelan,huff,$,$$,963,2,8,0.9524576988609255
+Venezuelan,screening,$$,$$$,1000,3,7,0.9946173598557465
+Venezuelan,huff,$$,$$$,963,0,10,0.8996806854254406
+Cuban,screening,$,$$,1000,4,6,0.9931538518489849
+Cuban,huff,$,$$,963,2,8,0.9382243106212549
+Cuban,screening,$$,$$$,1000,3,7,0.9946173598557465
+Cuban,huff,$$,$$$,963,0,10,0.8970314566739123
+Dominican,screening,$,$$,1000,4,6,0.9931538518489849
+Dominican,huff,$,$$,963,2,8,0.9492701697882603
+Dominican,screening,$$,$$$,1000,3,7,0.9946173598557465
+Dominican,huff,$$,$$$,963,2,8,0.9046859069157126
+Puerto Rican,screening,$,$$,1000,4,6,0.9931538518489849
+Puerto Rican,huff,$,$$,963,2,8,0.9473149629429929
+Puerto Rican,screening,$$,$$$,1000,3,7,0.9946173598557465
+Puerto Rican,huff,$$,$$$,963,4,6,0.9091150835052801
+Jamaican,screening,$,$$,1000,4,6,0.9931538518489849
+Jamaican,huff,$,$$,955,5,5,0.9818467990164491
+Jamaican,screening,$$,$$$,1000,3,7,0.9946173598557465
+Jamaican,huff,$$,$$$,955,4,6,0.976654472168065
+Haitian,screening,$,$$,1000,4,6,0.9931538518489849
+Haitian,huff,$,$$,981,5,5,0.9749706156869967
+Haitian,screening,$$,$$$,1000,3,7,0.9946173598557465
+Haitian,huff,$$,$$$,981,5,5,0.9685959579743629
+Ethiopian / Eritrean,screening,$,$$,1000,4,6,0.993719656001298
+Ethiopian / Eritrean,huff,$,$$,981,4,6,0.9345367078612682
+Ethiopian / Eritrean,screening,$$,$$$,1000,4,6,0.9948148359994435
+Ethiopian / Eritrean,huff,$$,$$$,981,0,10,0.9077621489373792
+West African,screening,$,$$,1000,4,6,0.9931538518489849
+West African,huff,$,$$,955,4,6,0.9782006287792646
+West African,screening,$$,$$$,1000,3,7,0.9946173598557465
+West African,huff,$$,$$$,955,3,7,0.9693918360649368
+Indian,screening,$,$$,1000,5,5,0.9937881827362091
+Indian,huff,$,$$,959,1,9,0.987606792370271
+Indian,screening,$$,$$$,1000,4,6,0.9949206386138116
+Indian,huff,$$,$$$,959,4,6,0.9608580451975681
+Pakistani / Bangladeshi,screening,$,$$,1000,3,7,0.9937347849451693
+Pakistani / Bangladeshi,huff,$,$$,959,4,6,0.9853922350830829
+Pakistani / Bangladeshi,screening,$$,$$$,1000,3,7,0.9946558374966299
+Pakistani / Bangladeshi,huff,$$,$$$,959,2,8,0.9533973688449825
+Chinese,screening,$,$$,1000,3,7,0.9934221174926332
+Chinese,huff,$,$$,897,1,9,0.903606430970985
+Chinese,screening,$$,$$$,1000,3,7,0.9947502479351477
+Chinese,huff,$$,$$$,897,0,10,0.8926514547111646
+Japanese,screening,$,$$,1000,5,5,0.9941972979032647
+Japanese,huff,$,$$,910,0,10,0.9798700927739848
+Japanese,screening,$$,$$$,1000,3,7,0.9952186442003982
+Japanese,huff,$$,$$$,910,3,7,0.9809425557216583
+Korean,screening,$,$$,1000,5,5,0.9934740161572875
+Korean,huff,$,$$,910,0,10,0.9551790013321787
+Korean,screening,$$,$$$,1000,4,6,0.9946248796997115
+Korean,huff,$$,$$$,910,2,8,0.9400447541648052
+Taiwanese,screening,$,$$,1000,4,6,0.9931538518489849
+Taiwanese,huff,$,$$,736,3,7,0.899460991404998
+Taiwanese,screening,$$,$$$,1000,3,7,0.9946173598557465
+Taiwanese,huff,$$,$$$,736,3,7,0.8706309843859673
+Thai,screening,$,$$,1000,3,7,0.9942758896680769
+Thai,huff,$,$$,909,0,10,0.966993568214836
+Thai,screening,$$,$$$,1000,4,6,0.9950723157274267
+Thai,huff,$$,$$$,909,1,9,0.9388275033147893
+Vietnamese,screening,$,$$,1000,4,6,0.9931538518489849
+Vietnamese,huff,$,$$,909,0,10,0.9550481692890207
+Vietnamese,screening,$$,$$$,1000,3,7,0.9946173598557465
+Vietnamese,huff,$$,$$$,909,4,6,0.8996497882832774
+Filipino,screening,$,$$,1000,3,7,0.9937676227877303
+Filipino,huff,$,$$,987,3,7,0.961127754900143
+Filipino,screening,$$,$$$,1000,3,7,0.9945134530494011
+Filipino,huff,$$,$$$,987,5,5,0.9275012924129675
+Indonesian / Malaysian,screening,$,$$,1000,4,6,0.9931538518489849
+Indonesian / Malaysian,huff,$,$$,909,0,10,0.9531830043148577
+Indonesian / Malaysian,screening,$$,$$$,1000,3,7,0.9946173598557465
+Indonesian / Malaysian,huff,$$,$$$,909,0,10,0.8948172979664236
+Middle Eastern,screening,$,$$,1000,5,5,0.9937317880868076
+Middle Eastern,huff,$,$$,964,0,10,0.9846542617335465
+Middle Eastern,screening,$$,$$$,1000,3,7,0.9946889632898601
+Middle Eastern,huff,$$,$$$,964,5,5,0.967422031143539
+Mediterranean,screening,$,$$,1000,5,5,0.994170286171416
+Mediterranean,huff,$,$$,784,0,10,0.9785578320939621
+Mediterranean,screening,$$,$$$,1000,4,6,0.9948449020203083
+Mediterranean,huff,$$,$$$,784,4,6,0.9753638302820945
+Turkish,screening,$,$$,1000,4,6,0.9937668242773261
+Turkish,huff,$,$$,964,1,9,0.9843144378019663
+Turkish,screening,$$,$$$,1000,4,6,0.9944939423099738
+Turkish,huff,$$,$$$,964,5,5,0.9664879272354299
+Persian / Iranian,screening,$,$$,1000,3,7,0.9932165750866446
+Persian / Iranian,huff,$,$$,957,0,10,0.9830272858244071
+Persian / Iranian,screening,$$,$$$,1000,3,7,0.994786315536834
+Persian / Iranian,huff,$$,$$$,957,4,6,0.948808674196775
+Steakhouse,screening,$,$$,1000,5,5,0.9938449135627541
+Steakhouse,huff,$,$$,852,4,6,0.9548489901252278
+Steakhouse,screening,$$,$$$,1000,4,6,0.9948670780597735
+Steakhouse,huff,$$,$$$,852,2,8,0.9573990146085751
+Seafood,screening,$,$$,1000,5,5,0.9938169977647934
+Seafood,huff,$,$$,852,4,6,0.9541712912288576
+Seafood,screening,$$,$$$,1000,4,6,0.9947305390977879
+Seafood,huff,$$,$$$,852,5,5,0.9387331520431871
+Barbecue,screening,$,$$,1000,4,6,0.9936726192862012
+Barbecue,huff,$,$$,852,5,5,0.9681712799364631
+Barbecue,screening,$$,$$$,1000,3,7,0.9945878924692996
+Barbecue,huff,$$,$$$,852,2,8,0.9666193711948438
+Pizza,screening,$,$$,1000,4,6,0.9933997354137388
+Pizza,huff,$,$$,705,3,7,0.9428716486485006
+Pizza,screening,$$,$$$,1000,4,6,0.9948758059478582
+Pizza,huff,$$,$$$,705,4,6,0.9361109322688643
+Burgers,screening,$,$$,1000,4,6,0.9939484978553015
+Burgers,huff,$,$$,851,4,6,0.9571713963882834
+Burgers,screening,$$,$$$,1000,4,6,0.9946306007802628
+Burgers,huff,$$,$$$,851,0,10,0.9541406425697339
+Sandwiches / Deli,screening,$,$$,1000,4,6,0.9938895383511833
+Sandwiches / Deli,huff,$,$$,705,2,8,0.9422085358436392
+Sandwiches / Deli,screening,$$,$$$,1000,3,7,0.9947100167638999
+Sandwiches / Deli,huff,$$,$$$,705,3,7,0.9518928320940708
+Bakery / Pastries,screening,$,$$,1000,4,6,0.9938631754388166
+Bakery / Pastries,huff,$,$$,743,5,5,0.9655040529567153
+Bakery / Pastries,screening,$$,$$$,1000,4,6,0.9948350957916295
+Bakery / Pastries,huff,$$,$$$,743,1,9,0.9440692909493622
+Coffee / Tea,screening,$,$$,1000,5,5,0.9940295119465348
+Coffee / Tea,huff,$,$$,743,4,6,0.9734442016452898
+Coffee / Tea,screening,$$,$$$,1000,4,6,0.9950866641943982
+Coffee / Tea,huff,$$,$$$,743,0,10,0.9644564818109912
+Desserts / Ice Cream,screening,$,$$,1000,4,6,0.9937354510385141
+Desserts / Ice Cream,huff,$,$$,743,1,9,0.9633192994043588
+Desserts / Ice Cream,screening,$$,$$$,1000,3,7,0.9948222231065849
+Desserts / Ice Cream,huff,$$,$$$,743,1,9,0.9493877178214827
+Salads / Bowls,screening,$,$$,1000,5,5,0.9940162025285606
+Salads / Bowls,huff,$,$$,903,3,7,0.9568523362953112
+Salads / Bowls,screening,$$,$$$,1000,4,6,0.9948513852862108
+Salads / Bowls,huff,$$,$$$,903,4,6,0.9606558252834463
+Breakfast / Brunch,screening,$,$$,1000,4,6,0.9931538518489849
+Breakfast / Brunch,huff,$,$$,706,3,7,0.9476900829909227
+Breakfast / Brunch,screening,$$,$$$,1000,3,7,0.9946173598557465
+Breakfast / Brunch,huff,$$,$$$,706,0,10,0.9544878927132574
+Noodles,screening,$,$$,1000,4,6,0.9931538518489849
+Noodles,huff,$,$$,897,2,8,0.9433374797953087
+Noodles,screening,$$,$$$,1000,3,7,0.9946173598557465
+Noodles,huff,$$,$$$,897,1,9,0.9325509313843896
+Diner,screening,$,$$,1000,4,6,0.9931538518489849
+Diner,huff,$,$$,851,2,8,0.9650897769279673
+Diner,screening,$$,$$$,1000,3,7,0.9946173598557465
+Diner,huff,$$,$$$,851,2,8,0.9675143527230989
+Health-Focused,screening,$,$$,1000,4,6,0.9931538518489849
+Health-Focused,huff,$,$$,750,3,7,0.9475655885610462
+Health-Focused,screening,$$,$$$,1000,3,7,0.9946173598557465
+Health-Focused,huff,$$,$$$,750,4,6,0.9460799894755367

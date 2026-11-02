@@ -1,0 +1,159 @@
+{
+  "status": "completed_offline_scenario_audit",
+  "scenarios": 150,
+  "candidate_properties": 1000,
+  "origin_tracts": 2327,
+  "score_rows": 150000,
+  "selection_rows": 1500,
+  "top_k": 5,
+  "source_as_of": "2026-10-27",
+  "held_fixed": {
+    "style": "casual",
+    "audience": "residents",
+    "daypart": "all_day",
+    "screening_profile": "restaurant"
+  },
+  "tiers": {
+    "$": 18,
+    "$$": 35,
+    "$$$": 65
+  },
+  "no_separate_source_classification": [
+    "Colombian",
+    "Venezuelan",
+    "Cuban",
+    "Dominican",
+    "Puerto Rican",
+    "Jamaican",
+    "Haitian",
+    "West African",
+    "Taiwanese",
+    "Indonesian / Malaysian",
+    "Breakfast / Brunch",
+    "Noodles",
+    "Diner",
+    "Health-Focused"
+  ],
+  "identical_selection_groups": [
+    {
+      "method": "screening",
+      "price_tier": "$",
+      "cuisines_with_identical_ordered_top_k": [
+        "Breakfast / Brunch",
+        "Colombian",
+        "Cuban",
+        "Diner",
+        "Dominican",
+        "Haitian",
+        "Health-Focused",
+        "Indonesian / Malaysian",
+        "Jamaican",
+        "Noodles",
+        "Puerto Rican",
+        "Taiwanese",
+        "Venezuelan",
+        "Vietnamese",
+        "West African"
+      ]
+    },
+    {
+      "method": "screening",
+      "price_tier": "$$",
+      "cuisines_with_identical_ordered_top_k": [
+        "Breakfast / Brunch",
+        "Colombian",
+        "Cuban",
+        "Diner",
+        "Dominican",
+        "Haitian",
+        "Health-Focused",
+        "Indonesian / Malaysian",
+        "Jamaican",
+        "Noodles",
+        "Puerto Rican",
+        "Taiwanese",
+        "Venezuelan",
+        "Vietnamese",
+        "West African"
+      ]
+    },
+    {
+      "method": "screening",
+      "price_tier": "$$$",
+      "cuisines_with_identical_ordered_top_k": [
+        "Brazilian",
+        "Cajun / Creole",
+        "Filipino",
+        "German / Central European",
+        "Pakistani / Bangladeshi"
+      ]
+    },
+    {
+      "method": "screening",
+      "price_tier": "$$$",
+      "cuisines_with_identical_ordered_top_k": [
+        "Breakfast / Brunch",
+        "Colombian",
+        "Cuban",
+        "Diner",
+        "Dominican",
+        "Haitian",
+        "Health-Focused",
+        "Indonesian / Malaysian",
+        "Jamaican",
+        "Noodles",
+        "Puerto Rican",
+        "Taiwanese",
+        "Venezuelan",
+        "Vietnamese",
+        "West African"
+      ]
+    },
+    {
+      "method": "huff",
+      "price_tier": "$",
+      "cuisines_with_identical_ordered_top_k": [
+        "Cuban",
+        "Venezuelan"
+      ]
+    },
+    {
+      "method": "huff",
+      "price_tier": "$$",
+      "cuisines_with_identical_ordered_top_k": [
+        "Cuban",
+        "Venezuelan"
+      ]
+    },
+    {
+      "method": "huff",
+      "price_tier": "$$$",
+      "cuisines_with_identical_ordered_top_k": [
+        "Coffee / Tea",
+        "Desserts / Ice Cream"
+      ]
+    },
+    {
+      "method": "huff",
+      "price_tier": "$$$",
+      "cuisines_with_identical_ordered_top_k": [
+        "Mediterranean",
+        "Turkish"
+      ]
+    }
+  ],
+  "production_changed": false,
+  "survival_accuracy_improvement_claimed": false,
+  "limitations": [
+    "Synthetic properties; no verified real-time listings or observed visits/sales.",
+    "Screening and Huff are separate scenario rankings, not a newly calibrated combined model.",
+    "Stage-one survival is cuisine/price-independent and is not rerun or promoted here.",
+    "Huff uses related-category and name-label assumptions; screening fallback flags remain visible.",
+    "Supply categories and inferred names do not establish cuisine-specific consumer preferences.",
+    "Fixed style isolates price; tiers are hypothetical checks, not observed menu prices or rent budgets.",
+    "No rent/size/transaction eligibility filter is applied in this unconstrained comparison.",
+    "Screening is tract-based: co-tract properties can tie; property ID breaks ties reproducibly.",
+    "Heatmap frequency reflects this fixed inventory and scenario grid, not citywide demand.",
+    "No predictive model improvement can be inferred without independent outcomes."
+  ]
+}

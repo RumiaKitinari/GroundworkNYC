@@ -1,0 +1,32 @@
+[
+  {
+    "reference": "dated_core_complete",
+    "candidate": "walk_cap12_complete",
+    "nll_delta": 0.0005288036792510104,
+    "nll_delta_95_ci": [
+      -0.00034918626470513967,
+      0.00141184574296061
+    ],
+    "concordance_delta": -0.005712731229597388,
+    "concordance_delta_95_ci": [
+      -0.02287092551757468,
+      0.009107074901519727
+    ],
+    "interpretation": "Matched rows and exact comparable pairs; paired NTA bootstrap, conditional on fitted models and proxy labels"
+  },
+  {
+    "reference": "walk_cap12_complete",
+    "candidate": "walk_cap12_expanded3",
+    "nll_delta": -5.965067696949981e-05,
+    "nll_delta_95_ci": [
+      -0.0009238387888940297,
+      0.0006321697106073185
+    ],
+    "concordance_delta": -0.0015410703534519423,
+    "concordance_delta_95_ci": [
+      -0.012707277778468268,
+      0.013265589631308985
+    ],
+    "interpretation": "Matched rows and exact comparable pairs; paired NTA bootstrap, conditional on fitted models and proxy labels"
+  }
+]

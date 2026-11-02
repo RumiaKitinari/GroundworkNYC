@@ -1,0 +1,45 @@
+{
+  "status": "passed",
+  "candidate_scenario_rows": 150000,
+  "selection_rows": 1500,
+  "scenario_method_checks": 300,
+  "frequency_cells_checked": 241,
+  "input_and_artifact_hashes_verified": true,
+  "methods": {
+    "screening": {
+      "unique_selected_properties": 42,
+      "unique_selected_tracts": 42,
+      "scenarios_fewer_than_five_distinct_tracts": 0,
+      "price_transitions_changing_top_five": 85,
+      "price_transitions_checked": 100,
+      "median_rank_correlation_between_adjacent_prices": 0.9943849159890252,
+      "minimum_assessed_properties": 1000
+    },
+    "huff": {
+      "unique_selected_properties": 117,
+      "unique_selected_tracts": 117,
+      "scenarios_fewer_than_five_distinct_tracts": 0,
+      "price_transitions_changing_top_five": 86,
+      "price_transitions_checked": 100,
+      "median_rank_correlation_between_adjacent_prices": 0.956015668813745,
+      "minimum_assessed_properties": 705
+    }
+  },
+  "no_separate_source_classification": [
+    "Colombian",
+    "Venezuelan",
+    "Cuban",
+    "Dominican",
+    "Puerto Rican",
+    "Jamaican",
+    "Haitian",
+    "West African",
+    "Taiwanese",
+    "Indonesian / Malaysian",
+    "Breakfast / Brunch",
+    "Noodles",
+    "Diner",
+    "Health-Focused"
+  ],
+  "note": "Distinct-area alternatives are diagnostics, not a silent change to production selection."
+}
