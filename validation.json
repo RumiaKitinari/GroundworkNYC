@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "tracts": 2243,
+  "cuisines": 51,
+  "hexagons": 9027,
+  "synthetic_properties": 1000,
+  "default_top_five_ids": [
+    "GW-SYN-0113",
+    "GW-SYN-0124",
+    "GW-SYN-0264",
+    "GW-SYN-0044",
+    "GW-SYN-0789"
+  ],
+  "default_scores_match_dashboard": true,
+  "price_dependent_experiment_used": false,
+  "private_accounts_included": false,
+  "business_training_rows_included": false,
+  "data_sha256": "c81df1e28ed856f11c413436d23d2b17cf60bb4a321252a1c4e6d2fd047b2240"
+}

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Groundwork NYC | Research Demo</title><meta name="description" content="Explore Groundwork NYC's price-independent cuisine-gap and archive-proxy ranking using synthetic property scenarios.">
+<link rel="stylesheet" href="vendor/leaflet.css"><link rel="stylesheet" href="style.css"></head>
+<body><header><div><h1>Groundwork NYC</h1><p>Research demo <span>•</span> November 5, 2026</p></div><a href="validation.json" target="_blank" rel="noopener">Data validation ↗</a></header>
+<main><section class="toolbar" aria-label="Location preferences">
+<label>Cuisine<select id="cuisine" disabled><option>Loading…</option></select></label>
+<label>Borough<select id="borough"><option value="">All NYC</option><option>Manhattan</option><option>Brooklyn</option><option>Queens</option><option>Bronx</option><option>Staten Island</option></select></label>
+<label>Monthly lease budget ($)<input id="budget" type="number" min="0" max="1000000" step="500" value="18000"></label>
+<label>Map layer<select id="metric"><option value="combined">Combined location score</option><option value="gap">Cuisine gap · H3 resolution 9</option><option value="proxy">Archive-persistence percentile</option></select></label>
+<button id="reset" type="button" title="Reset map to NYC" aria-label="Reset map to NYC">↺</button>
+</section>
+<section class="map-section"><div id="map" aria-label="Interactive NYC model map"></div><div class="map-legend"><strong id="legendTitle">Location score</strong><div class="scale"></div><div class="scale-labels"><span>0</span><span>100</span></div></div></section>
+<section class="results"><div class="section-heading"><div><h2>Top five synthetic lease scenarios</h2><p id="status" role="status">Loading model outputs…</p></div><strong class="formula">60% archive proxy <span>+</span> 40% cuisine gap</strong></div>
+<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Neighborhood</th><th>Score / 100</th><th>Archive percentile</th><th>Cuisine gap</th><th>Rent / month</th><th>Floor area</th></tr></thead><tbody id="rows"></tbody></table></div>
+<p id="empty" hidden>No synthetic lease scenarios match this budget and borough.</p></section>
+<footer><p><strong>Synthetic properties, not verified available listings.</strong> Frozen research outputs; no guest-price input. Properties inherit tract-level scores. The archive proxy is not verified restaurant-survival probability; assessment concordance is 0.545.</p><p id="coverage"></p><p>Geography: U.S. Census Bureau / NYC · Map © OpenStreetMap contributors · Cuisine-gap calculations: Groundwork NYC</p></footer></main>
+<script src="vendor/leaflet.js"></script><script src="app.js"></script></body></html>
