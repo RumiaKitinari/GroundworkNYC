@@ -331,17 +331,18 @@ function drawCompetitionRows(target, market) {
 function paintCompetitionExplorer(target, market, comparison) {
   const topCount = market.cuisine_counts[0]?.count || 1;
   const supportNote = market.cuisine_supported ? "" : `
-    <p class="competition-support-note">My Cuisine is unavailable because ${dashboard.meta.concept.cuisine === "any"
+    <p class="competition-support-note">Cuisine-specific comparison is optional: ${dashboard.meta.concept.cuisine === "any"
       ? "the brief has no selected cuisine" : "this cuisine is not separately classified in DOHMH records"}.
       <button type="button" id="competitionEditBrief">Choose a cuisine in Edit Brief</button>.</p>`;
   target.innerHTML = `
     <div class="competition-heading">
-      <div><h3>Competition Explorer</h3><p>Recorded establishments, not a guaranteed live inventory.</p></div>
+      <div><button type="button" id="competitionBack">← Market Profile</button><h3>Restaurant competition</h3><p>Understand the cuisine mix and recorded restaurants in this location. Records do not guarantee current operation.</p></div>
       <label>Compare Area<select id="competitionCompareArea"><option value="">No Comparison</option>${(profileAreasResolved || []).filter(row=>row.geoid!==market.geoid).map(row=>`<option value="${row.geoid}" ${row.geoid===profileComparisonId ? "selected" : ""}>${escapeHtml(row.name)} · ${escapeHtml(row.borough)}</option>`).join("")}</select></label>
     </div>
     <p class="competition-source">${escapeHtml(market.source)} · Latest Inspection: ${escapeHtml(market.latest_inspection_date || "Unavailable")}</p>
     ${competitionSummary(market, comparison)}
     ${supportNote}
+    <section class="competition-top"><h4>Most represented cuisines</h4><div class="competition-top-bars">${market.cuisine_counts.slice(0,5).map(item => `<button type="button" class="competition-bar" data-competition-cuisine="${escapeHtml(item.cuisine)}" aria-pressed="false"><span class="competition-bar-label"><span>${escapeHtml(item.cuisine)}</span><strong>${item.count.toLocaleString("en-US")} · ${competitionShare(item.count, market.tract_restaurant_count)}</strong></span><span class="competition-bar-track"><span style="width:${item.count / topCount * 100}%"></span></span></button>`).join("")}</div></section>
     <div class="competition-content">
       <details class="competition-breakdown" ${competitionBreakdownOpen ? "open" : ""}><summary>Cuisine breakdown <span>${market.cuisine_counts.length} classifications</span></summary>
         <div class="competition-bars">${market.cuisine_counts.length ? market.cuisine_counts.map(item => `
@@ -362,6 +363,7 @@ function paintCompetitionExplorer(target, market, comparison) {
         <button class="competition-more" id="competitionMore" type="button">Show More</button>
       </div>
     </div>`;
+  target.querySelector("#competitionBack").addEventListener("click", () => selectView("scorecard"));
   target.querySelector("#competitionEditBrief")?.addEventListener("click", openBrief);
   target.querySelector("#competitionCompareArea").addEventListener("change",event=>{profileComparisonId=event.target.value;persistDashboardView();renderCompetitionExplorer();});
   target.querySelector(".competition-breakdown").addEventListener("toggle", event => {competitionBreakdownOpen = event.target.open; persistDashboardView();});

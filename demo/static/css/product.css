@@ -158,14 +158,14 @@
 .app-frame .intelligence-table tbody th{font-weight:550;color:var(--text);width:60%}
 .app-frame .intelligence-table small{display:block;font-weight:400;color:var(--muted);line-height:1.5;margin-top:5px}
 
-.app-frame .intelligence-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
-.app-frame .intelligence-card{padding:22px;border:1px solid var(--line);border-radius:12px;min-width:0;background:var(--panel)}
+.app-frame .intelligence-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 32px;align-items:start}
+.app-frame .intelligence-card{padding:24px 0;border:0;border-top:1px solid var(--line);border-radius:0;min-width:0;background:transparent}
 .app-frame .intelligence-card dl{margin:16px 0 8px}
 .app-frame .intelligence-row{display:grid;grid-template-columns:1fr 1fr;gap:18px;border-bottom:1px solid var(--line);padding:12px 0}
 .app-frame .intelligence-row:last-child{border-bottom:0}
-.app-frame .intelligence-row dt{font-size:12px;color:var(--muted)}
+.app-frame .intelligence-row dt{font-size:14px;color:var(--muted)}
 .app-frame .intelligence-row dd{margin:0;font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
-.app-frame .intelligence-row small{display:block;margin-top:4px;font-size:10px;line-height:1.5;color:var(--muted);font-weight:400}
+.app-frame .intelligence-row small{display:block;margin-top:4px;font-size:12px;line-height:1.5;color:var(--muted);font-weight:400}
 .app-frame .intelligence-card > .text-action{margin-top:14px}
 .app-frame .intelligence-card .team-explorer-details{border:0;border-top:1px solid var(--line);margin:16px 0 0;padding:14px 0 0}
 .app-frame .intelligence-card .team-explorer-details > summary{font-size:12px}
@@ -200,7 +200,7 @@
 .app-frame .comparison-values strong{font-size:17px}
 .app-frame .score-comparison{padding:16px}
 .app-frame .factor-pair{grid-template-columns:1fr}
-.app-frame .intelligence-card{padding:18px}
+.app-frame .intelligence-card{padding:24px 0}
 .app-frame .profile-limitations summary span{float:none;display:block}
 }
 
@@ -355,10 +355,10 @@
 .app-frame .competition-content{gap:20px}
 .app-frame .competition-summary strong{font-size:24px}
 .app-frame .competition-bars{max-height:350px;overflow:auto}
-.app-frame .competition-source{font-size:10px}
-.app-frame .competition-breakdown{border:1px solid var(--line);border-radius:10px;padding:16px}
+.app-frame .competition-source{font-size:12px;line-height:1.6}
+.app-frame .competition-breakdown{border:0;border-top:1px solid var(--line);border-radius:0;padding:16px 0}
 .app-frame .compare-board{padding:24px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
-.app-frame .comparison-table th, .app-frame .comparison-table td{padding:14px 16px;font-size:12px}
+.app-frame .comparison-table th, .app-frame .comparison-table td{padding:14px 16px;font-size:14px}
 .app-frame .comparison-table thead th{background:var(--panel-2)}
 .app-frame .comparison-table .comparison-place{font-size:13px}
 .app-frame .comparison-best{background:color-mix(in srgb,var(--blue) 7%,transparent);color:var(--blue)}
@@ -597,3 +597,55 @@
   .app-frame .destination-nav button {padding:9px 5px}
   .app-frame .destination-nav .tab-count {margin-left:2px;padding:1px 2px}
 }
+
+/* Shared analytical reading rhythm. */
+.app-frame .rail-filters [hidden] {display:none!important}
+.app-frame .intelligence-card > .text-action {min-height:40px;margin-top:8px;font-size:14px}
+.app-frame .intelligence-card .card-heading {align-items:baseline;gap:16px}
+.app-frame .intelligence-card .source-tag {font-size:12px}
+.app-frame .intelligence-row {align-items:baseline}
+.app-frame .intelligence-card .inline-details {margin-top:16px}
+.app-frame .competition-source,.app-frame .business-plan-inputs label,.app-frame .economics-inputs label span {font-size:13px}
+/* Editorial evidence sections: title rail and compact aligned observations. */
+.app-frame .intelligence-grid {grid-template-columns:1fr;gap:0}
+.app-frame .intelligence-card {display:grid;grid-template-columns:minmax(180px,.65fr) minmax(0,1.35fr);column-gap:32px;padding:24px 0}
+.app-frame .intelligence-card .card-heading {grid-column:1;display:block}
+.app-frame .intelligence-card .card-heading h3 {font-size:18px;margin:0 0 8px}
+.app-frame .intelligence-card > :not(.card-heading) {grid-column:2;min-width:0}
+.app-frame .intelligence-card dl {margin:0}
+.app-frame .intelligence-row:first-child {padding-top:0}
+.app-frame .intelligence-card > .text-action {justify-self:start}
+.app-frame .competition-content,.app-frame .competition-content:has(.competition-breakdown:not([open])) {grid-template-columns:1fr}
+.app-frame .competition-top {border-top:1px solid var(--line);padding:24px 0 16px}
+.app-frame .competition-top h4 {margin:0 0 12px;font-size:16px}
+.app-frame .competition-top-bars {max-width:720px;display:grid;gap:4px}
+.app-frame .competition-heading p {max-width:640px;font-size:14px;line-height:1.6}
+.app-frame .competition-support-note {font-size:13px;color:var(--muted);background:transparent;border:0;padding:0}
+.app-frame .competition-tools {display:flex;align-items:end;gap:16px;padding:16px 0;border-bottom:1px solid var(--line)}
+.app-frame .competition-tools label {display:grid;gap:8px;flex:1;font-size:13px}
+.app-frame .competition-tools input {width:100%;min-height:40px}
+.app-frame .competition-filter button {min-height:40px}
+.app-frame .competition-row {font-size:14px;line-height:1.5;padding:16px 0;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr) minmax(0,1.2fr)}
+.app-frame .competition-row > * {min-width:0;overflow-wrap:anywhere}
+.app-frame .competition-results,.app-frame .competition-filter-state,.app-frame .storefront-count {font-size:13px}
+.app-frame :is(.access-controls,.planning-toolbar,.storefront-controls) :is(input,select,button) {min-height:40px}
+.app-frame :is(.transit-row,.storefront-record,.business-workspace p,.economics-advanced p) {font-size:14px;line-height:1.6}
+.app-frame :is(.transit-row strong,.comparison-table td,.storefront-record) {font-variant-numeric:tabular-nums}
+@media(max-width:700px) {
+ .app-frame .intelligence-card {grid-template-columns:1fr;gap:16px}
+ .app-frame .intelligence-card > :not(.card-heading) {grid-column:1}
+ .app-frame .competition-tools {align-items:stretch;flex-direction:column}
+ .app-frame .competition-row {grid-template-columns:1fr;gap:6px}
+ .app-frame .competition-row-head {display:none}
+ .app-frame .competition-row [role=cell]:nth-child(2)::before {content:'Cuisine: ';color:var(--muted)}
+ .app-frame .competition-row [role=cell]:nth-child(3)::before {content:'Address: ';color:var(--muted)}
+}
+@media(min-width:1000px) {
+ .app-frame .intelligence-card {grid-template-columns:220px minmax(0,1fr);column-gap:24px;padding:20px 0}
+ .app-frame .intelligence-row {padding:10px 0;border-bottom:0;grid-template-columns:minmax(160px,.8fr) minmax(0,1.2fr)}
+ .app-frame .intelligence-row dd {display:grid;grid-template-columns:minmax(90px,.6fr) minmax(0,1fr);gap:16px;align-items:baseline;text-align:left}
+ .app-frame .intelligence-row small {margin:0}
+ .app-frame .intelligence-card .team-explorer-details {margin-top:8px;padding-top:12px}
+}
+.app-frame #competitionBack {margin-bottom:16px}
+.app-frame .competition-area-cards {margin:16px 0}

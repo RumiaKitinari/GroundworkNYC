@@ -35,7 +35,7 @@
 
         <button class="brief-edit" id="briefEditButton" type="button">Edit restaurant brief</button>
         <details class="control-group rail-filters"><summary>Quick filters</summary>
-          <div class="control-field concept-search">
+          <div class="control-field concept-search" hidden>
             <span>Restaurant Idea</span>
             <input id="conceptInput" type="text" value="" maxlength="80" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sidebarConceptSuggestions" />
             <div id="sidebarConceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
@@ -48,7 +48,7 @@
               <option value="either">Lease Or Purchase</option>
             </select>
           </label>
-          <label class="control-field">
+          <label class="control-field" hidden>
             <span>Format</span>
             <select id="profileSelect">
               <option value="restaurant">Sit-Down Restaurant</option>
