@@ -1,0 +1,5 @@
+model,rows,finite_proxy_events,interval_nll,concordance,exact_comparable_pairs,nta_groups,bootstrap_replicates,resolved_3yr_rows,unresolved_3yr_rows,resolved_subset_brier,scope
+constant_complete,2234,380,0.6551188184044547,0.5,362086,37,400,677,1557,0.2981107677076131,"Previously exposed reserved neighborhoods, archive-disappearance proxy; conditional fitted-model uncertainty; not verified survival"
+dated_core_complete,2234,380,0.653866588887976,0.5451053064741526,362086,37,400,677,1557,0.2907881928117479,"Previously exposed reserved neighborhoods, archive-disappearance proxy; conditional fitted-model uncertainty; not verified survival"
+walk_cap12_complete,2234,380,0.654395392567227,0.5393925752445552,362086,37,400,677,1557,0.29135255988715436,"Previously exposed reserved neighborhoods, archive-disappearance proxy; conditional fitted-model uncertainty; not verified survival"
+walk_cap12_expanded3,2234,380,0.6543357418902576,0.5378515048911032,362086,37,400,677,1557,0.2905680029382386,"Previously exposed reserved neighborhoods, archive-disappearance proxy; conditional fitted-model uncertainty; not verified survival"

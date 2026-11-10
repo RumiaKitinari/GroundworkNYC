@@ -1,0 +1,16 @@
+{
+  "status": "completed_offline_research_only",
+  "property_calls": 1000,
+  "scenario_rows": 150000,
+  "stage_one_covered_properties": 996,
+  "as_of_date": "2026-11-02",
+  "stage_one_invariant_across_cuisines_and_prices": true,
+  "production_allowed": false,
+  "interpretation": "Frozen dated-core archive-proxy AFT control; not independently verified permanent-closure survival.",
+  "combined_score_created": false,
+  "limitations": [
+    "Reusing a saved model on hypothetical sites does not validate that model or establish opening-date accuracy.",
+    "Cuisine and guest price are not first-stage inputs; only the second-stage scenario components respond to them.",
+    "No unsupported survival/Huff blending weights were invented or deployed."
+  ]
+}

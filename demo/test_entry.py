@@ -38,3 +38,9 @@ def test_entry_assets_are_served_without_changing_calculation_routes():
     assert client.get("/static/css/entry.css").status_code == 200
     assert client.post("/api/menu/recipe-cost", json={}).status_code == 400
     assert client.post("/api/planning/forecast", json={}).status_code == 400
+
+
+def test_inverse_walkability_heatmap_label_is_explicit():
+    client = app.test_client()
+    assert '<option value="inverse_walkability">Inverse Walkability (Customer Access)</option>' in client.get("/").text
+    assert 'inverse_walkability:"Inverse Walkability (Customer Access)"' in client.get("/static/js/dashboard.js").text

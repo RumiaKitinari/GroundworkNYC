@@ -113,7 +113,7 @@ screening/Huff maps are separate fixed research scenarios, not live scoring.
 ## 8. Tests and verification
 
 The November 9 local frontend verification passed **43 JavaScript tests** and
-**107 Python regression tests**. Browser checks covered onboarding, both Top 35
+**108 Python regression tests**. Browser checks covered onboarding, both Top 35
 inventories, map modes/heatmaps, analysis, comparisons, property filters, menu
 baskets, saved economics, cash planning and real PDF generation. Layouts were
 checked at 320, 390, 768 and 1440 pixels, including light/dark themes.
@@ -137,6 +137,10 @@ Reproduce the data-backed Python regression run with the installed team package:
   demo/test_main_integration.py demo/test_market_api.py \
   -k 'not dashboard_keeps_reported_rent_separate_from_listings and not public_opportunity_is_source_linked_but_not_confirmed'
 ```
+
+Additional local CI-contract checks passed 27 Flask tests and 35 optional-backend
+tests. Six PostGIS integration tests were skipped locally because no disposable
+test database was configured; GitHub CI supplies that database.
 
 Those two existing checks are explicitly excluded because the local rent
 benchmarks and `data/listings/public_opportunities.csv` are absent. No fixtures
@@ -174,3 +178,21 @@ model retraining or authentication replacement is part of this frontend release.
 - [Offline interactive research heatmap](reports/2026-11-02-model-results/maps/heatmaps.html) — download the HTML and open it locally; GitHub displays its source.
 - [Temporal survival research](codes/TEMPORAL_SURVIVAL.md) · [Feature evaluation](codes/MODEL_FEATURE_EVALUATION.md)
 - [OpenStreetMap PBF conversion instructions](demo/OSM_CONVERSION.md) — preserved detailed commands, output schema and sample-output guidance.
+
+### Portable November 2 research
+
+The [portable handoff](reports/2026-11-02-model-results/README.md) contains the
+standalone interactive heatmap, briefing image, all 150,000 scenario/property
+scores, top-five selections, price-response checks, competition-label sensitivity
+and the saved first-stage research control. It covers 50 restaurant concepts at
+$18, $35 and $65 per guest across the pinned 1,000-property synthetic inventory.
+Screening and experimental walking-Huff rankings remain separate.
+
+Download the repository and open
+`reports/2026-11-02-model-results/maps/heatmaps.html` in a browser to view the saved
+results; no server, API key, local dataset installation or Python environment is
+needed. Rerunning calculations is different: follow the
+[scenario runner and frozen-input documentation](codes/CUISINE_BATCH.md), which
+requires the private pinned data/route/model bundles. These exports do not
+replace live scoring, establish an accuracy improvement or verify restaurant
+survival. The detailed reports preserve their coverage and scientific limits.

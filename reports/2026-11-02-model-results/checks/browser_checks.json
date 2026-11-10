@@ -1,0 +1,27 @@
+{
+  "status": "passed",
+  "results": [
+    {
+      "viewport": {
+        "width": 1280,
+        "height": 1000
+      },
+      "scenario_method_checks": 300,
+      "page_errors": [],
+      "external_requests": [],
+      "horizontal_overflow": false,
+      "nonwhite_pixels": 14992
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario_method_checks": 300,
+      "page_errors": [],
+      "external_requests": [],
+      "horizontal_overflow": false,
+      "nonwhite_pixels": 7151
+    }
+  ]
+}

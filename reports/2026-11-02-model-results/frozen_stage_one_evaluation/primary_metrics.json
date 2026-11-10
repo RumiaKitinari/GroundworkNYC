@@ -1,0 +1,90 @@
+[
+  {
+    "model": "constant_complete",
+    "rows": 2234,
+    "finite_proxy_events": 380,
+    "interval_nll": 0.6551188184044547,
+    "nll_95_ci": [
+      0.6023269656413957,
+      0.7124390033558331
+    ],
+    "concordance": 0.5,
+    "concordance_95_ci": [
+      0.5,
+      0.5
+    ],
+    "exact_comparable_pairs": 362086,
+    "nta_groups": 37,
+    "bootstrap_replicates": 400,
+    "resolved_3yr_rows": 677,
+    "unresolved_3yr_rows": 1557,
+    "resolved_subset_brier": 0.2981107677076131,
+    "scope": "Previously exposed reserved neighborhoods, archive-disappearance proxy; conditional fitted-model uncertainty; not verified survival"
+  },
+  {
+    "model": "dated_core_complete",
+    "rows": 2234,
+    "finite_proxy_events": 380,
+    "interval_nll": 0.653866588887976,
+    "nll_95_ci": [
+      0.6016791476065703,
+      0.7092920993363657
+    ],
+    "concordance": 0.5451053064741526,
+    "concordance_95_ci": [
+      0.4874050711925036,
+      0.5837059021156954
+    ],
+    "exact_comparable_pairs": 362086,
+    "nta_groups": 37,
+    "bootstrap_replicates": 400,
+    "resolved_3yr_rows": 677,
+    "unresolved_3yr_rows": 1557,
+    "resolved_subset_brier": 0.2907881928117479,
+    "scope": "Previously exposed reserved neighborhoods, archive-disappearance proxy; conditional fitted-model uncertainty; not verified survival"
+  },
+  {
+    "model": "walk_cap12_complete",
+    "rows": 2234,
+    "finite_proxy_events": 380,
+    "interval_nll": 0.654395392567227,
+    "nll_95_ci": [
+      0.6027397919204781,
+      0.7091111261906083
+    ],
+    "concordance": 0.5393925752445552,
+    "concordance_95_ci": [
+      0.47845256435824746,
+      0.581715725283025
+    ],
+    "exact_comparable_pairs": 362086,
+    "nta_groups": 37,
+    "bootstrap_replicates": 400,
+    "resolved_3yr_rows": 677,
+    "unresolved_3yr_rows": 1557,
+    "resolved_subset_brier": 0.29135255988715436,
+    "scope": "Previously exposed reserved neighborhoods, archive-disappearance proxy; conditional fitted-model uncertainty; not verified survival"
+  },
+  {
+    "model": "walk_cap12_expanded3",
+    "rows": 2234,
+    "finite_proxy_events": 380,
+    "interval_nll": 0.6543357418902576,
+    "nll_95_ci": [
+      0.6029913451243316,
+      0.7090310566108916
+    ],
+    "concordance": 0.5378515048911032,
+    "concordance_95_ci": [
+      0.4836679728830466,
+      0.5768463793443239
+    ],
+    "exact_comparable_pairs": 362086,
+    "nta_groups": 37,
+    "bootstrap_replicates": 400,
+    "resolved_3yr_rows": 677,
+    "unresolved_3yr_rows": 1557,
+    "resolved_subset_brier": 0.2905680029382386,
+    "scope": "Previously exposed reserved neighborhoods, archive-disappearance proxy; conditional fitted-model uncertainty; not verified survival"
+  }
+]

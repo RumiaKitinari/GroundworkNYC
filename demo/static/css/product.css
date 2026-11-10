@@ -591,3 +591,9 @@
   .app-frame .report-detail > summary {list-style:none}
   .app-frame .score-comparison,.app-frame .report-recommendation {break-inside:avoid}
 }
+/* Leave room for the saved-count badge on the smallest supported viewport. */
+@media(max-width:380px) {
+  .app-frame .destination-nav {gap:0}
+  .app-frame .destination-nav button {padding:9px 5px}
+  .app-frame .destination-nav .tab-count {margin-left:2px;padding:1px 2px}
+}

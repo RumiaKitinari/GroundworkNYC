@@ -1,0 +1,147 @@
+{
+  "schema": "groundwork-static-team-handoff-v1",
+  "date": "2026-11-02",
+  "artifacts": [
+    {
+      "path": "scenarios/all_scores.csv.gz",
+      "sha256": "ecea57c8a23ee724c5d7ec058347d69a3868bc8f2ec536f1e4a5425abf6bfeb9",
+      "bytes": 4712750,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_v3"
+    },
+    {
+      "path": "scenarios/top_selections.csv",
+      "sha256": "b07ae64106ae30d14f6abf3c76e215be1320c52c659f79363fd8a97191bf8e22",
+      "bytes": 333767,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_v3"
+    },
+    {
+      "path": "scenarios/scenario_summary.csv",
+      "sha256": "5d388c75f4da569803f95cb2233510dd868caf486b2d8abbcf2dba2a3702ed2a",
+      "bytes": 27508,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_v3"
+    },
+    {
+      "path": "scenarios/price_sensitivity.csv",
+      "sha256": "da0e2e687fa68930ed00062ca3de82f9e6847db00c54a770ef4b9e6d62dda4a9",
+      "bytes": 10691,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_v3"
+    },
+    {
+      "path": "scenarios/selection_frequency.geojson",
+      "sha256": "199ad2cc319e02552c137499418a12510488559ddf645fd1affed907e6e6a987",
+      "bytes": 127733,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_v3"
+    },
+    {
+      "path": "scenarios/results.json",
+      "sha256": "08ba0249031dd66cccfa996242c37e477c20eda61a5b677e5ac5ab321856e427",
+      "bytes": 4130,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_v3"
+    },
+    {
+      "path": "scenarios/independent_checks.json",
+      "sha256": "4c56515bd94db9da36477dd85fb8f37e2648b443ecb24b4adc7c95a33dc66dae",
+      "bytes": 1349,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_v3"
+    },
+    {
+      "path": "scenarios/independent_selection_concentration.csv",
+      "sha256": "5a1524a3995ae517bd27f5b314fd5ec3347dd29cd9bba6c9bf1d0081a5020979",
+      "bytes": 33576,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_v3"
+    },
+    {
+      "path": "maps/heatmaps.html",
+      "sha256": "b2c8a36490879f2445ae3bd08d273efc1e2664a6976efd6e6cb3256745892be4",
+      "bytes": 1164391,
+      "source_run": "data/output/background_tests/20261102_cuisine_batch_maps_v1"
+    },
+    {
+      "path": "maps/selection_heatmaps.png",
+      "sha256": "9cc83c3641f572f34fb84cdd19aaac34bb8510039082790feb5afc8d9229fa96",
+      "bytes": 493448,
+      "source_run": "data/output/background_tests/20261102_cuisine_batch_maps_v1"
+    },
+    {
+      "path": "competition_stress/competition_sensitivity.csv",
+      "sha256": "0107ca9336c1be3e193320f652b231fe4f0900fc66d8bc137fe6e79025a34119",
+      "bytes": 3531,
+      "source_run": "data/output/background_tests/20261102_cuisine_competition_stress_v2"
+    },
+    {
+      "path": "competition_stress/candidate_sensitivity.csv.gz",
+      "sha256": "ea452fbf4cb5e3ae2aac04af26026d984d9b8afe8f6c3ae043196011c038b30f",
+      "bytes": 1226614,
+      "source_run": "data/output/background_tests/20261102_cuisine_competition_stress_v2"
+    },
+    {
+      "path": "competition_stress/results.json",
+      "sha256": "35bd10d31f2e9fe085d72142af4a2da7932bcd11a06f91068d359d67d9bf927b",
+      "bytes": 844,
+      "source_run": "data/output/background_tests/20261102_cuisine_competition_stress_v2"
+    },
+    {
+      "path": "stage_one_control/property_archive_proxy.csv",
+      "sha256": "1cdced409fea33a957efa73730aec1a510c5bbe303f2519e87fab0dbc1a0f46b",
+      "bytes": 87880,
+      "source_run": "data/output/background_tests/20261102_cuisine_stage_one_v1"
+    },
+    {
+      "path": "stage_one_control/all_scenarios_with_stage_one.csv.gz",
+      "sha256": "2cbaf4112111676a90c416f1788a3263d91a64799567a345871bd4ade391bf25",
+      "bytes": 7415614,
+      "source_run": "data/output/background_tests/20261102_cuisine_stage_one_v1"
+    },
+    {
+      "path": "stage_one_control/selected_locations_with_stage_one.csv",
+      "sha256": "dfe3e3cf0fbf405c28dadf019522c0babcb9faeb70e11256280404568440f2d9",
+      "bytes": 429583,
+      "source_run": "data/output/background_tests/20261102_cuisine_stage_one_v1"
+    },
+    {
+      "path": "stage_one_control/stage_one_provenance.json",
+      "sha256": "b090dbe3d45075506dd786198a9408b3159fc0204cfa44edd1cbd696d039005d",
+      "bytes": 2336577,
+      "source_run": "data/output/background_tests/20261102_cuisine_stage_one_v1"
+    },
+    {
+      "path": "stage_one_control/results.json",
+      "sha256": "115677a1d9904a4d98613b393bcf8f61a8f6075482ce82ec7bec1b39ba581187",
+      "bytes": 756,
+      "source_run": "data/output/background_tests/20261102_cuisine_stage_one_v1"
+    },
+    {
+      "path": "frozen_stage_one_evaluation/primary_metrics.json",
+      "sha256": "a13a5e08705d6bc1877728c90f7df6f22c356a9cda7173051944a6b944ece19a",
+      "bytes": 2708,
+      "source_run": "data/output/background_tests/20261101_locked_results_v1"
+    },
+    {
+      "path": "frozen_stage_one_evaluation/primary_results_table.csv",
+      "sha256": "3d6fc91d5625a49f7dc1c2577a18b06f370c7f58e9a245a3773e98325e44b4a1",
+      "bytes": 1132,
+      "source_run": "data/output/background_tests/20261101_locked_results_v1"
+    },
+    {
+      "path": "frozen_stage_one_evaluation/primary_paired_comparisons.json",
+      "sha256": "e1b22f3d44387edb5b4b7af8f14bdf46127d8f6705559bfff9ab649dc367d7a1",
+      "bytes": 996,
+      "source_run": "data/output/background_tests/20261101_locked_results_v1"
+    },
+    {
+      "path": "frozen_stage_one_evaluation/results_for_briefing.png",
+      "sha256": "58bed2b79d5c25048e50d92d7c09f77defbc0ea7272f3449dfd3596f7ceeb31d",
+      "bytes": 169889,
+      "source_run": "data/output/background_tests/20261101_locked_results_v1"
+    },
+    {
+      "path": "checks/browser_checks.json",
+      "sha256": "b76b9d68de8b19c3433c51ec55ca834947d5b1a5e151424751dd328b4ce38207",
+      "bytes": 536,
+      "source_run": "data/output/background_tests/20261102_cuisine_price_batch_qa"
+    }
+  ],
+  "privacy_scope": "Generated property/scenario outputs and aggregate evaluation only. No raw restaurant cohort, accounts, credentials, model binaries or route matrices.",
+  "production_changed": false,
+  "verified_survival": false
+}
