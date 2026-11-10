@@ -134,9 +134,10 @@ function destinationForView(view) {
   if (["scorecard", "access", "whitespace"].includes(view)) return "analyze";
   if (["lease", "finance", "menu", "workspace"].includes(view)) return "plan";
   if (["reports", "layers"].includes(view)) return "report";
-  return view === "compare" ? "compare" : view === "settings" ? "settings" : "explore";
+  if (["compare", "advisor", "settings"].includes(view)) return view;
+  return "explore";
 }
-const destinationLastView = {explore:"discover", analyze:"scorecard", compare:"compare", plan:"lease", report:"reports"};
+const destinationLastView = {explore:"discover", analyze:"scorecard", compare:"compare", plan:"lease", report:"reports", advisor:"advisor"};
 
 function renderAnalysisNavigation() {
   const destination = destinationForView(activeView);
@@ -161,8 +162,9 @@ function selectView(view) {
   });
   document.querySelectorAll(".nav-group").forEach(group => group.classList.toggle("has-active-tab", !!group.querySelector(".is-active")));
   document.querySelector(`.feature-tab[data-view="${view}"]`)?.scrollIntoView({block: "nearest", inline: "nearest"});
-  if (dashboard) renderConceptChrome();
+  renderConceptChrome();
   renderPanels();
+  if (view === "advisor") syncAdvisorChatScope();
   if (view === "menu") loadMenuSuggestions();
   if (view === "access") renderCustomerAccess();
   if (view === "finance") prepareEconomicsLab();
@@ -496,7 +498,7 @@ async function syncWorkspace() {
   }
 }
 
-async function initializeWorkspace() {
+async function initializeWorkspace({showBrief = true} = {}) {
   if (accountOwner) {
     try {
       const response = await fetch("/api/workspace", {cache: "no-store"});
@@ -528,7 +530,7 @@ async function initializeWorkspace() {
   } else workspaceStatus("Saved on this device");
   const hasSavedBrief = restoreBrief();
   entryHasSavedBrief = hasSavedBrief;
-  if (window.GROUNDWORK_ACCESS && !hasSavedBrief) openBrief();
+  if (window.GROUNDWORK_ACCESS && showBrief && !hasSavedBrief) openBrief();
   else closeBrief();
   renderSavedBriefs();
   updateConceptImage(state.cuisine);
@@ -1985,6 +1987,697 @@ async function analyzeSelectedCatchment() {
   }
 }
 
+const advisorPreview = document.body.dataset.advisorPreview;
+const advisorModeControl = document.querySelector("#siteAdvisorMode");
+const advisorChat = {
+  form: document.querySelector("#advisorChatForm"),
+  input: document.querySelector("#advisorChatMessage"),
+  send: document.querySelector("#advisorChatSend"),
+  thread: document.querySelector("#advisorChatThread"),
+  welcome: document.querySelector("#advisorChatWelcome"),
+  status: document.querySelector("#advisorChatStatus"),
+  scope: document.querySelector("#advisorChatDashboardScope"),
+  query: null,
+  context: null,
+  controller: null,
+};
+const decisionLabCurrency = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD", minimumFractionDigits: 0});
+let advisorRevision = 0;
+let advisorEvidenceVersion = null;
+let decisionLabController = null;
+
+function updateAdvisorMode() {
+  for (const element of document.querySelectorAll("[data-advisor-mode]")) {
+    const visible = element.dataset.advisorMode === advisorModeControl.value;
+    element.hidden = !visible;
+    element.querySelectorAll("input, select, textarea").forEach(field => { field.disabled = !visible; });
+  }
+  document.querySelector("#advisorResearchTools").open = advisorModeControl.value === "sample";
+  resetAdvisorResults();
+}
+
+advisorModeControl.addEventListener("change", updateAdvisorMode);
+updateAdvisorMode();
+
+function renderSiteBrief(result, panel) {
+  const append = (parent, tag, text) => {
+    const element = document.createElement(tag);
+    element.textContent = text;
+    parent.append(element);
+    return element;
+  };
+  panel.replaceChildren();
+  const summary = append(panel, "p", result.summary);
+  summary.id = "siteBriefSummary";
+  const assumptions = result.assumptions;
+  const inputText = [assumptions.cuisine, assumptions.average_check == null ? null : `$${assumptions.average_check} per guest`,
+    assumptions.daypart, assumptions.audience].filter(Boolean).map(value => value.replaceAll("_", " "));
+  if (inputText.length) append(panel, "p", `Brief assumptions: ${inputText.join(" · ")}`);
+  if (result.economics) append(panel, "p", result.economics);
+  for (const site of result.sites) {
+    const section = append(panel, "section", "");
+    section.className = "site-advisor-evidence";
+    append(section, "h3", site.name);
+    if (site.gaps.length) append(section, "p", `Missing evidence: ${site.gaps.join(", ")}.`);
+    for (const caution of site.cautions) append(section, "p", caution);
+    append(section, "strong", "Verify before touring");
+    const checks = append(section, "ul", "");
+    site.checks.forEach(check => append(checks, "li", check));
+    const details = append(section, "details", "");
+    append(details, "summary", "Supporting evidence");
+    const list = append(details, "ul", "");
+    for (const fact of site.facts) {
+      const item = append(list, "li", `${fact.label}: ${fact.value ?? "Unavailable"} (${fact.basis})`);
+      if (fact.source && fact.value != null) {
+        const label = `${fact.source.name} · ${fact.source.vintage}`;
+        item.append(" · ");
+        if (fact.source.url?.startsWith("https://")) {
+          const link = append(item, "a", label);
+          link.href = fact.source.url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+        } else append(item, "span", label);
+      }
+    }
+  }
+  if (result.coverage.survival && result.coverage.survival !== "available") {
+    append(panel, "p", "No validated survival estimate was used in this brief.");
+  }
+  append(panel, "p", result.limitations);
+  panel.hidden = false;
+}
+
+async function generateSiteBrief(event) {
+  const generate = document.querySelector("#generateSiteBrief");
+  const polish = document.querySelector("#polishSiteBrief");
+  const status = document.querySelector("#siteBriefStatus");
+  const panel = document.querySelector("#siteBriefResult");
+  const wording = event.currentTarget === polish;
+  const revision = advisorRevision;
+  const modeAtRequest = advisorModeControl.value;
+  const sample = modeAtRequest === "sample";
+  const params = sample ? null : conceptParams();
+  const token = advisorEvidenceVersion;
+  if (wording && !token) return;
+  generate.disabled = polish.disabled = true;
+  status.hidden = false;
+  status.textContent = wording ? "Polishing wording locally…" : "Preparing evidence brief…";
+  if (!wording) {
+    polish.hidden = true;
+    advisorEvidenceVersion = null;
+    panel.hidden = true;
+  }
+  try {
+    const response = await fetch(sample ? "/api/site-brief/sample" : `/api/site-brief?${params}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(wording ? {wording: true, evidence_version: token} : {}),
+    });
+    const result = await response.json();
+    if (revision !== advisorRevision) return;
+    if (!sample && String(params) !== String(conceptParams())) {
+      status.textContent = "Search settings changed. Generate a new brief.";
+      return;
+    }
+    if (!response.ok) throw new Error(result.error || "Site brief unavailable.");
+    if (wording) {
+      if (result.evidence_version !== token) throw new Error("Evidence changed. Generate a new brief.");
+      if (result.mode !== "local_model") {
+        status.textContent = "Local AI is unavailable or busy. Your evidence brief is unchanged.";
+        return;
+      }
+      panel.querySelector("#siteBriefSummary").textContent = result.summary;
+    } else {
+      advisorEvidenceVersion = result.evidence_version;
+      renderSiteBrief(result, panel);
+      polish.hidden = false;
+    }
+    status.textContent = [result.scope, wording ? "Local AI wording" : "Evidence brief", result.release].filter(Boolean).join(" · ");
+  } catch (error) {
+    if (revision === advisorRevision) status.textContent = error.message || "Site brief unavailable.";
+  } finally {
+    generate.disabled = polish.disabled = false;
+  }
+}
+
+document.querySelector("#generateSiteBrief").addEventListener("click", generateSiteBrief);
+document.querySelector("#polishSiteBrief").addEventListener("click", generateSiteBrief);
+
+async function compareSiteScenario(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const panel = document.querySelector("#siteScenarioResult");
+  const status = document.querySelector("#siteScenarioStatus");
+  const revision = advisorRevision;
+  const modeAtRequest = advisorModeControl.value;
+  const sample = modeAtRequest === "sample";
+  const params = sample ? null : conceptParams();
+  const fields = new FormData(form);
+  const changes = {};
+  if (fields.get("average_check") !== "") changes.average_check = Number(fields.get("average_check"));
+  if (fields.get("daypart")) changes.daypart = fields.get("daypart");
+  panel.hidden = true;
+  panel.replaceChildren();
+  if (!Object.keys(changes).length) {
+    status.textContent = "Change spend per guest or trading period first.";
+    return;
+  }
+  button.disabled = true;
+  status.textContent = sample ? "Comparing saved shortlists…" : "Recomputing both shortlists…";
+  try {
+    const response = await fetch(sample ? "/api/site-brief/sample/scenario" : `/api/site-brief/scenario?${params}`, {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(changes),
+    });
+    const result = await response.json();
+    if (revision !== advisorRevision) return;
+    if (!sample && String(params) !== String(conceptParams())) {
+      status.textContent = "Search settings changed. Compare again.";
+      return;
+    }
+    if (!response.ok) throw new Error(result.error || "Scenario comparison unavailable.");
+    const write = (tag, text) => {
+      const element = document.createElement(tag);
+      element.textContent = text;
+      panel.append(element);
+      return element;
+    };
+    const formatInputs = ({average_check, daypart}) => `$${average_check} per guest · ${daypart.replaceAll("_", " ")}`;
+    write("p", `${formatInputs(result.inputs[0])} → ${formatInputs(result.inputs[1])}`);
+    for (const [label, rows] of [["Current top three", result.before], ["Scenario top three", result.after]]) {
+      write("strong", `${label} · ${result.ranking_basis}`);
+      const list = write("ol", "");
+      for (const row of rows) {
+        const item = document.createElement("li");
+        item.textContent = `${row.name} · ${row.score ?? "Unavailable"}`;
+        list.append(item);
+      }
+    }
+    const names = rows => rows.map(row => row.name).join(", ") || "None";
+    write("p", `Entered: ${names(result.entered)}. Left: ${names(result.left)}.`);
+    const moves = result.retained.filter(row => row.previous_rank !== row.current_rank);
+    if (moves.length) write("p", `Moved: ${moves.map(row => `${row.name} (${row.previous_rank} → ${row.current_rank})`).join(", ")}.`);
+    if (result.explanations?.length) {
+      write("strong", "What changed behind the rankings");
+      const explanationList = write("ul", "");
+      const signed = value => value > 0 ? `+${value}` : String(value);
+      const rank = value => value == null ? "Not in results" : `#${value}`;
+      for (const change of result.explanations) {
+        const item = document.createElement("li");
+        const label = document.createElement("strong");
+        label.textContent = `${change.name} · ${rank(change.before_rank)} → ${rank(change.after_rank)}`;
+        item.append(label);
+        if (change.score_delta != null) {
+          item.append(` · score ${change.before_score} → ${change.after_score} (${signed(change.score_delta)})`);
+        }
+        if (change.factors.length) {
+          const factors = document.createElement("p");
+          factors.textContent = change.factors.map(f => `${f.label}: ${f.before} → ${f.after} (${signed(f.delta)})${f.coverage_changed ? " · evidence coverage changed" : ""}`).join("; ");
+          item.append(factors);
+        }
+        if (change.note) {
+          const note = document.createElement("p");
+          note.textContent = change.note;
+          item.append(note);
+        }
+        explanationList.append(item);
+      }
+      write("p", "These are changes in individual component scores. They don’t add up to the overall score change or prove what caused the rank change.");
+    }
+    write("p", result.limitations);
+    status.textContent = result.scope;
+    panel.hidden = false;
+  } catch (error) {
+    if (revision === advisorRevision) status.textContent = error.message || "Scenario comparison unavailable.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+document.querySelector("#siteScenarioForm").addEventListener("submit", compareSiteScenario);
+
+function decisionLabText(parent, tag, text = "") {
+  const element = document.createElement(tag);
+  element.textContent = text;
+  parent.append(element);
+  return element;
+}
+
+function decisionLabScenarioLabel({average_check, daypart}) {
+  const period = {all_day: "All day", morning: "Morning", lunch: "Lunch", evening: "Evening"}[daypart] || "Trading period unavailable";
+  return `${decisionLabCurrency.format(average_check)} per guest · ${period}`;
+}
+
+function addDecisionSource(parent, source) {
+  if (source?.url?.startsWith("https://")) {
+    const link = decisionLabText(parent, "a", source.name);
+    link.href = source.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  } else if (source?.name) decisionLabText(parent, "small", source.name);
+}
+
+function renderDecisionFacts(parent, evidence) {
+  if (!evidence?.length) return;
+  const facts = decisionLabText(parent, "ul");
+  for (const fact of evidence) {
+    const value = fact.id === "median_household_income" ? householdIncome(fact.value)
+      : fact.value == null ? "Unavailable" : [fact.value.toLocaleString(), fact.unit].filter(Boolean).join(fact.unit?.startsWith("/") ? "" : " ");
+    const item = decisionLabText(facts, "li", `${fact.label} · ${value}`);
+    const coverage = fact.coverage == null ? null : `${fact.coverage}% evidence coverage`;
+    const basis = [fact.status === "modeled" ? "Modeled" : null, fact.basis, fact.grain, fact.vintage, coverage].filter(Boolean).join(" · ");
+    if (basis) decisionLabText(item, "small", basis);
+    addDecisionSource(item, fact.source);
+  }
+}
+
+function renderDecisionDossier(site, panel) {
+  const {evidence, property_gates: gates, next_check: next, break_even: breakEven} = site;
+  panel.replaceChildren();
+  if (next) {
+    decisionLabText(panel, "strong", `Next check · ${next.label}`);
+    if (next.detail) decisionLabText(panel, "p", next.detail);
+  }
+  if (gates) {
+    decisionLabText(panel, "strong", "Property search evidence");
+    decisionLabText(panel, "p", `${gates.verified_live_count} verified live listings · ${gates.sourced_count} sourced leads · ${gates.registry_count} registry records · ${gates.synthetic_count} synthetic examples`);
+    if (gates.scope) decisionLabText(panel, "p", gates.scope);
+    if (gates.lead) {
+      const lead = gates.lead;
+      const quote = lead.transaction === "lease" && lead.asking_rent != null ? `${decisionLabCurrency.format(lead.asking_rent)}/month`
+        : lead.asking_price != null ? decisionLabCurrency.format(lead.asking_price) : null;
+      const listing = decisionLabText(panel, "p", [lead.address || lead.title, quote, lead.sqft ? `${lead.sqft.toLocaleString()} sq ft` : null,
+        "Source-reported lead · Confirm availability and terms"].filter(Boolean).join(" · "));
+      addDecisionSource(listing, lead.source);
+      const walking = lead.site_evidence;
+      if (walking?.status === "available") {
+        decisionLabText(panel, "strong", `${walking.minutes}-minute walking catchment from the reported address`);
+        renderDecisionFacts(panel, walking.evidence);
+      } else if (walking?.reason) decisionLabText(panel, "p", walking.reason);
+    }
+    if (gates.checks?.length) {
+      const list = decisionLabText(panel, "ul");
+      for (const check of gates.checks) decisionLabText(list, "li", [check.label, check.detail].filter(Boolean).join(". "));
+    }
+  }
+  if (breakEven?.required_covers_per_day != null) {
+    const basis = breakEven.basis === "source_reported_asking_rent" ? "Source-reported asking rent" : "Entered rent target";
+    decisionLabText(panel, "p", `Break-even scenario · ${breakEven.required_covers_per_day} covers per day · ${decisionLabCurrency.format(breakEven.required_monthly_sales)} in monthly sales. ${basis} · ${decisionLabCurrency.format(breakEven.rent_monthly)} per month.`);
+    if (breakEven.detail) decisionLabText(panel, "p", breakEven.detail);
+  } else if (breakEven?.status === "incomplete") {
+    decisionLabText(panel, "p", "Enter operating costs in Operating Economics to calculate a break-even scenario.");
+  }
+  if (evidence?.length) {
+    decisionLabText(panel, "strong", "Supporting area evidence");
+    renderDecisionFacts(panel, evidence);
+  }
+  for (const group of site.profile_detail || []) {
+    const details = decisionLabText(panel, "details");
+    decisionLabText(details, "summary", group.label);
+    renderDecisionFacts(details, group.evidence);
+  }
+}
+
+function addDecisionDossier(parent, candidate, context) {
+  const {result, params, signal, dossiers} = context;
+  const initial = dossiers.get(candidate.id);
+  if (!initial && (!result.snapshot_id || !candidate.name)) return;
+  const details = decisionLabText(parent, "details");
+  decisionLabText(details, "summary", "Supporting evidence and property checks");
+  const body = decisionLabText(details, "div");
+  if (initial) renderDecisionDossier(initial, body);
+  if (!result.snapshot_id || (initial && !initial.property_gates?.lead)) return;
+  const status = decisionLabText(details, "p");
+  status.setAttribute("role", "status");
+  const load = decisionLabText(details, "button", initial ? "Load address-level evidence" : "Load evidence");
+  load.type = "button";
+  load.className = "quiet-action";
+  load.addEventListener("click", async () => {
+    if (params !== conceptParams().toString()) {
+      status.textContent = "Search settings changed. Run the Decision Lab again.";
+      return;
+    }
+    load.disabled = true;
+    status.textContent = "Loading supporting evidence…";
+    try {
+      const response = await fetch(`/api/site-brief/decision-lab/dossier?${params}`, {
+        method: "POST", headers: {"Content-Type": "application/json"}, signal,
+        body: JSON.stringify({id: candidate.id, snapshot_id: result.snapshot_id}),
+      });
+      const data = await response.json().catch(() => null);
+      if (signal.aborted) return;
+      if (!response.ok || !data?.sites?.length) throw new Error(data?.error || "Supporting evidence is unavailable for this area.");
+      renderDecisionDossier(data.sites[0], body);
+      status.textContent = "Supporting evidence is ready.";
+      load.hidden = true;
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = error.message || "Supporting evidence could not be loaded.";
+      load.disabled = false;
+    }
+  });
+}
+
+function renderDecisionCandidate(parent, candidate, scenarios, context) {
+  const details = decisionLabText(parent, "details");
+  details.className = "decision-lab-candidate";
+  const name = candidate.name || `Saved area ${candidate.id}`;
+  const count = context.result.summary.comparable_count;
+  const heading = decisionLabText(details, "summary");
+  decisionLabText(heading, "strong", name);
+  if (candidate.saved) decisionLabText(heading, "span", "Saved area");
+  decisionLabText(heading, "span", candidate.available_count ? `${candidate.clear_count}/${count} clear top-three finishes` : "Rank unavailable");
+  if (!candidate.available_count) {
+    decisionLabText(details, "p", "No comparable rank was available for this area in the tested scenarios.");
+  } else {
+    decisionLabText(details, "p", `Clearly in the top three in ${candidate.clear_count} of ${count} comparable scenarios. In the top three or tied at the cutoff in ${candidate.possible_count} of ${count}. Ranked in ${candidate.available_count} of ${count}.`);
+    if (candidate.score_range) {
+      const {min, max} = candidate.score_range;
+      decisionLabText(details, "p", `Score range ${min === max ? min : `${min}–${max}`} · Largest gap to the leader ${candidate.max_gap_to_leader} points`);
+    }
+    const results = decisionLabText(details, "ul");
+    for (const entry of candidate.results) {
+      const scenario = scenarios.get(entry.scenario_id);
+      const unavailable = {missing_score: "Score unavailable for this area", not_ranked: "Area outside the scored results", scenario_insufficient: "Scenario had insufficient evidence", scenario_unavailable: "Scenario unavailable"};
+      const rank = entry.rank_min == null ? unavailable[entry.status] || "Rank unavailable" : entry.rank_min === entry.rank_max
+        ? `Rank ${entry.rank_min}` : `Tied across ranks ${entry.rank_min}–${entry.rank_max}`;
+      decisionLabText(results, "li", [decisionLabScenarioLabel(scenario), rank, entry.score == null ? null : `Score ${entry.score}`].filter(Boolean).join(" · "));
+    }
+  }
+  addDecisionDossier(details, candidate, context);
+}
+
+function renderDecisionLab(panel, result, params, signal) {
+  const {summary, scenarios, candidates, one_factor_flips: flips} = result;
+  const scenarioById = new Map(scenarios.map(scenario => [scenario.id, scenario]));
+  const candidateNames = new Map(candidates.map(candidate => [candidate.id, candidate.name]));
+  const dossiers = new Map((result.dossiers?.sites || []).map(site => [site.id, site]));
+  const context = {result, params, signal, dossiers};
+  const baseline = scenarioById.get(summary.baseline_id);
+  panel.replaceChildren();
+  decisionLabText(panel, "h3", "Decision brief");
+  if (baseline) decisionLabText(panel, "p", `Current search · ${decisionLabScenarioLabel(baseline)}`);
+  decisionLabText(panel, "p", [result.ranking_basis, result.release].filter(Boolean).join(" · "));
+  if (result.assumptions) {
+    const {borough, cuisine, service_style: serviceStyle, audience} = result.assumptions;
+    const scope = [borough || "All NYC", cuisine === "any" ? null : cuisine, serviceStyle, audience]
+      .filter(Boolean).map(value => value.replaceAll("_", " "));
+    decisionLabText(panel, "p", scope.join(" · "));
+  }
+  if (result.method_note) decisionLabText(panel, "p", result.method_note);
+  decisionLabText(panel, "p", `${summary.comparable_count} of ${summary.scenario_count} scenarios were comparable. ${summary.insufficient_count} had insufficient evidence and ${summary.unavailable_count} were unavailable for comparison.`);
+  if (summary.coverage_changed_pair_count) decisionLabText(panel, "p", `The set of scored areas changed in ${summary.coverage_changed_pair_count} one-assumption comparisons. Shortlist moves below compare areas with a score on both sides.`);
+  if (typeof result.brief === "string") decisionLabText(panel, "p", result.brief);
+  if (summary.tied_cutoff_count) decisionLabText(panel, "p", "Equal scores at the cutoff can span several rank positions. The possible shortlist includes all areas tied there.");
+
+  const comparison = decisionLabText(panel, "details");
+  decisionLabText(comparison, "summary", "Results for each scenario");
+  const scenarioList = decisionLabText(comparison, "ul");
+  for (const scenario of scenarios) {
+    const item = decisionLabText(scenarioList, "li");
+    decisionLabText(item, "strong", `${decisionLabScenarioLabel(scenario)}${scenario === baseline ? " · Current search" : ""}`);
+    if (scenario.status !== "comparable") {
+      decisionLabText(item, "div", scenario.status === "insufficient" ? "Insufficient evidence to compare" : "Unavailable for comparison");
+      continue;
+    }
+    decisionLabText(item, "small", `${scenario.eligible_count.toLocaleString()} scored areas`);
+    const top = decisionLabText(item, "ul");
+    for (const row of scenario.displayed_top_three) decisionLabText(top, "li", `${row.name} · Score ${row.score}`);
+    if (scenario.cutoff_tied) decisionLabText(item, "small", "Other areas share the cutoff score.");
+  }
+
+  if (flips.length) {
+    const changes = decisionLabText(panel, "details");
+    decisionLabText(changes, "summary", "What changed the shortlist when one assumption moved");
+    const list = decisionLabText(changes, "ul");
+    const names = ids => ids.map(id => candidateNames.get(id) || id).join(", ");
+    for (const flip of flips) {
+      const before = decisionLabScenarioLabel(scenarioById.get(flip.before_id));
+      const after = decisionLabScenarioLabel(scenarioById.get(flip.after_id));
+      const item = decisionLabText(list, "li", `${before} → ${after}`);
+      if (flip.entered_ids.length) decisionLabText(item, "div", `Entered the possible shortlist · ${names(flip.entered_ids)}`);
+      if (flip.left_ids.length) decisionLabText(item, "div", `Left the possible shortlist · ${names(flip.left_ids)}`);
+    }
+  } else if (summary.matched_pair_count) {
+    decisionLabText(panel, "p", "No tested change to a single assumption altered the possible shortlist among comparable scenarios.");
+  }
+
+  if (candidates.length) {
+    decisionLabText(panel, "h3", "Areas to review");
+    const board = decisionLabText(panel, "div");
+    const load = decisionLabText(panel, "button");
+    load.type = "button";
+    load.className = "quiet-action";
+    let shown = 0;
+    const showMore = () => {
+      const next = candidates.slice(shown, shown + 16);
+      for (const candidate of next) renderDecisionCandidate(board, candidate, scenarioById, context);
+      shown += next.length;
+      load.hidden = shown === candidates.length;
+      load.textContent = `Show more areas (${shown} of ${candidates.length} shown)`;
+    };
+    load.addEventListener("click", showMore);
+    showMore();
+  }
+  const selected = dashboard && selectedId ? selectedLocation() : null;
+  if (result.snapshot_id && selected && selected.id === selectedId && /^\d{11}$/.test(selected.id) && !candidateNames.has(selected.id)) {
+    const area = decisionLabText(panel, "section");
+    decisionLabText(area, "h3", "Selected map area");
+    decisionLabText(area, "p", selected.name);
+    addDecisionDossier(area, selected, context);
+  }
+  for (const note of [result.limitations].flat().filter(Boolean)) decisionLabText(panel, "p", note);
+  panel.hidden = false;
+}
+
+function resetDecisionLab() {
+  decisionLabController?.abort();
+  decisionLabController = null;
+  const form = document.querySelector("#siteDecisionLabForm");
+  form.querySelector('button[type="submit"]').disabled = false;
+  form.removeAttribute("aria-busy");
+  document.querySelector("#siteDecisionLabStatus").textContent = "";
+  const panel = document.querySelector("#siteDecisionLabResult");
+  panel.hidden = true;
+  panel.replaceChildren();
+}
+
+async function runDecisionLab(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  resetDecisionLab();
+  const controller = new AbortController();
+  decisionLabController = controller;
+  const {signal} = controller;
+  const button = form.querySelector('button[type="submit"]');
+  const status = document.querySelector("#siteDecisionLabStatus");
+  const panel = document.querySelector("#siteDecisionLabResult");
+  const params = conceptParams().toString();
+  const fields = new FormData(form);
+  const changes = {
+    average_checks: [...new Set(fields.getAll("average_check").filter(Boolean).map(Number))],
+    dayparts: [...new Set(fields.getAll("daypart").filter(Boolean))],
+  };
+  form.setAttribute("aria-busy", "true");
+  button.disabled = true;
+  status.textContent = "Testing your assumptions…";
+  try {
+    const response = await fetch(`/api/site-brief/decision-lab?${params}`, {
+      method: "POST", headers: {"Content-Type": "application/json"}, signal, body: JSON.stringify(changes),
+    });
+    const result = await response.json().catch(() => null);
+    if (signal.aborted) return;
+    if (params !== conceptParams().toString()) {
+      status.textContent = "Search settings changed. Run the Decision Lab again.";
+      return;
+    }
+    if (!response.ok || !result) throw new Error(result?.error || "Decision Lab is unavailable.");
+    renderDecisionLab(panel, result, params, signal);
+    status.textContent = "Decision Lab results are ready.";
+  } catch (error) {
+    if (!signal.aborted) status.textContent = error.message || "Decision Lab is unavailable.";
+  } finally {
+    if (!signal.aborted) {
+      button.disabled = false;
+      form.removeAttribute("aria-busy");
+    }
+  }
+}
+
+document.querySelector("#siteDecisionLabForm").addEventListener("submit", runDecisionLab);
+document.querySelector("#siteDecisionLabForm").addEventListener("input", () => {
+  if (!decisionLabController) return;
+  resetDecisionLab();
+  document.querySelector("#siteDecisionLabStatus").textContent = "Assumptions changed. Run the Decision Lab again.";
+});
+
+function setAdvisorChatBusy(busy) {
+  advisorChat.form.setAttribute("aria-busy", String(busy));
+  advisorChat.input.readOnly = busy;
+  advisorChat.send.disabled = busy;
+  document.querySelectorAll("[data-advisor-chat-prompt]").forEach(button => { button.disabled = busy; });
+}
+
+function clearAdvisorChat(status = "") {
+  advisorChat.controller?.abort();
+  advisorChat.controller = null;
+  advisorChat.query = null;
+  advisorChat.context = null;
+  advisorChat.thread.replaceChildren();
+  advisorChat.welcome.hidden = false;
+  advisorChat.input.value = "";
+  advisorChat.status.textContent = status;
+  setAdvisorChatBusy(false);
+}
+
+function syncAdvisorChatScope() {
+  advisorChat.scope.textContent = `Dashboard search · ${conceptName()} · ${state.preferredArea || "All NYC"}`;
+  if (advisorChat.query !== null && advisorChat.query !== conceptParams().toString()) {
+    clearAdvisorChat("Your dashboard search changed. Start a new conversation for the current search.");
+  }
+}
+
+function renderAdvisorChatReply(result, turn) {
+  const reply = document.createElement("div");
+  reply.className = "advisor-chat-reply";
+  decisionLabText(reply, "strong", "Groundwork");
+  const answer = decisionLabText(reply, "p", result.answer);
+  answer.className = "advisor-chat-answer";
+  if (result.scope) {
+    const scope = decisionLabText(reply, "p", `Conversation scope · ${result.scope}`);
+    scope.className = "advisor-chat-scope";
+  }
+  if (result.cards?.length) {
+    const cards = decisionLabText(reply, "div");
+    cards.className = "advisor-chat-cards";
+    for (const card of result.cards) {
+      const item = decisionLabText(cards, "article");
+      item.className = "advisor-chat-card";
+      if (card.label) decisionLabText(item, "small", card.label);
+      decisionLabText(item, "h4", card.name);
+      if (card.score != null) decisionLabText(item, "p", `Score ${card.score}`);
+      const dossier = card.dossier?.sites?.[0] || card.dossier;
+      if (dossier?.evidence?.length) {
+        const details = decisionLabText(item, "details");
+        decisionLabText(details, "summary", "Review evidence and property checks");
+        renderDecisionDossier(dossier, decisionLabText(details, "div"));
+      }
+    }
+  }
+  if (result.sources?.length) {
+    const details = decisionLabText(reply, "details");
+    details.className = "advisor-chat-sources";
+    decisionLabText(details, "summary", "Sources for this reply");
+    const list = decisionLabText(details, "ul");
+    for (const source of result.sources) {
+      const item = decisionLabText(list, "li");
+      addDecisionSource(item, source);
+      if (source.vintage) decisionLabText(item, "small", source.vintage);
+    }
+  }
+  if (result.actions?.length) {
+    const actions = decisionLabText(reply, "div");
+    actions.className = "advisor-chat-prompts advisor-chat-actions";
+    actions.setAttribute("aria-label", "Suggested follow-up questions");
+    for (const {label, prompt} of result.actions) {
+      if (!label || !prompt) continue;
+      const button = decisionLabText(actions, "button", label);
+      button.type = "button";
+      button.className = "quiet-action";
+      button.dataset.advisorChatPrompt = prompt;
+    }
+  }
+  turn.append(reply);
+}
+
+async function sendAdvisorChat(rawMessage) {
+  if (advisorChat.controller || advisorModeControl.value !== "live") return;
+  const message = rawMessage.trim();
+  if (!message || message.length > advisorChat.input.maxLength) {
+    advisorChat.status.textContent = "Enter a question up to 500 characters.";
+    advisorChat.input.focus();
+    return;
+  }
+  syncAdvisorChatScope();
+  const query = conceptParams().toString();
+  advisorChat.query = query;
+  const controller = new AbortController();
+  advisorChat.controller = controller;
+  const {signal} = controller;
+  const promptFocused = document.activeElement?.matches("[data-advisor-chat-prompt]");
+  const turn = decisionLabText(advisorChat.thread, "div");
+  turn.className = "advisor-chat-turn";
+  const question = decisionLabText(turn, "div");
+  question.className = "advisor-chat-question";
+  decisionLabText(question, "strong", "You");
+  decisionLabText(question, "p", message);
+  advisorChat.input.value = "";
+  advisorChat.welcome.hidden = true;
+  setAdvisorChatBusy(true);
+  if (promptFocused) advisorChat.thread.focus({preventScroll: true});
+  advisorChat.thread.scrollTop = advisorChat.thread.scrollHeight;
+  advisorChat.status.textContent = "Checking the available evidence…";
+  try {
+    const response = await fetch(`/api/site-brief/chat?${query}`, {
+      method: "POST", headers: {"Content-Type": "application/json"}, signal,
+      body: JSON.stringify({message, context: advisorChat.context, selected_id: /^\d{11}$/.test(selectedId || "") ? selectedId : null}),
+    });
+    const result = await response.json().catch(() => null);
+    if (signal.aborted) return;
+    syncAdvisorChatScope();
+    if (signal.aborted) return;
+    if (!response.ok || typeof result?.answer !== "string" || !result.answer.trim()) {
+      throw new Error(result?.error || "The Advisor could not answer. Try sending your question again.");
+    }
+    renderAdvisorChatReply(result, turn);
+    advisorChat.context = typeof result.context === "string" ? result.context : null;
+    while (advisorChat.thread.children.length > 12) advisorChat.thread.firstElementChild.remove();
+    advisorChat.thread.scrollTop = advisorChat.thread.scrollHeight;
+    advisorChat.status.textContent = "";
+  } catch (error) {
+    if (signal.aborted) return;
+    turn.remove();
+    advisorChat.welcome.hidden = Boolean(advisorChat.thread.children.length);
+    advisorChat.input.value = message;
+    advisorChat.status.textContent = error.message || "The Advisor could not answer. Try sending your question again.";
+  } finally {
+    if (!signal.aborted) {
+      advisorChat.controller = null;
+      setAdvisorChatBusy(false);
+    }
+  }
+}
+
+advisorChat.form.addEventListener("submit", event => {
+  event.preventDefault();
+  sendAdvisorChat(advisorChat.input.value);
+});
+advisorChat.input.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    if (!advisorChat.send.disabled) advisorChat.form.requestSubmit();
+  }
+});
+document.querySelector("#advisorChat").addEventListener("click", event => {
+  const prompt = event.target.closest("[data-advisor-chat-prompt]");
+  if (prompt) sendAdvisorChat(prompt.dataset.advisorChatPrompt);
+});
+document.querySelector("#advisorChatReset").addEventListener("click", () => {
+  clearAdvisorChat("New conversation ready.");
+  advisorChat.input.focus();
+});
+
+function resetAdvisorResults() {
+  advisorRevision++;
+  advisorEvidenceVersion = null;
+  resetDecisionLab();
+  syncAdvisorChatScope();
+  document.querySelector("#polishSiteBrief").hidden = true;
+  document.querySelector("#siteScenarioResult").hidden = true;
+  document.querySelector("#siteScenarioStatus").textContent = "";
+  document.querySelector("#siteBriefResult").hidden = true;
+  document.querySelector("#siteBriefStatus").hidden = true;
+}
+
 function renderCompare() {
   const candidates = savedIds.map(id => allLocations().find(row => row.id === id)).filter(Boolean);
   const available = dashboard.locations.filter(row => !savedIds.includes(row.id));
@@ -2507,6 +3200,7 @@ function renderAll() {
   renderMarketProfile();
   renderCustomerAccess();
   renderCompare();
+  resetAdvisorResults();
   renderLease();
   renderWhitespace();
   renderFinance();
@@ -2521,7 +3215,7 @@ function renderAll() {
 
 function renderConceptChrome() {
   const name = conceptName();
-  const titles = {discover: "Location Search", scorecard: "Market Profile", access: "Customer Access", whitespace: "Competition", compare: "Location Comparison", lease: "Property Search", finance: "Operating Economics", menu: "Menu Studio", workspace: "Business Plan", reports: "Decision Report", layers: "Sources & Coverage", settings: "Workspace Settings"};
+  const titles = {discover: "Location Search", scorecard: "Market Profile", access: "Customer Access", whitespace: "Competition", compare: "Location Comparison", advisor: "Site Advisor", lease: "Property Search", finance: "Operating Economics", menu: "Menu Studio", workspace: "Business Plan", reports: "Decision Report", layers: "Sources & Coverage", settings: "Workspace Settings"};
   document.querySelector("#workspaceTitle").textContent = titles[activeView] || "Explore NYC";
   document.title = `${titles[activeView] || "Location Search"} | Groundwork NYC`;
   document.querySelector("#activeConceptName").textContent = name;
@@ -2898,10 +3592,13 @@ document.querySelectorAll("[data-logout]").forEach(button => button.addEventList
 setTheme(dashboardThemeChoice, false);
 updateConceptImage(state.cuisine);
 loadConceptImages();
-initializeWorkspace();
-initializePlanningControls();
-initializeMenuLab();
-initializeBusinessWorkspace();
+if (advisorPreview) selectView("advisor");
+if (advisorPreview !== "sample") {
+  initializeWorkspace({showBrief: advisorPreview !== "live"});
+  initializePlanningControls();
+  initializeMenuLab();
+  initializeBusinessWorkspace();
+}
 setActiveLayer(activeLayer);
 
 document.querySelector("#recommendationLimit").addEventListener("change", event => {

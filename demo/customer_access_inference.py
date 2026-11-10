@@ -2,6 +2,7 @@
 
 from datetime import date
 from functools import lru_cache
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -67,9 +68,6 @@ class CustomerAccessInference:
                 "visit_forecast": None, "assessment_type": "Uncalibrated customer-access index"}
 
     def attach(self, locations, properties, concept):
-        # Compute the two full-inventory surfaces once per concept, not per row.
-        self.table("tract_run", parameters(concept), date.today().isoformat())
-        self.table("property_run", parameters(concept), date.today().isoformat())
         for row in locations:
             assessment = self.assessment("tract_run", row["geoid"], concept)
             row["customer_access"] = assessment
@@ -138,8 +136,12 @@ def access_engine(config_path=DEFAULT_ACCESS_CONFIG):
             manifest = json.loads(manifest_path.read_text())
             paths += [manifest_path, run / "routes.npz"]
             paths += [Path(manifest["sources"][name]["path"]) for name in ("master", "listings")]
-        signature = tuple((str(path), path.stat().st_mtime_ns, path.stat().st_size) for path in paths)
-        return _engine(text, signature), {"status": "available"}
+        def signature_for(path):
+            stat = path.stat()
+            return str(path), stat.st_mtime_ns, stat.st_size, stat.st_ino, stat.st_ctime_ns
+        signature = tuple(signature_for(path) for path in paths)
+        identity = hashlib.sha256(repr(signature[1:5]).encode()).hexdigest()
+        return _engine(text, signature), {"status": "available", "artifact_id": identity}
     except (OSError, ValueError, KeyError, TypeError, ImportError):
         return None, {"status": "unavailable", "basis": "Customer-access snapshot unavailable", "calibrated": False}
 
@@ -148,8 +150,7 @@ def attach_access(locations, properties, concept, config_path=DEFAULT_ACCESS_CON
     engine, status = access_engine(config_path)
     if engine is not None:
         try:
-            status = engine.attach(locations, properties, concept)
-            return status
+            return {**status, **engine.attach(locations, properties, concept)}
         except (OSError, ValueError, KeyError, TypeError, ImportError):
             status = {"status": "unavailable", "basis": "Customer-access snapshot requires review", "calibrated": False}
     for row in locations:

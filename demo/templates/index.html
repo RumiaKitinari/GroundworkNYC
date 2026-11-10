@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261109-product" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261109-advisor" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261029-planning" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/explorers.css') }}?v=20261029" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/entry.css') }}?v=20261109-product" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/product.css') }}?v=20261109-product" />
   </head>
-  <body>
+  <body{% if advisor_preview %} data-advisor-preview="{{ advisor_preview }}"{% endif %}>
     <div class="app-frame">
       <aside class="rail">
         <div class="brand">
@@ -123,6 +123,7 @@
           <button type="button" data-destination="compare">Compare <span id="compareCount" class="tab-count">0</span></button>
           <button type="button" data-destination="plan">Plan</button>
           <button type="button" data-destination="report">Report</button>
+          <button type="button" data-destination="advisor" aria-label="Site Advisor">Advisor</button>
         </nav>
         <nav class="feature-tabs contextual-nav" aria-label="Section navigation" hidden>
           <div class="nav-group" data-destination-group="analyze">
@@ -247,6 +248,87 @@
               </div>
             </div>
             <div class="compare-board" id="compareBoard"></div>
+          </div>
+
+          <div class="table-module is-hidden" data-panel="advisor">
+            <div class="module-head compact"><h2>Site Advisor</h2></div>
+            <div class="comparison-summary" id="siteAdvisor" aria-label="Site Advisor">
+              <div class="advisor-toolbar">
+                <label class="control-field"><span>Data source</span><select id="siteAdvisorMode">
+                  <option value="live"{% if advisor_preview != 'sample' %} selected{% endif %}>Current dashboard data</option>
+                  <option value="sample"{% if advisor_preview == 'sample' %} selected{% endif %}>Published sample</option>
+                </select></label>
+                <button type="button" class="quiet-action" id="advisorChatReset" data-advisor-mode="live"{% if advisor_preview == 'sample' %} hidden{% endif %}>New chat</button>
+              </div>
+              <section id="advisorChat" data-advisor-mode="live" aria-label="Ask Groundwork"{% if advisor_preview == 'sample' %} hidden{% endif %}>
+                <p id="advisorChatDashboardScope" class="advisor-chat-scope"></p>
+                <div id="advisorChatWelcome">
+                  <div class="eyebrow">GROUNDWORK SITE ADVISOR</div>
+                  <h3>Where should we look?</h3>
+                  <p>Ask about a shortlist, a saved area, or what would change under different restaurant assumptions.</p>
+                  <div class="advisor-chat-prompts" aria-label="Suggested questions">
+                    <button type="button" class="quiet-action" data-advisor-chat-prompt="Where should I start looking?">Find a shortlist</button>
+                    <button type="button" class="quiet-action" data-advisor-chat-prompt="Compare my saved areas.">Compare saved areas</button>
+                    <button type="button" class="quiet-action" data-advisor-chat-prompt="What would change at $50 per guest for dinner?">Test a $50 dinner</button>
+                    <button type="button" class="quiet-action" data-advisor-chat-prompt="What should I verify before touring?">Plan a site visit</button>
+                  </div>
+                </div>
+                <div id="advisorChatThread" aria-label="Conversation" role="log" tabindex="-1"></div>
+                <form id="advisorChatForm" aria-describedby="advisorChatHelp">
+                  <label class="sr-only" for="advisorChatMessage">Ask about your restaurant search</label>
+                  <textarea id="advisorChatMessage" name="message" rows="2" maxlength="500" placeholder="Ask about your restaurant search…" required></textarea>
+                  <button id="advisorChatSend" class="primary-action" type="submit">Send</button>
+                </form>
+                <p id="advisorChatHelp">Uses the current search and available evidence. Shift+Enter starts a new line.</p>
+                <p id="advisorChatStatus" role="status"></p>
+              </section>
+              <details id="advisorResearchTools"{% if advisor_preview == 'sample' %} open{% endif %}>
+                <summary>Research tools</summary>
+                <div class="advisor-research-body">
+                  <p class="site-advisor-note" data-advisor-mode="live">Summarize up to three saved locations, or the current top three if none are saved.</p>
+                  <p class="site-advisor-note" data-advisor-mode="sample"{% if advisor_preview != 'sample' %} hidden{% endif %}>Italian concept, $35 per guest, all day. This sample replays published screening results for synthetic properties.</p>
+                  <div class="advisor-brief-actions">
+                    <button type="button" class="quiet-action" id="generateSiteBrief">Generate Site Brief</button>
+                    <button type="button" class="quiet-action" id="polishSiteBrief" hidden>Polish wording with local AI</button>
+                  </div>
+                  <p id="siteBriefStatus" role="status" hidden></p>
+                  <div id="siteBriefResult" hidden></div>
+                  <details id="siteDecisionLab" data-advisor-mode="live" open{% if advisor_preview == 'sample' %} hidden{% endif %}>
+                    <summary>Decision Lab</summary>
+                    <p id="siteDecisionLabIntro">See which areas hold up as guest spend and trading hours change. The lab tests your current assumptions alongside any alternatives you enter, using the same geography and ranking as your search.</p>
+                    <form id="siteDecisionLabForm" aria-describedby="siteDecisionLabIntro">
+                      <div class="decision-lab-fields">
+                        <fieldset>
+                          <legend>Spend per guest</legend>
+                          <label class="control-field"><span>First alternative ($)</span><input name="average_check" type="number" min="5" max="250" step="0.01" placeholder="Optional"></label>
+                          <label class="control-field"><span>Second alternative ($)</span><input name="average_check" type="number" min="5" max="250" step="0.01" placeholder="Optional"></label>
+                        </fieldset>
+                        <fieldset>
+                          <legend>Trading period</legend>
+                          {% for label in ['First alternative', 'Second alternative'] %}
+                          <label class="control-field"><span>{{ label }}</span><select name="daypart"><option value="">Optional</option><option value="all_day">All day</option><option value="morning">Morning</option><option value="lunch">Lunch</option><option value="evening">Evening</option></select></label>
+                          {% endfor %}
+                        </fieldset>
+                      </div>
+                      <button class="primary-action" type="submit">Run Decision Lab</button>
+                    </form>
+                    <p id="siteDecisionLabStatus" role="status"></p>
+                    <div id="siteDecisionLabResult" hidden></div>
+                  </details>
+                  <details id="siteScenario">
+                    <summary>Compare a different scenario</summary>
+                    <form id="siteScenarioForm" class="finance-scenario-controls">
+                      <label class="control-field" data-advisor-mode="sample" hidden><span>Saved spend per guest</span><select name="average_check" disabled><option value="18">$18</option><option value="65">$65</option></select></label>
+                      <label class="control-field" data-advisor-mode="live"><span>New spend per guest ($)</span><input name="average_check" type="number" min="5" max="250" step="0.01" placeholder="Keep current"></label>
+                      <label class="control-field" data-advisor-mode="live"><span>New trading period</span><select name="daypart"><option value="">Keep current</option><option value="all_day">All day</option><option value="morning">Morning</option><option value="lunch">Lunch</option><option value="evening">Evening</option></select></label>
+                      <button class="quiet-action" type="submit">Compare Top Three</button>
+                    </form>
+                    <p id="siteScenarioStatus" role="status"></p>
+                    <div id="siteScenarioResult" hidden></div>
+                  </details>
+                </div>
+              </details>
+            </div>
           </div>
 
           <div class="table-module is-hidden" data-panel="access">
@@ -423,7 +505,7 @@
       </main>
     </div>
 
-    <section class="welcome-overlay {{ '' if access else 'is-open' }}" id="welcomeOverlay" aria-labelledby="welcomeTitle" aria-modal="true" role="dialog">
+    <section class="welcome-overlay {{ '' if access or advisor_preview else 'is-open' }}" id="welcomeOverlay" aria-labelledby="welcomeTitle" aria-modal="true" role="dialog">
       <div class="welcome-card">
         <div class="welcome-photo" aria-hidden="true"></div>
         <div class="welcome-content">
@@ -445,7 +527,7 @@
       </div>
     </section>
 
-    <section class="brief-overlay {{ 'is-open' if access else '' }}" id="briefOverlay" aria-labelledby="briefTitle" aria-modal="true" role="dialog">
+    <section class="brief-overlay {{ 'is-open' if access and not advisor_preview else '' }}" id="briefOverlay" aria-labelledby="briefTitle" aria-modal="true" role="dialog">
       <div class="brief-dialog">
         <div id="briefPhoto" class="brief-photo" aria-hidden="true"><div class="photo-caption">A better location starts with a clearer idea.</div></div>
         <form class="brief-form" id="briefForm" novalidate>
@@ -562,6 +644,6 @@
     <script src="{{ url_for('static', filename='js/menu_lab.js') }}?v=20261029"></script>
     <script src="{{ url_for('static', filename='js/business_workspace.js') }}?v=20261029"></script>
     <script src="{{ url_for('static', filename='js/entry.js') }}?v=20261109-product"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261109-product"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261109-advisor"></script>
   </body>
 </html>

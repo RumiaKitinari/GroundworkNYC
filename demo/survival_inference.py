@@ -137,6 +137,7 @@ def model_state(config_path=DEFAULT_CONFIG, prediction_date=None):
         return engine, {"status": "available", "label": "Experimental survival model connected",
                         "model_version": engine.model_id, "horizon_years": 3,
                         "trained_as_of": engine.metadata["trained_as_of"], "prediction_date": prediction_date,
+                        "artifact_id": hashlib.sha256(repr((prediction_date, signature)).encode()).hexdigest(),
                         "assessment_type": "Experimental survival estimate", "ranking_mode": "screening",
                         "limitations": engine.metadata.get("limitations", [])}
     except (OSError, ValueError, KeyError, TypeError, ImportError) as error:
@@ -178,7 +179,7 @@ def _gap_table(path, signature):
     return table
 
 
-def attach_model(locations, tracts, cuisine, config_path=DEFAULT_CONFIG):
+def attach_model(locations, tracts, cuisine, config_path=DEFAULT_CONFIG, *, prediction_cache=None):
     """Attach batch inference; blend only with available actual res-9 gap data.
 
     Existing screening components remain contextual diagnostics. Separate fields
@@ -192,7 +193,14 @@ def attach_model(locations, tracts, cuisine, config_path=DEFAULT_CONFIG):
             row["survival"] = {"status": status["status"], "probability": None}
         return locations, status
     try:
-        predictions = engine.predict(tracts)
+        if prediction_cache is None:
+            predictions = engine.predict(tracts)
+        else:
+            # Historical predictions depend on the tract cohort and artifact, not guest spend or daypart.
+            key = (engine, tuple(row["geoid"] for row in tracts))
+            if key not in prediction_cache:
+                prediction_cache[key] = engine.predict(tracts)
+            predictions = prediction_cache[key]
         for row in locations:
             row["survival"] = predictions.get(row["geoid"], {"status": "missing_historical_features", "probability": None})
         if status.get("source_type") == "atharv_tract_export":
@@ -211,7 +219,9 @@ def attach_model(locations, tracts, cuisine, config_path=DEFAULT_CONFIG):
                 return general_model_ranking(locations, status, engine.model_id)
             status["ranking_message"] = "Survival estimates connected; cuisine-gap artifact is unavailable. Ranking uses screening."
             return locations, status
-        table = _gap_table(str(path.resolve()), (path.stat().st_mtime_ns, path.stat().st_size))
+        stat = path.stat()
+        gap_signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino, stat.st_ctime_ns)
+        table = _gap_table(str(path.resolve()), gap_signature)
         if not any(key[1] == label for key in table):
             if policy_aware:
                 return general_model_ranking(locations, status, engine.model_id)
@@ -237,6 +247,7 @@ def attach_model(locations, tracts, cuisine, config_path=DEFAULT_CONFIG):
                                           "h3_resolution": 9, "cuisine": label}
             row["recommendation"] = "Compare the experimental survival estimate and cuisine gap; confirm property suitability."
         status.update(ranking_mode="survival_cuisine_gap", assessment_type="Experimental survival/cuisine-gap ranking",
+                      gap_id=hashlib.sha256(repr((str(path.resolve()), gap_signature)).encode()).hexdigest(),
                       ranking_scope="Eligible tract screening points in the selected borough filter; not property-level ranks")
         return sorted(locations, key=lambda row: row["opportunity"], reverse=True), status
     except (OSError, ValueError, KeyError, ImportError) as error:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import os
@@ -9,12 +10,14 @@ import sqlite3
 from collections import defaultdict
 from copy import deepcopy
 from contextlib import closing
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 from statistics import mean, median
 from urllib.parse import urlparse
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory, redirect, session, url_for
+from itsdangerous import BadData, URLSafeTimedSerializer
 from werkzeug.security import generate_password_hash, check_password_hash
 from scoring import CUISINES, Concept, ScreeningModel, MODEL_VERSION, resolve_concept
 from evaluation import evaluation_status, run_evaluation
@@ -26,7 +29,12 @@ from rent_benchmarks import load_rent_benchmarks
 from generate_synthetic_properties import load_published_inventory
 from survival_inference import DEFAULT_CONFIG, attach_model, model_state
 from customer_access_inference import DEFAULT_ACCESS_CONFIG, attach_access, access_engine
-from evidence_policy import catalog as evidence_catalog, property_policy, attach_runtime_policy
+from evidence_policy import VERSION as EVIDENCE_POLICY_VERSION, catalog as evidence_catalog, property_policy, attach_runtime_policy
+from advisor_dossier import build_dossier
+from advisor_chat import parse_message
+from advisor_chat_answers import compose_answer
+from decision_lab import analyze_scenarios, scenario_grid
+from site_advisor import build_evidence, compare_rankings, evidence_version, published_sample, scenario_arguments, site_brief
 
 
 app = Flask(__name__)
@@ -366,8 +374,26 @@ def integrated_package() -> dict:
     return _load_integrated_package(integrated_directory())
 
 
-@lru_cache(maxsize=2)
 def _load_integrated_package(directory: Path) -> dict:
+    files = [directory / name for name in (
+        "master_tract_features.csv", "entities/current_restaurants.csv", "source_catalog.csv",
+        "entities/current_storefronts.csv", "entities/subway_stations_weekly_activity.csv",
+        "feature_readiness.csv",
+    )]
+    return _read_integrated_package(directory, tuple(file_revision(path) for path in files))
+
+
+def file_revision(path: Path) -> tuple:
+    stat = path.stat()
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
+def revision_id(*parts) -> str:
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
+
+
+@lru_cache(maxsize=2)
+def _read_integrated_package(directory: Path, revisions: tuple) -> dict:
     master_rows = read_csv(directory / "master_tract_features.csv")
     restaurants = read_csv(directory / "entities" / "current_restaurants.csv")
     sources = read_csv(directory / "source_catalog.csv")
@@ -433,6 +459,8 @@ def _load_integrated_package(directory: Path) -> dict:
         "subway_vintage": next((row["vintage"] for row in sources if row.get("source") == "MTA ridership"), "Nearest station · one complete week"),
         "readiness": read_csv(directory / "feature_readiness.csv"),
         "data_release": directory.name,
+        "release_id": revision_id(str(directory), revisions, MODEL_VERSION, EVIDENCE_POLICY_VERSION),
+        "directory": directory,
         "data_path": str(directory.relative_to(PROJECT_ROOT)) if directory.is_relative_to(PROJECT_ROOT) else f"external/{directory.name}",
         "screening_model": ScreeningModel(eligible_rows, restaurants),
         "bounds": {
@@ -866,8 +894,9 @@ REPORTS = [
 ]
 
 
-def tuned_locations(profile: str, rent_cap: int, borough: str = "", concept: Concept | None = None, limit: int | None = 24) -> list[dict]:
-    package = integrated_package()
+def tuned_locations(profile: str, rent_cap: int, borough: str = "", concept: Concept | None = None,
+                    limit: int | None = 24, *, package: dict | None = None) -> list[dict]:
+    package = integrated_package() if package is None else package
     rows = package["tracts"]
     if borough:
         rows = [row for row in rows if row.get("borough") == borough]
@@ -891,8 +920,10 @@ def score_comparison(locations: list[dict], borough: str, sort_by: str) -> dict:
             "definition": f"All evidence-eligible scored tracts in {borough or 'New York City'} for the active concept, format, price, audience and trading-period settings; before the 35-result response cap. Missing scores excluded. Property budgets and transaction filters apply to property inventory, not tract eligibility."}
 
 
-def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, purchase_budget: int, concept: Concept | None = None, profile: str | None = None) -> list[dict]:
-    package = integrated_package()
+def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, purchase_budget: int,
+                        concept: Concept | None = None, profile: str | None = None, *,
+                        package: dict | None = None, include_site_evidence: bool = True) -> list[dict]:
+    package = integrated_package() if package is None else package
     location_lookup = {location["geoid"]: location for location in locations}
     properties = []
     listing_paths = [path for path in (LISTINGS_PATH, LISTINGS_PATH.parent / "public_opportunities.csv") if path.is_file()]
@@ -990,7 +1021,8 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, pu
             "broker_contact": None, "source_url": None, "checked_at": None,
         })
     if deal_type == "purchase":
-        return add_site_evidence(select_property_candidates(properties), package, concept)
+        return (add_site_evidence(select_property_candidates(properties), package, concept)
+                if include_site_evidence else properties)
     seen_bbls = set()
     storefronts = sorted(
         package["storefronts"],
@@ -1047,7 +1079,8 @@ def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, pu
                 "zip_code": listing.get("zip_code") or listing.get("postcode"),
             }
         )
-    return add_site_evidence(select_property_candidates(properties), package, concept)
+    return (add_site_evidence(select_property_candidates(properties), package, concept)
+            if include_site_evidence else properties)
 
 
 def select_property_candidates(properties: list[dict]) -> list[dict]:
@@ -1087,7 +1120,7 @@ def add_site_evidence(properties: list[dict], package: dict, concept: Concept | 
     return properties
 
 
-def data_feeds() -> list[dict]:
+def data_feeds(package=None) -> list[dict]:
     feeds = [
         {
             "name": row.get("source") or "Source",
@@ -1097,7 +1130,7 @@ def data_feeds() -> list[dict]:
             "coverage": row.get("coverage") or "Not Specified",
             "url": public_url(row.get("url")),
         }
-        for row in integrated_package()["sources"]
+        for row in (integrated_package() if package is None else package)["sources"]
     ]
     rent = load_rent_benchmarks(PROJECT_ROOT / "data")
     if rent["status"] == "available" and not any(feed["name"] == "NYC Storefront Rent Statistics" for feed in feeds):
@@ -1199,7 +1232,10 @@ def recommendation_for(score: int, confidence: int, risks: list[str]) -> str:
 
 @app.route("/")
 def index():
-    return render_template("index.html", access=session.get("access"), email=session.get("email"), csrf=csrf_token(), auth_error=None, auth_mode="login")
+    preview = request.args.get("advisor")
+    return render_template("index.html", access=session.get("access"), email=session.get("email"),
+                           csrf=csrf_token(), auth_error=None, auth_mode="login",
+                           advisor_preview=preview if preview in {"live", "sample"} else None)
 
 
 @app.post("/auth/<action>")
@@ -1669,57 +1705,116 @@ def map_restaurants():
 
 @app.route("/api/dashboard")
 def dashboard():
-    try:
-        resolution = resolve_concept(request.args)
-        concept = Concept(**resolution["concept"])
-        rent_cap = int(request.args.get("rent_cap", "18000"))
-        purchase_budget = int(request.args.get("purchase_budget", "3000000"))
-        if not 2000 <= rent_cap <= 100000:
-            raise ValueError("Monthly budget must be between $2,000 and $100,000.")
-        if not 100000 <= purchase_budget <= 50000000:
-            raise ValueError("Purchase budget must be between $100,000 and $50 million.")
-        deal_type = request.args.get("deal_type", "lease")
-        if deal_type not in {"lease", "purchase", "either"}:
-            raise ValueError("Choose lease, purchase, or both.")
-        finance = operating_scenario(request.args, rent_cap, concept.average_check, deal_type)
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
-    concept_name = (request.args.get("concept_name", "Restaurant Concept") or "Restaurant Concept").strip()[:80]
-    profile = resolution["profile"]
-    borough = request.args.get("borough", "")
+    return _dashboard(request.args)
+
+
+@dataclass(frozen=True)
+class DashboardInputs:
+    resolution: dict
+    concept: Concept
+    rent_cap: int
+    purchase_budget: int
+    deal_type: str
+    borough: str
+    sort_by: str
+    finance: dict
+
+    @property
+    def profile(self):
+        return self.resolution["profile"]
+
+
+def dashboard_inputs(args):
+    resolution = resolve_concept(args)
+    concept = Concept(**resolution["concept"])
+    rent_cap = int(args.get("rent_cap", "18000"))
+    purchase_budget = int(args.get("purchase_budget", "3000000"))
+    if not 2000 <= rent_cap <= 100000:
+        raise ValueError("Monthly budget must be between $2,000 and $100,000.")
+    if not 100000 <= purchase_budget <= 50000000:
+        raise ValueError("Purchase budget must be between $100,000 and $50 million.")
+    deal_type = args.get("deal_type", "lease")
+    if deal_type not in {"lease", "purchase", "either"}:
+        raise ValueError("Choose lease, purchase, or both.")
+    borough = args.get("borough", "")
     if borough not in {"", "Brooklyn", "Queens", "Manhattan", "Bronx", "Staten Island"}:
-        borough = ""
-    ranked_locations = tuned_locations(profile, rent_cap, borough, concept, limit=None)
+        raise ValueError("Choose a supported borough or explicitly select all NYC.")
+    sort_by = args.get("sort_by", "opportunity")
+    if sort_by not in {"opportunity", "inverse_walkability"}:
+        raise ValueError("Choose a supported location ranking.")
+    finance = operating_scenario(args, rent_cap, concept.average_check, deal_type)
+    return DashboardInputs(resolution, concept, rent_cap, purchase_budget, deal_type, borough, sort_by, finance)
+
+
+def saved_tract_ids(args):
+    return list(dict.fromkeys(value for value in args.getlist("saved_id")[:4]
+                              if len(value) == 11 and value.isascii() and value.isdigit()))
+
+
+def rank_locations(inputs, package, *, with_access=False, prediction_cache=None):
+    concept = inputs.concept
+    ranked_locations = tuned_locations(inputs.profile, inputs.rent_cap, inputs.borough, concept,
+                                       limit=None, package=package)
     if not ranked_locations:
-        return jsonify({"locations": [], "properties": [], "error": "No locations have sufficient evidence within the selected area.",
-                        "decision_status": "insufficient_location_evidence", "constraints_relaxed": False,
-                        "evidence_policy": evidence_catalog()})
+        return [], {"ranking_mode": "screening", "status": "no_eligible_tracts"}, {"status": "not_assessed"}
     ranked_locations, survival_status = attach_model(
-        ranked_locations, [row for row in integrated_package()["tracts"]
-                           if not borough or row.get("borough") == borough],
-        concept.cuisine, app.config["SURVIVAL_CONFIG"])
-    access_status = attach_access(ranked_locations, [], concept, app.config["CUSTOMER_ACCESS_CONFIG"])
+        ranked_locations, [row for row in package["tracts"]
+                           if not inputs.borough or row.get("borough") == inputs.borough],
+        concept.cuisine, app.config["SURVIVAL_CONFIG"], prediction_cache=prediction_cache)
+    access_status = {"status": "not_assessed"}
+    if with_access or inputs.sort_by == "inverse_walkability":
+        access_status = attach_access(ranked_locations, [], concept, app.config["CUSTOMER_ACCESS_CONFIG"])
     for row in ranked_locations:
         attach_runtime_policy(row)
-    sort_by = request.args.get("sort_by", "opportunity")
-    if sort_by not in {"opportunity", "inverse_walkability"}:
-        return jsonify({"error": "Choose a supported location ranking."}), 400
-    if sort_by == "inverse_walkability":
-        if access_status["status"] != "available":
-            return jsonify({"error": "Customer-access rankings are currently unavailable."}), 503
+    if inputs.sort_by == "inverse_walkability" and access_status["status"] == "available":
         ranked_locations.sort(key=lambda row: (row["inverse_walkability"] is not None,
                                                row["inverse_walkability"] or 0), reverse=True)
-        access_status["ranking_changed"] = True
-    locations = ranked_locations[:35]
+        access_status = {**access_status, "ranking_changed": True}
+    return ranked_locations, survival_status, access_status
+
+
+def rank_snapshot(inputs, package, rows, survival, access):
+    mode = survival["ranking_mode"]
+    if inputs.sort_by == "inverse_walkability":
+        basis_id = revision_id("customer_access", access.get("artifact_id"), access.get("version"), access.get("as_of"))
+    elif mode.startswith("survival_"):
+        basis_id = revision_id(mode, survival.get("model_version"), survival.get("artifact_id"), survival.get("gap_id"))
+    else:
+        basis_id = revision_id(mode, MODEL_VERSION, EVIDENCE_POLICY_VERSION)
+    return {"locations": rows, "scoring": {"ranking_mode": mode, "basis_id": basis_id},
+            "meta": {"sort_by": inputs.sort_by, "data_release": package["data_release"],
+                     "release_id": package["release_id"], "concept": inputs.concept.public()}}
+
+
+def _dashboard(args, *, advisor_snapshot=False):
+    try:
+        inputs = dashboard_inputs(args)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    concept, profile, resolution = inputs.concept, inputs.profile, inputs.resolution
+    rent_cap, purchase_budget, deal_type = inputs.rent_cap, inputs.purchase_budget, inputs.deal_type
+    borough, sort_by, finance = inputs.borough, inputs.sort_by, inputs.finance
+    concept_name = (args.get("concept_name", "Restaurant Concept") or "Restaurant Concept").strip()[:80]
+    package = integrated_package()
+    ranked_locations, survival_status, access_status = rank_locations(inputs, package, with_access=not advisor_snapshot)
+    if sort_by == "inverse_walkability" and access_status["status"] not in {"available", "not_assessed"}:
+        return jsonify({"error": "Customer-access rankings are currently unavailable."}), 503
+    scored_locations = ([row for row in ranked_locations if row.get("inverse_walkability") is not None]
+                        if sort_by == "inverse_walkability" else ranked_locations)
+    if not scored_locations:
+        return jsonify({"locations": [], "properties": [], "error": "No locations have sufficient evidence within the selected area and ranking method.",
+                        "decision_status": "insufficient_location_evidence", "constraints_relaxed": False,
+                        "evidence_policy": evidence_catalog()})
+    if advisor_snapshot:
+        keys = ("id", "name", "opportunity", "inverse_walkability", "score_components")
+        rows = [{key: row.get(key) for key in keys} for row in scored_locations]
+        return jsonify(rank_snapshot(inputs, package, rows, survival_status, access_status))
+    locations = scored_locations[:35]
     best = locations[0]
-    requested_ids = list(dict.fromkeys(
-        value for value in request.args.getlist("saved_id")[:4]
-        if len(value) == 11 and value.isdigit()
-    ))
+    requested_ids = saved_tract_ids(args)
     ranked_lookup = {row["id"]: row for row in ranked_locations}
     missing_ids = set(requested_ids) - ranked_lookup.keys()
     if missing_ids:
-        package = integrated_package()
         for row in package["tracts"]:
             if row["geoid"] in missing_ids:
                 ranked_lookup[row["geoid"]] = real_location_from_tract(row, profile, rent_cap, package, concept)
@@ -1730,7 +1825,7 @@ def dashboard():
     avg_confidence = round(sum(row["confidence_score"] for row in locations) / len(locations))
     finance["purchase_budget"] = purchase_budget
     finance["average_check"] = concept.average_check
-    properties = matching_properties(ranked_locations, deal_type, rent_cap, purchase_budget, concept, profile)
+    properties = matching_properties(ranked_locations, deal_type, rent_cap, purchase_budget, concept, profile, package=package)
     attach_access([], properties, concept, app.config["CUSTOMER_ACCESS_CONFIG"])
     if sort_by == "inverse_walkability":
         properties.sort(key=lambda row: (row.get("customer_access", {}).get("index") is not None,
@@ -1748,7 +1843,7 @@ def dashboard():
             "property_locations": property_locations,
             "selected": best["id"],
             "comparison": score_comparison(ranked_locations, borough, sort_by),
-            "feeds": data_feeds(),
+            "feeds": data_feeds(package),
             "whitespace": market_gap_rows(locations),
             "vendor_windows": VENDOR_WINDOWS,
             "properties": properties,
@@ -1792,12 +1887,452 @@ def dashboard():
                 "deal_type": deal_type,
                 "borough": borough or "All NYC",
                 "sort_by": sort_by,
-                "primary_dataset": f"{integrated_package()['data_path']}/master_tract_features.csv",
-                "data_release": integrated_package()["data_release"],
+                "primary_dataset": f"{package['data_path']}/master_tract_features.csv",
+                "data_release": package["data_release"],
                 "unsupported_values": unsupported_values(properties),
             },
         }
     )
+
+
+@app.get("/site-advisor-preview")
+def site_advisor_preview():
+    return redirect(url_for("index", advisor="sample"))
+
+
+def _advisor_brief_response(evidence, payload):
+    wording = isinstance(payload, dict) and payload.get("wording") is True
+    if wording and payload.get("evidence_version") != evidence_version(evidence):
+        return jsonify({"error": "The evidence changed. Generate a new brief before polishing."}), 409
+    return jsonify(site_brief(evidence, wording=wording))
+
+
+@app.post("/api/site-brief/sample")
+@app.post("/api/site-brief/sample/scenario")
+def site_brief_sample_api():
+    if not request.is_json:
+        return jsonify({"error": "Send a JSON request."}), 415
+    comparison = request.path.endswith("/scenario")
+    changes = request.get_json(silent=True)
+    if comparison and (not isinstance(changes, dict) or set(changes) != {"average_check"}
+                       or changes["average_check"] not in (18, 65)):
+        return jsonify({"error": "Choose the saved $18 or $65 sample."}), 400
+    path = PROJECT_ROOT / "reports/2026-11-02-model-results/scenarios/top_selections.csv"
+    try:
+        base = published_sample(path, 35)
+        if comparison:
+            variant = published_sample(path, changes["average_check"])
+            result = compare_rankings(base, variant)
+            result["scope"] = "Published synthetic scenario replay; no new scores were calculated."
+            result["inputs"] = [row["meta"]["concept"] for row in (base, variant)]
+            return jsonify(result)
+    except (OSError, ValueError, KeyError):
+        return jsonify({"error": "Published sample results are unavailable."}), 503
+    evidence = build_evidence(base)
+    evidence["scope"] = "Published synthetic property sample"
+    return _advisor_brief_response(evidence, changes)
+
+
+@app.post("/api/site-brief")
+def site_brief_api():
+    if not request.is_json:
+        return jsonify({"error": "Send a JSON request."}), 415
+    try:
+        response = app.make_response(dashboard())
+    except FileNotFoundError:
+        return jsonify({"error": "Integrated data is not installed. Try the published sample."}), 503
+    if response.status_code != 200:
+        return response
+    result = response.get_json()
+    saved_ids = [value for value in request.args.getlist("saved_id")[:4] if len(value) == 11 and value.isdigit()]
+    evidence = build_evidence(result, saved_ids)
+    if not evidence["sites"]:
+        return jsonify({"error": "No locations have sufficient evidence for a brief."}), 422
+    return _advisor_brief_response(evidence, request.get_json(silent=True))
+
+
+@app.post("/api/site-brief/scenario")
+def site_brief_scenario_api():
+    if not request.is_json:
+        return jsonify({"error": "Send a JSON request."}), 415
+    try:
+        variant = scenario_arguments(request.args, request.get_json(silent=True))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    results = []
+    for args in (request.args, variant):
+        try:
+            response = app.make_response(_dashboard(args, advisor_snapshot=True))
+        except FileNotFoundError:
+            return jsonify({"error": "Integrated data is not installed. Try the published sample."}), 503
+        if response.status_code != 200:
+            return response
+        result = response.get_json()
+        if not result.get("locations"):
+            return jsonify({"error": "One scenario has insufficient location evidence; no comparison was made."}), 422
+        results.append(result)
+    try:
+        comparison = compare_rankings(*results)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 409
+    comparison["inputs"] = [
+        {key: result.get("meta", {}).get("concept", {}).get(key) for key in ("average_check", "daypart")}
+        for result in results
+    ]
+    return jsonify(comparison)
+
+
+def decision_lab_assumptions(inputs):
+    concept = inputs.concept
+    return {"borough": inputs.borough or "All NYC", "deal_type": inputs.deal_type,
+            "rent_cap": inputs.rent_cap, "purchase_budget": inputs.purchase_budget,
+            "profile": inputs.profile, "cuisine": concept.cuisine, "service_style": concept.service_style,
+            "audience": concept.audience, "dietary": concept.dietary,
+            "baseline_average_check": concept.average_check, "baseline_daypart": concept.daypart}
+
+
+def decision_lab_snapshot_id(inputs, baseline):
+    return revision_id(baseline["meta"]["release_id"], baseline["scoring"]["basis_id"],
+                       decision_lab_assumptions(inputs), inputs.finance)
+
+
+def decision_lab_dossier(inputs, package, rows, survival, access, *, deep=False, properties=None):
+    ids = [row["id"] for row in rows]
+    meta = {"data_release": package["data_release"], "concept": inputs.concept.public()}
+    if not rows:
+        return build_dossier({"meta": meta, "survival_model": survival, "customer_access_model": access}, ids)
+    if inputs.sort_by != "inverse_walkability":
+        access = attach_access(rows, [], inputs.concept, app.config["CUSTOMER_ACCESS_CONFIG"])
+        for row in rows:
+            attach_runtime_policy(row)
+    if properties is None:
+        properties = matching_properties(rows, inputs.deal_type, inputs.rent_cap, inputs.purchase_budget,
+                                         inputs.concept, inputs.profile, package=package, include_site_evidence=False)
+    else:
+        properties = [item for item in properties if item["location_id"] in ids]
+    for item in properties:
+        item["assessment_policy"] = property_policy(item, inputs.deal_type, inputs.rent_cap, inputs.purchase_budget)
+    if deep:
+        leads = {}
+        for item in properties:
+            if item.get("lead_type") == "listing":
+                leads.setdefault(item["location_id"], item)
+        add_site_evidence(list(leads.values()), package, inputs.concept)
+    rent = load_rent_benchmarks(PROJECT_ROOT / "data")
+    rent = {**rent, "by_geoid": {key: value for key in ids if (value := rent.get("by_geoid", {}).get(key)) is not None}}
+    try:
+        profiles = {row["geoid"]: resident_worker_profile(row, package["directory"]) for row in rows}
+    except FileNotFoundError:
+        profiles = {}
+    return build_dossier({"locations": rows, "properties": properties, "feeds": data_feeds(package),
+                          "property_search": {"status": "matches_available" if properties else "no_matching_inventory"},
+                          "finance": inputs.finance, "rent_benchmarks": rent, "survival_model": survival,
+                          "customer_access_model": access, "meta": meta},
+                         ids, profiles=profiles)
+
+
+def decision_lab_brief(result):
+    summary = result["summary"]
+    total, comparable = summary["scenario_count"], summary["comparable_count"]
+    if not comparable:
+        return "This scope and ranking method produced no scored scenarios. Check data coverage before building a shortlist."
+    if total == 1:
+        return "This is the current baseline. Add guest spends or trading periods to see which areas hold up when assumptions change."
+    robust = [row["name"] for row in result["candidates"] if row["clear_count"] == total]
+    if result.get("method_note"):
+        first = result["method_note"]
+    elif robust:
+        first = f"{', '.join(robust)} {'clears' if len(robust) == 1 else 'clear'} the top-three cutoff in all {total} tested scenarios."
+    elif comparable < total:
+        first = f"Only {comparable} of {total} scenarios produced comparable ranks. The full range has insufficient evidence for a stable shortlist."
+    else:
+        first = f"No area earned a clear top-three place across all {total} tested scenarios."
+    if summary["tied_cutoff_count"]:
+        count = summary["tied_cutoff_count"]
+        first += f" The third-place cutoff was tied in {count} of {total} scenarios."
+    sites = result["dossiers"]["sites"]
+    if sites:
+        focus = sites[0]
+        check = focus["next_check"]["label"]
+        first += f" First check for {focus['name']}: {check}."
+    return first
+
+
+@app.post("/api/site-brief/decision-lab")
+def site_decision_lab_api():
+    if not request.is_json:
+        return jsonify({"error": "Send a JSON request."}), 415
+    try:
+        inputs = dashboard_inputs(request.args)
+        scenarios = scenario_grid(inputs.concept.average_check, inputs.concept.daypart, request.get_json(silent=True))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
+    try:
+        package = integrated_package()
+        predictions = {}
+        rows, survival, access = rank_locations(inputs, package, prediction_cache=predictions)
+        baseline = rank_snapshot(inputs, package, rows, survival, access)
+        snapshots = [baseline if access["status"] != "unavailable" else None]
+        for scenario in scenarios[1:]:
+            concept = replace(inputs.concept, average_check=scenario["average_check"], daypart=scenario["daypart"])
+            if concept.average_check != inputs.concept.average_check:
+                concept = replace(concept, price_mode="exact")
+            variant = replace(inputs, concept=concept)
+            ranked, variant_survival, variant_access = rank_locations(variant, package, prediction_cache=predictions)
+            if variant_access["status"] == "unavailable":
+                snapshots.append(None)
+            else:
+                compact = [{key: row.get(key) for key in ("id", "name", inputs.sort_by)} for row in ranked]
+                snapshots.append(rank_snapshot(variant, package, compact, variant_survival, variant_access))
+
+        try:
+            result = analyze_scenarios(scenarios, snapshots, saved_tract_ids(request.args))
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 409
+        result["candidates"].sort(key=lambda row: (row["saved"], row["clear_count"], row["possible_count"],
+                                                   row["available_count"]), reverse=True)
+        by_id = {row["id"]: row for row in rows}
+        focused = [by_id[candidate["id"]] for candidate in result["candidates"] if candidate["id"] in by_id][:3]
+        result["dossiers"] = decision_lab_dossier(inputs, package, focused, survival, access)
+        if integrated_package()["release_id"] != package["release_id"]:
+            return jsonify({"error": "The data release changed. Run the Decision Lab again."}), 409
+    except FileNotFoundError:
+        return jsonify({"error": "Integrated data is not installed. Try the published sample."}), 503
+
+    result["assumptions"] = decision_lab_assumptions(inputs)
+    result["release"] = package["data_release"]
+    result["snapshot_id"] = decision_lab_snapshot_id(inputs, baseline)
+    if inputs.sort_by == "inverse_walkability":
+        result.update(ranking_basis="Customer access", ranking_mode="inverse_walkability")
+    elif result["ranking_mode"] == "survival_cuisine_gap":
+        result["method_note"] = ("Guest spend and trading period do not enter the survival/cuisine-gap score. "
+                                 "Unchanged ranks on that basis are not evidence of stability under those assumptions.")
+    result["brief"] = decision_lab_brief(result)
+    return jsonify(result)
+
+
+@app.post("/api/site-brief/decision-lab/dossier")
+def site_decision_dossier_api():
+    if not request.is_json:
+        return jsonify({"error": "Send a JSON request."}), 415
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"id", "snapshot_id"}:
+        return jsonify({"error": "Choose a tract from the current Decision Lab."}), 400
+    geoid, token = payload["id"], payload["snapshot_id"]
+    if not isinstance(geoid, str) or len(geoid) != 11 or not geoid.isascii() or not geoid.isdigit():
+        return jsonify({"error": "Choose a valid census tract."}), 400
+    if not isinstance(token, str) or len(token) != 64:
+        return jsonify({"error": "Run the Decision Lab before opening tract evidence."}), 400
+    try:
+        inputs = dashboard_inputs(request.args)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    try:
+        package = integrated_package()
+        rows, survival, access = rank_locations(inputs, package)
+        baseline = rank_snapshot(inputs, package, rows, survival, access)
+        if token != decision_lab_snapshot_id(inputs, baseline):
+            return jsonify({"error": "The dashboard inputs or ranking data changed. Run the Decision Lab again."}), 409
+        row = next((row for row in rows if row["id"] == geoid), None)
+        if row is None:
+            return jsonify({"error": "This tract is outside the current scope or lacks core screening evidence."}), 404
+        dossier = decision_lab_dossier(inputs, package, [row], survival, access, deep=True)
+        if integrated_package()["release_id"] != package["release_id"]:
+            return jsonify({"error": "The data release changed. Run the Decision Lab again."}), 409
+        return jsonify(dossier)
+    except FileNotFoundError:
+        return jsonify({"error": "Integrated data is not installed. Try the published sample."}), 503
+
+
+CHAT_DAYPARTS = {"all_day": "all day", "morning": "morning", "lunch": "lunch", "evening": "evening"}
+
+
+def chat_inputs(args, changes):
+    adjusted = args.copy()
+    for key, value in changes.items():
+        adjusted[key] = str(value)
+    if "average_check" in changes:
+        adjusted["price_mode"] = "exact"
+    return dashboard_inputs(adjusted)
+
+
+def chat_check_label(concept):
+    return f"${concept.average_check:,.2f}".rstrip("0").rstrip(".") + f" per guest, {CHAT_DAYPARTS[concept.daypart]}"
+
+
+def chat_scope(inputs):
+    concept = inputs.concept
+    cuisine = concept.cuisine.replace("_", " ").title() if concept.cuisine != "any" else "Any cuisine"
+    limits = []
+    if inputs.deal_type != "purchase":
+        limits.append(f"Lease up to ${inputs.rent_cap:,}/mo")
+    if inputs.deal_type != "lease":
+        limits.append(f"Purchase up to ${inputs.purchase_budget:,}")
+    return " · ".join([inputs.borough or "All NYC", cuisine, chat_check_label(concept), *limits])
+
+
+def chat_actions(intent, cards, inputs):
+    if not cards:
+        return [{"label": "Find areas", "prompt": "Where should I start looking?"}]
+    actions = []
+    if intent != "why":
+        actions.append({"label": "Why this area?", "prompt": "Why the first one?"})
+    if len(cards) >= 2 and intent != "compare":
+        actions.append({"label": "Compare these areas", "prompt": "Compare these areas."})
+    if intent != "property":
+        actions.append({"label": "Check property leads", "prompt": "Can I tour the first one?"})
+    period = "lunch" if inputs.concept.daypart == "evening" else "dinner"
+    actions.append({"label": f"Try {period}", "prompt": f"What if I switch to {period}?"})
+    return actions[:3]
+
+
+def chat_scenario(before, after, before_inputs, after_inputs, survival):
+    settings = [before_inputs.concept, after_inputs.concept]
+    variants = [{"id": key, "average_check": concept.average_check, "daypart": concept.daypart}
+                for key, concept in zip(("before", "after"), settings)]
+    result = {"before_label": chat_check_label(settings[0]), "after_label": chat_check_label(settings[1]),
+              "matched": sum(variants[0][key] != variants[1][key] for key in ("average_check", "daypart")) == 1,
+              "inert": after_inputs.sort_by == "opportunity" and survival["ranking_mode"] == "survival_cuisine_gap"}
+    try:
+        compared = analyze_scenarios(variants, [before, after])
+    except ValueError:
+        return {**result, "comparison_unavailable": True}
+    if compared["summary"]["comparable_count"] != 2:
+        return {**result, "comparison_unavailable": True}
+    baseline, variant = compared["scenarios"]
+    entries, exits = [], []
+    for row in compared["candidates"]:
+        left, right = row["results"]
+        if left["status"] == right["status"] == "ranked":
+            if right["possible"] and not left["possible"]:
+                entries.append(row["name"])
+            if left["possible"] and not right["possible"]:
+                exits.append(row["name"])
+    return {**result, "entrants": entries, "departures": exits,
+            "before_ids": [row["id"] for row in baseline["displayed_top_three"]],
+            "after_ids": [row["id"] for row in variant["displayed_top_three"]],
+            "tied_cutoff": baseline["cutoff_tied"] or variant["cutoff_tied"],
+            "comparison_unavailable": False}
+
+
+def chat_cards(inputs, package, snapshot, focus, survival, access, *, deep=False, properties=None):
+    dossier = decision_lab_dossier(inputs, package, focus, survival, access, deep=deep, properties=properties)
+    dossiers = {site["id"]: site for site in dossier["sites"]}
+    concept = inputs.concept
+    ids = [row["id"] for row in focus]
+    ranking = analyze_scenarios([{"id": "current", "average_check": concept.average_check,
+                                  "daypart": concept.daypart}], [snapshot], ids)
+    ranks = {item["id"]: item["results"][0] for item in ranking["candidates"]}
+    cards = []
+    for row in focus:
+        rank = ranks[row["id"]]
+        low, high = rank["rank_min"], rank["rank_max"]
+        label = ("Score unavailable" if low is None else f"Rank {low}" if low == high
+                 else f"Tied across ranks {low}–{high}")
+        cards.append({"id": row["id"], "name": row["name"], "label": label,
+                      "score": rank["score"], "dossier": dossiers.get(row["id"])})
+    return cards
+
+
+@app.post("/api/site-brief/chat")
+def site_advisor_chat_api():
+    if not request.is_json:
+        return jsonify({"error": "Send a JSON request."}), 415
+    if request.content_length is not None and request.content_length > 10_000:
+        return jsonify({"error": "That question is too long. Use up to 500 characters."}), 413
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or "message" not in payload or payload.keys() - {"message", "context", "selected_id"}:
+        return jsonify({"error": "Send a question for the Advisor."}), 400
+    message, context, selected = payload["message"], payload.get("context"), payload.get("selected_id")
+    if not isinstance(message, str) or not 1 <= len(message.strip()) <= 500:
+        return jsonify({"error": "Ask a question of up to 500 characters."}), 400
+    if selected is not None and (not isinstance(selected, str) or len(selected) != 11
+                                 or not selected.isascii() or not selected.isdigit()):
+        return jsonify({"error": "Choose a valid map area."}), 400
+    if context is not None and (not isinstance(context, str) or not 1 <= len(context) <= 4000):
+        return jsonify({"error": "Start a new chat to continue."}), 400
+
+    serializer = URLSafeTimedSerializer(app.secret_key, salt="groundwork-advisor-chat-v1")
+    try:
+        package = integrated_package()
+        anchor = revision_id(request.args.to_dict(flat=False), package["release_id"])
+        state = serializer.loads(context, max_age=4 * 3600) if context else {}
+        if state and state["anchor"] != anchor:
+            return jsonify({"error": "The dashboard settings or data changed. Start a new chat to use them."}), 409
+        accepted = state.get("changes", {})
+        prior = chat_inputs(request.args, accepted)
+        candidates = [{"id": row["geoid"], "name": tract_display_name(row), "borough": row.get("borough"),
+                       "neighborhood": row.get("nta_name")} for row in package["tracts"]]
+        plan = parse_message(message, {**decision_lab_assumptions(prior), "average_check": prior.concept.average_check,
+                                      "daypart": prior.concept.daypart}, candidates=candidates,
+                             selected_ids=saved_tract_ids(request.args), map_selected_id=selected,
+                             previous=state.get("previous"))
+        if plan["clarification"]:
+            return jsonify({"answer": plan["clarification"], "context": context, "cards": [],
+                            "actions": plan.get("actions", []), "scope": chat_scope(prior)})
+        intent, topic = plan["intent"], plan["topic"]
+        changes = {**accepted, **plan["changes"]}
+        hypothetical_rent = plan["changes"].get("rent_cap") if topic == "rent_scenario" else None
+        if hypothetical_rent is not None:
+            changes = {**accepted, **{key: value for key, value in plan["changes"].items() if key != "rent_cap"}}
+        inputs = chat_inputs(request.args, changes)
+        predictions = {}
+        rows, survival, access = rank_locations(inputs, package, prediction_cache=predictions)
+        snapshot = rank_snapshot(inputs, package, rows, survival, access)
+        ranked = [row for row in rows if row.get(inputs.sort_by) is not None]
+        by_id = {row["id"]: row for row in rows}
+        requested = plan["candidate_ids"]
+        if any(key not in by_id for key in requested):
+            return jsonify({"answer": "One of those areas is outside this search or lacks core screening data. "
+                            "Name a different tract or specify the borough you want to use.", "context": context,
+                            "cards": [], "actions": [], "scope": chat_scope(inputs)})
+        focus = [by_id[key] for key in requested]
+        if intent == "recommend" and focus:
+            topic = "focused_area"
+        properties = None
+        if intent == "property" and not focus:
+            topic = "property_search"
+            properties = matching_properties(rows, inputs.deal_type, inputs.rent_cap, inputs.purchase_budget,
+                                             inputs.concept, inputs.profile, package=package, include_site_evidence=False)
+            source_ids = {item["location_id"] for item in properties if item.get("lead_type") == "listing"}
+            focus = [row for row in rows if row["id"] in source_ids][:3]
+        if not focus and intent != "break_even":
+            focus = ranked[:1] if intent == "why" else ranked[:3]
+        cards = chat_cards(inputs, package, snapshot, focus, survival, access,
+                           deep=intent == "property", properties=properties) if focus else []
+        scenario = None
+        if intent == "what_if":
+            # A change of borough or cuisine establishes the scope for both sides of the comparison.
+            baseline_changes = {**changes, "average_check": prior.concept.average_check, "daypart": prior.concept.daypart}
+            baseline = chat_inputs(request.args, baseline_changes)
+            base_rows, base_survival, base_access = rank_locations(baseline, package, prediction_cache=predictions)
+            scenario = chat_scenario(rank_snapshot(baseline, package, base_rows, base_survival, base_access),
+                                     snapshot, baseline, inputs, survival)
+        finance = None if focus and intent == "break_even" else inputs.finance
+        if hypothetical_rent is not None:
+            finance = operating_scenario(request.args, hypothetical_rent, inputs.concept.average_check, inputs.deal_type)
+        ranking_basis = ("customer-access index" if inputs.sort_by == "inverse_walkability" else
+                         "experimental location index" if survival["ranking_mode"].startswith("survival_") else
+                         "location screening score")
+        if not ranked and inputs.sort_by == "inverse_walkability" and intent in {"recommend", "compare", "what_if"}:
+            answer = ("Customer-access scores are unavailable for this search. Switch the dashboard to location screening "
+                      "to get a shortlist on that basis.")
+        else:
+            answer = compose_answer(intent, topic, cards, ranking_basis=ranking_basis, finance=finance, scenario=scenario)
+        if integrated_package()["release_id"] != package["release_id"]:
+            return jsonify({"error": "The data changed while answering. Start a new chat with the new data."}), 409
+        previous = {"intent": intent, "changes": plan["changes"], "topic": topic,
+                    "candidate_ids": [card["id"] for card in cards] or state.get("previous", {}).get("candidate_ids", [])}
+        token = serializer.dumps({"anchor": anchor, "changes": changes, "previous": previous})
+        return jsonify({"answer": answer, "context": token, "cards": cards,
+                        "actions": chat_actions(intent, cards, inputs), "scope": chat_scope(inputs)})
+    except BadData:
+        return jsonify({"error": "This conversation expired or could not be read. Start a new chat."}), 409
+    except FileNotFoundError:
+        return jsonify({"error": "Integrated data is unavailable. The research tools include a published sample."}), 503
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
 
 @app.get("/api/assessment-policy")
