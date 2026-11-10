@@ -27,7 +27,7 @@ jobs:
           node-version: '22'
       - run: pip install -r backend/requirements-dev.txt
       - run: ruff check backend && node --check demo/static/js/dashboard.js
-      - run: node --test backend/tests/frontend_hex.test.cjs
+      - run: node --test backend/tests/frontend_*.test.cjs
       - run: pytest -q
         working-directory: backend
         env:

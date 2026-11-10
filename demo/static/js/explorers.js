@@ -12,7 +12,7 @@ let transitRenderId = 0;
 const explorerCompetitionCache = new Map();
 const competitionResolved = new Map();
 let competitionRenderId = 0;
-let competitionBreakdownOpen = true;
+let competitionBreakdownOpen = false;
 let competitionComparisonOpen = true;
 let competitionFilter = "all";
 let competitionQuery = "";
@@ -117,9 +117,9 @@ function profileNumber(value, currency = false) {
 }
 
 function profileMetric(title, source, first, second, currency = false, income = false) {
-  const value = profile => profileNumber(profile?.market_profile?.[first], currency);
+  const value = profile => income ? householdIncome(profile?.market_profile?.[first]) : profileNumber(profile?.market_profile?.[first], currency);
   const margin = profile => income && profile?.market_profile?.[first] != null
-    ? `<small>${profile.market_profile.income_margin_of_error == null ? "Margin of error unavailable" : `±${fmtDollar(profile.market_profile.income_margin_of_error)} margin of error`}</small>` : "";
+    ? `<small>${Number(profile.market_profile[first]) === 250001 ? "ACS upper open interval · not an exact value" : profile.market_profile.income_margin_of_error == null ? "Margin of error unavailable" : `±${fmtDollar(profile.market_profile.income_margin_of_error)} margin of error`}</small>` : "";
   return `<article class="rw-metric"><h4>${title}</h4><p>${source}</p>
     <div class="rw-metric-value"><span>${escapeHtml(first === "jobs" ? "Selected workplace" : "Selected area")}</span><strong>${value(second[0])}</strong>${margin(second[0])}</div>
     ${second[1] ? `<div class="rw-metric-value"><span>Comparison area</span><strong>${value(second[1])}</strong>${margin(second[1])}</div>` : ""}
