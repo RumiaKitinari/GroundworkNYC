@@ -175,7 +175,7 @@ function syncEntryFields() {
   document.querySelector("#briefCustomCuisine").value = custom?.[1] || "";
   if (custom) descriptionField.value = state.description.slice(0, custom.index);
   document.querySelector("#briefSkip").hidden = false;
-  document.querySelector("#briefSkip").textContent = "Cancel";
+  document.querySelector("#briefSkip").textContent = "Back to Dashboard";
 }
 
 function submitEntryBrief() {
