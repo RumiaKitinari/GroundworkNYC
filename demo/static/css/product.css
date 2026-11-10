@@ -1,0 +1,593 @@
+
+/* Groundwork product layer: navigation, decision hierarchy and progressive detail.
+   Existing components, MapLibre layers and calculation code remain in place. */
+:root {
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 18px;
+  --space-5: 24px; --space-6: 32px; --radius-card: 12px;
+}
+
+:root[data-theme="dark"] {
+  --void: #0e171f; --bg: #111d27; --panel: #172630; --panel-2: #1d303d;
+  --line: #314654; --line-bright: #547082; --text: #dae5ed; --bright: #f7fafc;
+  --muted: #a0b3c2; --faint: #91a6b6; --blue: #80bfff; --cyan: #66c8bc;
+  --green: #69c5ac; --amber: #e8bd77; --violet: #bda9e4;
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f6f8; --panel: #fff; --panel-2: #f0f4f7; --line: #d9e1e7;
+  --text: #304354; --bright: #182c3c; --muted: #5a6c7b; --faint: #647583;
+  --blue: #1768ab; --cyan: #147665; --green: #147665; --amber: #926019; --violet: #7751a8;
+}
+
+/* Product navigation: five destinations, one contextual level. */
+.app-frame .destination-nav{display:flex;gap:6px;border-bottom:1px solid var(--line);padding:0 0 10px;min-width:0}
+
+.app-frame .destination-nav button{border:0;border-radius:8px;background:transparent;color:var(--muted);padding:11px 20px;font-size:14px;font-weight:650;white-space:nowrap}
+
+.app-frame .destination-nav button[aria-current="page"]{background:color-mix(in srgb,var(--blue) 12%,var(--panel));color:var(--blue)}
+
+.app-frame .contextual-nav{margin-top:-12px;border-bottom:0;overflow-x:auto;padding:0!important;min-height:0}
+
+.app-frame .contextual-nav[hidden], .app-frame .contextual-nav [hidden]{display:none!important}
+
+.app-frame .contextual-nav .nav-group{padding:0;margin:0;border:0;gap:20px}
+
+.app-frame .contextual-nav .feature-tab{min-height:34px;padding:0 0 8px;font-size:13px;font-weight:550;border-radius:0;background:none;white-space:nowrap}
+
+.app-frame .location-context{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;margin-top:-6px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+
+.app-frame .location-context[hidden]{display:none}
+.app-frame .location-context > div{display:flex;align-items:center;gap:12px;min-width:0}
+.app-frame .location-context strong{font-weight:600}
+.app-frame .context-caption{font-size:11px;color:var(--muted)}
+
+.app-frame .context-divider{height:18px;border-left:1px solid var(--line)}
+
+.app-frame .text-action{background:none;border:0;color:var(--blue);padding:4px 0;font-size:12px;white-space:nowrap}
+
+.app-frame .rail-filters{margin-top:24px}
+.app-frame .rail-filters summary{color:var(--muted);font-size:12px;cursor:pointer;padding-bottom:16px}
+.app-frame .rail-filters .concept-search{margin-top:8px}
+
+.app-frame .rail > .brief-edit{margin-top:14px;min-height:36px;background:transparent;border-color:var(--line);font-size:12px;color:var(--text)}
+
+.app-frame .topbar{align-items:center}
+.app-frame .topbar h1{font-size:23px;letter-spacing:-.5px}
+.app-frame .top-actions{gap:10px}
+.app-frame .top-actions .search{width:240px;flex:0 1 240px}
+.app-frame .top-actions .location-select{max-width:240px}
+
+.app-frame .topbar .settings-shortcut{width:auto;margin:0;font-size:12px;min-height:36px;padding:0 12px}
+
+.app-frame .workspace{gap:20px}
+.app-frame .workspace:not(.is-discover) .top-actions .search{display:none}
+.app-frame .workspace.is-discover .top-actions .location-select{display:none}
+
+@media(max-width:760px) {
+.app-frame .destination-nav{gap:2px;justify-content:space-between}
+.app-frame .destination-nav button{padding:10px 9px;font-size:12px}
+
+.app-frame .location-context{align-items:start}
+.app-frame .location-context > div{flex-wrap:wrap;gap:8px}
+.app-frame .context-caption{display:none}
+.app-frame .location-context .quiet-action{flex:0 0 auto;font-size:11px}
+
+.app-frame .contextual-nav .nav-group{gap:18px}
+.app-frame .topbar .top-actions{display:flex;flex-wrap:wrap;gap:8px;width:100%}
+.app-frame .top-actions .search{width:auto;flex:1 1 210px}
+.app-frame .top-actions .location-select{max-width:none;flex:1 1 230px}
+
+.app-frame .rail > .brief-edit{margin:10px 0 0;width:auto}
+.app-frame .rail-filters{margin:10px 0 0}
+.app-frame .rail-filters:not([open]){padding:0}
+.app-frame .rail-filters summary{padding:5px 0}
+
+}
+
+@media print {.app-frame .destination-nav, .app-frame .location-context{display:none!important}
+}
+
+
+/* Market profile: decision first, supporting evidence on demand. */
+.app-frame .scorecard-board{padding:26px!important}
+.app-frame .location-hero{display:flex;justify-content:space-between;gap:36px;align-items:center;padding:4px 0 26px}
+.app-frame .location-hero h2{font-size:28px;line-height:1.25;letter-spacing:-.7px;margin:9px 0 12px;max-width:700px}
+.app-frame .location-hero p{max-width:720px;color:var(--text);font-size:14px;line-height:1.7;margin:0 0 16px}
+
+.app-frame .hero-score{flex:0 0 124px;display:flex;justify-content:center;align-items:baseline;gap:4px;flex-wrap:wrap;background:color-mix(in srgb,var(--blue) 8%,var(--panel));padding:20px 12px;border:1px solid color-mix(in srgb,var(--blue) 25%,var(--line));border-radius:16px;color:var(--blue)}
+
+.app-frame .hero-score strong{font-size:52px;letter-spacing:-2px;line-height:1}
+.app-frame .hero-score span{font-size:14px;color:var(--muted)}
+.app-frame .hero-score small{width:100%;text-align:center;font-size:11px;margin-top:8px}
+
+.app-frame .hero-evidence{display:flex;flex-wrap:wrap;gap:10px 20px;font-size:12px;color:var(--muted)}
+.app-frame .hero-evidence b{color:var(--text)}
+
+.app-frame .card-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.app-frame .card-heading h3{margin:0;font-size:15px;font-weight:650}
+.app-frame .card-heading .muted, .app-frame .source-tag{font-size:11px;color:var(--muted);white-space:nowrap}
+
+.app-frame .score-comparison{padding:22px;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;margin:0 0 28px}
+
+.app-frame .comparison-scale{height:28px;position:relative;margin:20px 9px 0}
+.app-frame .scale-line{position:absolute;left:0;right:0;top:12px;height:6px;border-radius:8px;background:linear-gradient(90deg,var(--line),color-mix(in srgb,var(--blue) 50%,var(--line)))}
+
+.app-frame .scale-mark{display:block;position:absolute;top:8px;width:3px;height:14px;background:var(--amber);transform:translateX(-50%)}
+.app-frame .scale-median{background:var(--violet);top:5px;height:20px}
+.app-frame .scale-selected{width:14px;height:14px;border-radius:50%;top:8px;background:var(--blue);border:3px solid var(--panel-2);box-shadow:0 0 0 2px var(--blue)}
+
+.app-frame .scale-endpoints{display:flex;justify-content:space-between;color:var(--muted);font-size:10px;margin:4px 0 20px}
+
+.app-frame .comparison-values{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
+.app-frame .comparison-values > div{display:flex;flex-direction:column;gap:7px}
+.app-frame .comparison-values span{font-size:11px;color:var(--muted)}
+.app-frame .comparison-values strong{font-size:19px;font-weight:650;font-variant-numeric:tabular-nums}
+.app-frame .comparison-values > div:nth-child(1) strong{color:var(--blue)}
+.app-frame .comparison-values > div:nth-child(2) strong{color:var(--amber)}
+.app-frame .comparison-values > div:nth-child(3) strong{color:var(--violet)}
+
+.app-frame .comparison-method{margin-top:18px;font-size:11px;color:var(--muted)}
+.app-frame .comparison-method p{line-height:1.7;margin-bottom:0}
+.app-frame .comparison-method summary{cursor:pointer}
+
+.app-frame .profile-section{margin:30px 0}
+.app-frame .section-intro{margin-bottom:18px}
+.app-frame .section-intro h3{margin:0 0 5px;font-size:17px;letter-spacing:-.2px}
+.app-frame .section-intro p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+
+.app-frame .factor-pair{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.app-frame .factor-card{border:1px solid var(--line);border-radius:12px;padding:20px;background:var(--panel)}
+.app-frame .factor-card .eyebrow{font-size:10px;color:var(--green)}
+.app-frame .factor-card.tradeoff .eyebrow{color:var(--amber)}
+.app-frame .factor-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:10px 0 14px}
+.app-frame .factor-heading h3{font-size:15px;margin:0}
+.app-frame .factor-heading strong{font-size:16px;font-variant-numeric:tabular-nums}
+.app-frame .factor-card p{font-size:12px;line-height:1.7;color:var(--text);margin-bottom:8px}
+.app-frame .factor-card small{font-size:11px;color:var(--muted)}
+
+.app-frame .factor-card meter{width:100%;height:7px;display:block;appearance:none;border-radius:6px;background:var(--line)}
+.app-frame .factor-card meter::-webkit-meter-bar{background:var(--line);border:0;height:7px}
+.app-frame .factor-card meter::-webkit-meter-optimum-value{background:var(--green);border-radius:6px}
+.app-frame .factor-card.tradeoff meter::-webkit-meter-optimum-value{background:var(--amber)}
+
+.app-frame .factor-details{margin-top:16px;color:var(--muted);font-size:12px}
+.app-frame .factor-details summary{cursor:pointer;padding:8px 0}
+.app-frame .intelligence-table{width:100%;border-collapse:collapse;font-size:12px}
+.app-frame .intelligence-table th, .app-frame .intelligence-table td{text-align:left;border-bottom:1px solid var(--line);padding:12px 10px;vertical-align:top}
+.app-frame .intelligence-table thead th{font-size:11px;color:var(--muted);font-weight:550}
+.app-frame .intelligence-table tbody th{font-weight:550;color:var(--text);width:60%}
+.app-frame .intelligence-table small{display:block;font-weight:400;color:var(--muted);line-height:1.5;margin-top:5px}
+
+.app-frame .intelligence-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.app-frame .intelligence-card{padding:22px;border:1px solid var(--line);border-radius:12px;min-width:0;background:var(--panel)}
+.app-frame .intelligence-card dl{margin:16px 0 8px}
+.app-frame .intelligence-row{display:grid;grid-template-columns:1fr 1fr;gap:18px;border-bottom:1px solid var(--line);padding:12px 0}
+.app-frame .intelligence-row:last-child{border-bottom:0}
+.app-frame .intelligence-row dt{font-size:12px;color:var(--muted)}
+.app-frame .intelligence-row dd{margin:0;font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.app-frame .intelligence-row small{display:block;margin-top:4px;font-size:10px;line-height:1.5;color:var(--muted);font-weight:400}
+.app-frame .intelligence-card > .text-action{margin-top:14px}
+.app-frame .intelligence-card .team-explorer-details{border:0;border-top:1px solid var(--line);margin:16px 0 0;padding:14px 0 0}
+.app-frame .intelligence-card .team-explorer-details > summary{font-size:12px}
+.app-frame .intelligence-card:has(.team-explorer-details[open]){grid-column:1/-1}
+
+.app-frame .inline-details{font-size:12px;color:var(--muted);margin-top:16px;border-top:1px solid var(--line);padding-top:14px}
+.app-frame .inline-details summary{cursor:pointer}
+.app-frame .inline-details p{font-size:12px;line-height:1.6}
+.app-frame .profile-limitations{border-top:1px solid var(--line);padding:20px 0 0;color:var(--muted);font-size:12px;line-height:1.7}
+.app-frame .profile-limitations summary{cursor:pointer;font-weight:600;color:var(--text)}
+.app-frame .profile-limitations summary span{float:right;font-size:11px;color:var(--muted);font-weight:400}
+.app-frame .profile-limitations a{color:var(--blue)}
+
+.app-frame .property-context-note{display:flex;flex-direction:column;align-items:start;gap:8px;font-size:13px;margin-top:18px}
+.app-frame .muted{color:var(--muted)}
+
+@media(max-width:900px) {.app-frame .intelligence-grid{grid-template-columns:1fr}
+.app-frame .location-hero h2{font-size:25px}
+.app-frame .location-hero{gap:20px}
+.app-frame .hero-score{flex-basis:110px}
+}
+
+@media(max-width:600px) {.app-frame .scorecard-board{padding:18px!important}
+.app-frame .location-hero{align-items:start;gap:14px}
+.app-frame .location-hero h2{font-size:22px}
+.app-frame .location-hero p{font-size:12px}
+.app-frame .hero-score{flex-basis:80px;padding:14px 8px;border-radius:12px}
+.app-frame .hero-score strong{font-size:36px}
+.app-frame .hero-score span{font-size:11px}
+.app-frame .hero-score small{font-size:10px}
+.app-frame .comparison-values{grid-template-columns:1fr 1fr;gap:18px}
+.app-frame .comparison-values strong{font-size:17px}
+.app-frame .score-comparison{padding:16px}
+.app-frame .factor-pair{grid-template-columns:1fr}
+.app-frame .intelligence-card{padding:18px}
+.app-frame .profile-limitations summary span{float:none;display:block}
+}
+
+
+/* Explore prioritizes the map; supporting controls disclose progressively. */
+.app-frame .metric-ribbon{padding:0 0 14px;gap:24px;margin:0;border:0}
+.app-frame .metric{min-height:0;flex:1}
+.app-frame .metric-label{font-size:10px;text-transform:none}
+.app-frame .metric-value{font-size:19px;margin-top:3px}
+.app-frame .metric-sub{font-size:10px;margin-top:2px}
+
+.app-frame .command-grid{grid-template-columns:minmax(0,1fr) 280px;gap:20px}
+.app-frame .map-module{grid-template-rows:auto auto minmax(0,1fr);overflow:visible}
+.app-frame .map-module .module-head{border-radius:12px 12px 0 0;flex-wrap:wrap;gap:10px}
+.app-frame .map-module .module-head h2{font-size:15px}
+.app-frame .map-stage{min-height:450px;max-height:560px;border-radius:0 0 12px 12px;overflow:hidden}
+.app-frame .module-tabs{display:flex;gap:8px;flex-wrap:wrap}
+.app-frame .module-tabs select{max-width:185px;height:34px;font-size:11px;padding:0 8px}
+.app-frame .map-options{position:relative;display:block;font-size:11px;color:var(--muted);align-self:center}
+.app-frame .map-options[hidden]{display:none}
+.app-frame .map-options summary{cursor:pointer;padding:8px}
+.app-frame .map-options[open]{padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);z-index:3}
+.app-frame .map-options select{display:block;margin-top:8px}
+.app-frame .map-options .restaurant-toggle{margin-top:8px}
+
+.app-frame .heatmap-guide{grid-row:2;font-size:11px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel);color:var(--muted)}
+.app-frame .heatmap-guide[hidden]{display:none}
+.app-frame .heatmap-guide summary{cursor:pointer}
+.app-frame .heatmap-guide .heatmap-help{padding:8px 0 0;border:0;font-size:11px}
+.app-frame .map-legend{font-size:10px;opacity:.9;max-width:calc(100% - 20px)}
+
+.app-frame .intel-module{padding:18px;align-self:start;border-radius:12px;overflow:hidden}
+.app-frame .selected-header{padding:0 0 12px;gap:12px}
+.app-frame .selected-header h2{font-size:17px}
+.app-frame .selected-header .score-orb{height:52px;width:52px;flex-basis:52px;background:var(--panel-2);box-shadow:none;border:1px solid var(--line)}
+.app-frame .selected-header .score-orb span{font-size:23px}
+.app-frame .selected-header .eyebrow{font-size:9px}
+.app-frame .driver-list{margin:0;padding:0}
+.app-frame .driver-list h3{font-size:12px}
+.app-frame .decision-note{font-size:12px;line-height:1.7}
+.app-frame .selected-extra{padding:10px 0;margin:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+.app-frame .selected-extra summary{cursor:pointer}
+.app-frame .selected-extra .bar-stack{padding:12px 0}
+.app-frame .selected-extra ul{list-style:none;padding:0;display:grid;gap:10px}
+.app-frame .intel-actions{gap:8px;display:flex;flex-wrap:wrap}
+.app-frame .intel-actions #viewAnalysis{order:-1;flex-basis:100%;background:var(--blue);color:var(--void);border:0;font-weight:650;padding:10px 12px}
+.app-frame .intel-actions #saveLocation{border:0;background:transparent;color:var(--muted);font-size:11px;min-height:28px}
+
+.app-frame .ranking-explanation{font-size:11px;color:var(--muted);padding:0 0 14px}
+.app-frame .ranking-explanation summary{cursor:pointer}
+.app-frame .ranking-explanation p{max-width:850px;font-size:12px;line-height:1.7;margin-bottom:0}
+.app-frame .data-table{max-height:540px;overflow:auto;border:1px solid var(--line);border-radius:10px;font-family:var(--font-ui)}
+
+.app-frame .data-table .table-row{grid-template-columns:36px minmax(230px,2fr) repeat(3,minmax(80px,.65fr)) 90px;min-width:650px;min-height:64px;align-items:center;padding:0 14px;gap:12px;border-bottom:1px solid var(--line);font-size:12px}
+
+.app-frame .data-table.is-property-ranking .table-row{grid-template-columns:32px minmax(210px,2fr) 58px 58px 60px minmax(115px,1fr) 76px;min-width:800px}
+.app-frame .data-table .table-row.header{position:sticky;top:0;z-index:2;min-height:38px;color:var(--muted);font-size:10px;font-weight:550;background:var(--panel-2)}
+.app-frame .data-table .table-row .place-name{font-weight:550;font-size:12px;text-align:left;line-height:1.5}
+.app-frame .data-table .table-row .place-name small{font-size:10px;color:var(--muted)}
+.app-frame .table-row .rank-price{font-variant-numeric:tabular-nums;font-weight:550}
+.app-frame .table-row .rank-score{color:var(--blue);font-weight:650}
+.app-frame .data-table .table-row.is-selected{background:color-mix(in srgb,var(--blue) 8%,var(--panel));box-shadow:inset 3px 0 var(--blue)}
+
+.app-frame .record-badge{display:inline-block;border:1px solid var(--line);border-radius:5px;padding:4px 7px;font-size:10px;font-weight:550;color:var(--muted);background:var(--panel-2)}
+.app-frame .record-badge.synthetic{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 25%,var(--line))}
+.app-frame .record-badge.listing{color:var(--blue)}
+.app-frame .record-badge.registry_record{color:var(--violet)}
+
+.app-frame .property-intro{grid-column:1/-1;font-size:13px;color:var(--muted);line-height:1.7;margin:0}
+.app-frame .lease-board > .ranking-explanation{grid-column:1/-1}
+.app-frame .property-card{border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:none}
+.app-frame .property-card.synthetic-card{border-style:solid}
+.app-frame .property-body{padding:22px!important}
+.app-frame .property-title{margin-top:15px}
+.app-frame .property-title h3{font-size:16px;line-height:1.5}
+.app-frame .property-title p{font-size:12px;color:var(--muted)}
+.app-frame .property-area-score{min-width:66px}
+.app-frame .property-area-score strong{color:var(--blue);font-size:22px}
+.app-frame .property-area-score span{font-size:9px;white-space:nowrap}
+.app-frame .property-price{display:flex;flex-direction:column;gap:4px;margin:16px 0}
+.app-frame .property-price strong{font-size:22px;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+.app-frame .property-price span{font-size:11px;color:var(--muted)}
+.app-frame .property-card .kv{font-size:12px;padding:9px 0}
+.app-frame .property-specs{font-size:11px;line-height:1.7;gap:8px}
+.app-frame .property-card .property-source-note{font-size:10px;color:var(--amber)}
+
+@media(max-width:1150px) {.app-frame .command-grid{grid-template-columns:minmax(0,1fr)}
+.app-frame .intel-module{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.app-frame .intel-module .driver-list{grid-column:2;grid-row:1/4}
+.app-frame .selected-header{border:0}
+.app-frame .selected-extra{margin:0}
+.app-frame .map-stage{min-height:440px}
+.app-frame .metric-sub{max-width:240px}
+}
+
+@media(max-width:600px) {.app-frame .data-table .table-row span:nth-child(n), .app-frame .data-table .table-row button:nth-child(n){display:block}
+.app-frame .data-table .table-row{min-width:650px}
+.app-frame .data-table.is-property-ranking .table-row{min-width:800px}
+.app-frame .intel-module{display:block}
+.app-frame .map-stage{min-height:360px}
+.app-frame .metric-ribbon{gap:12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.app-frame .metric:first-child{grid-column:auto}
+.app-frame .metric-value{font-size:17px}
+.app-frame .metric-sub{font-size:9px;line-height:1.4}
+.app-frame .module-tabs select{max-width:155px}
+.app-frame .map-options summary{padding:6px 0}
+}
+
+
+/* Analytical workspaces share a compact summary and progressive detail. */
+.app-frame .analysis-intro{font-size:13px;color:var(--muted);line-height:1.7;margin:0 0 20px;max-width:760px}
+.app-frame .economics-lab{padding:24px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.app-frame .economics-lab .view-heading{margin-bottom:10px}
+.app-frame .economics-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;padding:20px 0}
+.app-frame .economics-kpis > div{min-width:0;display:flex;flex-direction:column;gap:8px}
+.app-frame .economics-kpis span{font-size:11px;line-height:1.5;color:var(--muted)}
+.app-frame .economics-kpis strong{font-size:23px;line-height:1.2;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.app-frame .economics-kpis > div:first-child strong{color:var(--blue)}
+
+.app-frame .scenario-basis{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--muted);line-height:1.8;background:var(--panel-2);border-radius:8px;padding:12px 16px;margin:0 0 24px}
+.app-frame .scenario-basis b{font-weight:550;color:var(--text)}
+
+.app-frame .economics-primary-chart .economics-chart{height:320px}
+.app-frame .economics-chart-section h4{font-size:13px;font-weight:600;margin:0 0 16px}
+.app-frame .economics-chart-caption{color:var(--muted);font-size:11px;line-height:1.7;margin-bottom:24px}
+.app-frame .economics-advanced, .app-frame .economics-editor, .app-frame .economics-assumptions{border-top:1px solid var(--line);padding:16px 0;font-size:12px;color:var(--muted)}
+.app-frame .economics-advanced summary, .app-frame .economics-editor summary{cursor:pointer;font-weight:550;color:var(--text)}
+.app-frame .economics-editor{padding-bottom:0}
+.app-frame .economics-advanced .economics-chart{height:260px}
+.app-frame .economics-advanced p{font-size:12px;line-height:1.6}
+.app-frame .economics-chart-grid{grid-template-columns:1fr 1fr;gap:24px}
+.app-frame .economics-optimum strong{font-size:18px}
+.app-frame .economics-inputs{grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;border-bottom:0;padding:20px 0}
+.app-frame .economics-inputs label span{font-size:11px}
+.app-frame .advanced-economics-inputs{grid-column:1/-1;font-size:12px;color:var(--muted);padding-top:12px;border-top:1px solid var(--line)}
+.app-frame .advanced-economics-inputs summary{cursor:pointer}
+.app-frame .economics-input-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;padding-top:18px}
+.app-frame .economics-actions{grid-column:1/-1;justify-content:flex-start}
+
+.app-frame .scenario-library{border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:20px 0;background:var(--panel)}
+.app-frame .scenario-library > summary{cursor:pointer;font-size:13px;font-weight:550}
+.app-frame .scenario-library .planning-toolbar{margin-top:18px}
+.app-frame .scenario-library .economics-chart{height:280px}
+.app-frame .business-input-details{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+.app-frame .business-input-details > summary{font-size:13px;cursor:pointer;font-weight:550}
+.app-frame .business-plan-inputs{padding-top:18px;gap:18px}
+.app-frame .business-plan-inputs label{font-size:11px}
+.app-frame .business-metrics strong{font-size:21px}
+.app-frame .business-workspace{padding:24px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+
+.app-frame .competition-heading h3{font-size:18px}
+.app-frame .competition-content{gap:20px}
+.app-frame .competition-summary strong{font-size:24px}
+.app-frame .competition-bars{max-height:350px;overflow:auto}
+.app-frame .competition-source{font-size:10px}
+.app-frame .competition-breakdown{border:1px solid var(--line);border-radius:10px;padding:16px}
+.app-frame .compare-board{padding:24px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.app-frame .comparison-table th, .app-frame .comparison-table td{padding:14px 16px;font-size:12px}
+.app-frame .comparison-table thead th{background:var(--panel-2)}
+.app-frame .comparison-table .comparison-place{font-size:13px}
+.app-frame .comparison-best{background:color-mix(in srgb,var(--blue) 7%,transparent);color:var(--blue)}
+
+@media(max-width:760px) {.app-frame .economics-lab{padding:18px}
+.app-frame .economics-kpis{grid-template-columns:1fr 1fr;gap:20px}
+.app-frame .economics-kpis strong{font-size:21px}
+.app-frame .economics-inputs, .app-frame .economics-input-grid{grid-template-columns:1fr 1fr}
+.app-frame .economics-chart-grid{grid-template-columns:1fr}
+.app-frame .economics-primary-chart .economics-chart{height:280px}
+.app-frame .scenario-library{padding:18px}
+.app-frame .compare-board{padding:16px}
+}
+
+
+
+/* Shared controls and readable density across retained analytical components. */
+.app-frame {grid-template-columns:220px minmax(0,1fr)}
+
+.app-frame .workspace {padding:24px 28px 40px;gap:20px}
+
+.app-frame .rail {padding:24px 18px;background:var(--panel);overflow-y:auto}
+
+.app-frame .brand {padding-bottom:20px}
+.app-frame .brand__name {font-size:17px}
+
+.app-frame .rail-brief {padding:16px 0;border:0;background:none}
+.app-frame .rail-brief strong {font-size:18px;line-height:1.5}
+
+.app-frame .rail-brief__label {font-size:9px;letter-spacing:.7px;color:var(--muted);margin-bottom:8px}
+
+.app-frame .concept-facts {gap:5px}
+.app-frame .concept-facts span {font-size:10px;padding:4px 6px;background:var(--panel-2);border:0}
+
+.app-frame .topbar {grid-template-columns:minmax(180px,1fr) auto;gap:20px}
+.app-frame .topbar h1 {font-size:25px;font-weight:650;letter-spacing:-.6px;margin-top:4px}
+.app-frame .topbar .eyebrow {font-size:9px;color:var(--muted);letter-spacing:1px}
+
+.app-frame .quiet-action {width:auto;min-width:0;margin:0;min-height:32px;display:inline-flex;align-items:center;justify-content:center;padding:7px 11px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--text);font-size:12px;font-weight:550;text-align:center;line-height:1.4}
+
+.app-frame .quiet-action:hover {background:var(--panel-2);border-color:var(--line-bright)}
+
+.app-frame .primary-action {width:auto;min-height:38px;border:0;border-radius:8px;background:var(--blue);color:var(--void);padding:9px 15px;font-size:12px;font-weight:650;box-shadow:none}
+
+.app-frame :is(button,select,input,textarea,a,summary):focus-visible {outline:2px solid var(--blue);outline-offset:3px;box-shadow:none}
+
+.app-frame :is(input,select,textarea) {border-radius:7px;font-size:13px}
+.app-frame input[type=checkbox],.app-frame input[type=range] {accent-color:var(--blue)}
+
+.app-frame summary {line-height:1.6}
+.app-frame button:disabled {opacity:.48;cursor:not-allowed}
+
+.app-frame .module-head h2 {font-size:16px;font-weight:600}
+.app-frame .workspace:not(.is-discover) .table-module > .module-head:not(.menu-heading) {display:none}
+
+.app-frame .workspace:not(.is-discover) .menu-heading h2 {display:none}
+
+.app-frame .card-status,.app-frame .access-status {background:var(--panel-2);color:var(--muted);border:1px solid var(--line);border-radius:5px;font-size:10px;padding:5px 8px}
+
+.app-frame .property-empty,.app-frame .comparison-empty,.app-frame .menu-empty {padding:32px 24px;border:1px dashed var(--line);border-radius:12px;color:var(--muted);text-align:center}
+
+.app-frame .property-empty h3,.app-frame .comparison-empty h3 {font-size:17px;color:var(--text);margin:0 0 12px}
+
+.app-frame .competition-content:has(.competition-breakdown:not([open])) {grid-template-columns:1fr}
+
+.app-frame .competition-breakdown:not([open]) {grid-column:1/-1}
+
+.app-frame .menu-kpis {padding:16px 0;gap:24px}
+.app-frame .menu-kpi strong {font-size:23px}
+.app-frame .menu-kpi span {font-size:11px}
+
+.app-frame .menu-workspace {gap:24px;margin-top:24px}
+.app-frame .menu-discovery,.app-frame .menu-selection {border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:20px}
+
+.app-frame .menu-section-head h3 {font-size:15px}
+.app-frame .menu-suggestion {box-shadow:none;border:1px solid var(--line);border-radius:8px}
+.app-frame .menu-composition-summary {font-size:12px;color:var(--muted);padding:14px 0;border-block:1px solid var(--line)}
+
+.app-frame .menu-composition-summary > summary {cursor:pointer}
+.app-frame .menu-pricing-toolbar {padding:14px 0;border:0;font-size:12px}
+
+.app-frame .location-report {max-width:980px;padding:32px;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin:0 auto}
+
+.app-frame .report-toolbar {max-width:980px;margin:0 auto 18px;font-size:12px}
+.app-frame .report-detail {border-top:1px solid var(--line);padding:16px 0;color:var(--muted);font-size:12px}
+.app-frame .report-detail > summary {font-weight:550;color:var(--text);cursor:pointer}
+
+.app-frame .report-factors {gap:12px 24px}
+.app-frame .report-plan .kv {font-size:12px;padding:10px 0}
+
+.app-frame .source-register {border:1px solid var(--line);padding:18px;border-radius:12px;margin:24px 0}
+.app-frame .source-register > summary {font-size:13px;font-weight:550;cursor:pointer}
+.app-frame .source-register .source-table {margin-top:18px}
+
+.app-frame .dashboard-status {border:1px solid var(--line);border-radius:8px;font-size:12px;padding:12px 16px;background:var(--panel)}
+
+.app-frame .metric-ribbon {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;padding:0 0 8px;background:none;border:0}
+
+.app-frame .metric {border:0!important;background:none;padding:0;min-height:0}
+.app-frame .metric:first-child {grid-column:auto}
+.app-frame .metric-value {font-size:19px;margin-top:4px}
+
+.app-frame .data-table .table-row {grid-template-columns:36px minmax(230px,2fr) repeat(3,minmax(80px,.65fr)) 90px;min-width:650px}
+
+.app-frame .data-table.is-property-ranking .table-row {grid-template-columns:32px minmax(210px,2fr) 58px 58px 60px minmax(115px,1fr) 76px;min-width:800px}
+
+.app-frame .data-table .table-row > * {display:block!important}
+.app-frame .data-table .table-row > :nth-child(8)::after {content:none!important}
+
+.app-frame .data-table .table-row span,.app-frame .data-table .table-row button {padding:10px 0;font-family:var(--font-ui)}
+
+.app-frame .intel-module .intel-actions #viewAnalysis {width:100%;flex-basis:100%;background:var(--blue);color:var(--void);order:-1;min-height:38px}
+
+.app-frame .intel-module .intel-actions #saveLocation {background:transparent;border:0;color:var(--muted);font-size:11px;width:auto}
+
+.app-frame .selected-header .score-orb {background:var(--panel-2)!important;width:52px;height:52px;flex-basis:52px;border:1px solid var(--line)}
+
+.app-frame .selected-header .score-orb span {font-size:24px}
+.app-frame .selected-property-summary {padding:12px;border:1px solid var(--line);border-radius:8px;font-size:11px;background:var(--panel-2)}
+
+.app-frame .module-title-row {flex-wrap:wrap;gap:8px}
+.app-frame #confidencePill {white-space:normal;font-size:10px;color:var(--muted);background:none;border:0;padding:0}
+
+@media(max-width:1100px) {.app-frame {grid-template-columns:190px minmax(0,1fr)}
+.app-frame .workspace {padding:20px}
+.app-frame .command-grid {grid-template-columns:1fr}
+.app-frame .topbar {grid-template-columns:1fr}
+.app-frame .top-actions {justify-content:flex-start}
+.app-frame .intel-module {display:grid;grid-template-columns:1fr 1fr;gap:20px}
+}
+
+@media(max-width:760px) {
+.app-frame {display:block}
+.app-frame .rail {position:static;height:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 16px;border:0;border-bottom:1px solid var(--line)}
+
+.app-frame .brand {padding:0;border:0;flex:1 1 auto}
+.app-frame .brand__meta {display:none}
+.app-frame .rail-brief {padding:0;margin:0;background:none;border:0;order:2;flex:1 1 100%}
+.app-frame .rail-brief__label {display:none}
+.app-frame .rail-brief strong {font-size:14px}
+.app-frame .concept-facts {margin-top:5px}
+.app-frame .rail > .brief-edit {margin:0;font-size:11px;padding:7px 10px}
+.app-frame .rail .control-group {display:none}
+
+.app-frame .workspace {padding:18px 14px 32px;gap:16px}
+.app-frame .topbar {display:flex;flex-direction:column;gap:12px;align-items:stretch}
+.app-frame .topbar h1 {font-size:22px}
+.app-frame .top-actions {display:flex;flex-wrap:nowrap;width:100%;gap:8px}
+.app-frame .top-actions .search {flex:1;min-width:0;width:auto;max-width:none}
+.app-frame .top-actions .location-select {flex:1;max-width:none;width:auto;min-width:0}
+.app-frame .settings-shortcut {font-size:11px;padding:7px 9px}
+
+.app-frame .destination-nav button {padding:9px 8px;font-size:12px}
+.app-frame .destination-nav .tab-count {font-size:10px;padding:1px 4px;min-width:0}
+.app-frame .location-context {margin:0;padding-bottom:10px}
+.app-frame .location-context strong {font-size:12px}
+.app-frame .context-caption {display:none}
+
+.app-frame .intel-module {display:block}
+.app-frame .module-tabs {gap:7px}
+.app-frame .module-tabs select {max-width:none;flex:1 1 120px}
+.app-frame .module-tabs .map-options {width:100%}
+.app-frame .map-module .module-head {gap:8px}
+.app-frame .map-module .module-head > div:first-child {width:100%}
+
+.app-frame .metric-ribbon {grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.app-frame .metric-value {font-size:17px}
+.app-frame .metric-sub {font-size:9px}
+.app-frame .metric-label {font-size:9px}
+.app-frame .metric:first-child {grid-column:auto}
+
+.app-frame .intelligence-row {gap:12px}
+.app-frame .card-heading {gap:10px}
+.app-frame .card-heading h3 {font-size:14px}
+.app-frame .source-tag {font-size:9px}
+.app-frame .location-report {padding:20px}
+.app-frame .comparison-table th,.app-frame .comparison-table td {padding:12px;font-size:11px}
+.app-frame .economics-inputs {grid-template-columns:1fr 1fr}
+
+}
+
+@media(prefers-reduced-motion:reduce) {.app-frame * {scroll-behavior:auto!important;transition:none!important;animation:none!important}
+}
+
+@media print {.destination-nav,.contextual-nav,.location-context,.sample-notice {display:none!important}
+.app-frame .location-report {padding:0;border:0;background:white;color:black}
+.app-frame .report-detail {break-inside:auto}
+}
+
+/* Override the inherited stacked header only at narrow widths. */
+@media(max-width:760px) {
+  .app-frame .topbar .top-actions {display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;width:100%;max-width:100%;min-width:0}
+  .app-frame .topbar .top-actions .location-select {flex:1 1 0;width:0;min-width:0;max-width:none;height:36px}
+  .app-frame .topbar .top-actions .search {flex:1 1 0;width:0;min-width:0;max-width:none}
+  .app-frame .topbar .top-actions #refreshButton {flex:0 0 36px;width:36px;height:36px}
+  .app-frame .topbar .top-actions .settings-shortcut {flex:0 0 auto;width:auto;max-width:none;padding:7px 10px}
+  .app-frame .topbar {width:100%;min-width:0}
+}
+
+.app-frame .map-legend {background:color-mix(in srgb,var(--panel) 93%,transparent);color:var(--text);border:1px solid var(--line);box-shadow:none;backdrop-filter:blur(6px)}
+.app-frame .map-legend span {color:var(--text)}
+
+/* Property cards size to content, including records with no photograph. */
+.app-frame .property-card {display:flex;flex-direction:column;min-height:0;grid-template-rows:none;height:auto}
+.app-frame .property-body {flex:1 1 auto;min-height:0}
+.app-frame .property-record-details {font-size:11px;color:var(--muted);padding:14px 0;border-top:1px solid var(--line);margin-top:8px}
+.app-frame .property-record-details > summary {cursor:pointer}
+.app-frame .property-card-actions {display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+.app-frame .property-card-actions .property-link {width:auto;font-size:11px}
+.app-frame .property-price.unpriced strong {font-size:14px;color:var(--muted);font-weight:550}
+.app-frame .property-record-filter {display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted)}
+.app-frame .property-record-filter select {width:180px;min-width:0;font-size:12px;height:36px}
+.app-frame #propertyShortlist {padding:16px 20px;margin:0 0 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.app-frame #propertyShortlist .view-heading {margin-bottom:14px}
+.app-frame .shortlist-empty {display:flex;gap:20px;align-items:center;justify-content:space-between;font-size:12px}
+.app-frame .shortlist-empty span {font-size:11px;color:var(--muted)}
+@media(max-width:760px) {
+.app-frame .map-module .module-tabs {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:100%;gap:8px;align-items:center}
+.app-frame .module-tabs #mapInventorySelect {grid-column:1;grid-row:1;width:100%}
+.app-frame .module-tabs #mapBasemapSelect {grid-column:2;grid-row:1;width:100%}
+.app-frame .module-tabs #heatmapMetricSelect {grid-column:1/-1;grid-row:2;width:100%}
+.app-frame .module-tabs .map-options {grid-column:1/-1;grid-row:3}
+.app-frame .module-tabs:has(#mapInventorySelect[hidden]) #mapBasemapSelect {grid-column:1/-1}
+.app-frame .shortlist-empty {flex-direction:column;align-items:start;gap:6px}
+.app-frame .property-record-filter {width:100%;justify-content:space-between}
+}
+@media print {
+  :root[data-theme] {--void:#fff;--bg:#fff;--panel:#fff;--panel-2:#f2f4f6;--line:#d5dbe1;--text:#253340;--bright:#111827;--muted:#4b5967;--faint:#5a6570;--blue:#1768ab;--amber:#805b17;--violet:#7044a3;--green:#147665}
+  .app-frame .location-report {max-width:none;box-shadow:none}
+  .app-frame .report-detail > summary {list-style:none}
+  .app-frame .score-comparison,.app-frame .report-recommendation {break-inside:avoid}
+}

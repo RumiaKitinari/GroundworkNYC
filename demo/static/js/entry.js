@@ -63,8 +63,9 @@ setupChoice(ideaInput, document.querySelector("#conceptSuggestions"), () => idea
   selectedIdea = item;
   document.querySelector("#customIdeaField").hidden = item.value !== "other";
   document.querySelector("#ideaError").hidden = true;
+  document.querySelector("#briefCustomIdea").required = item.value === "other";
 });
-ideaInput.addEventListener("input", () => {selectedIdea = null; document.querySelector("#customIdeaField").hidden = true;});
+ideaInput.addEventListener("input", () => {selectedIdea = null; document.querySelector("#briefCustomIdea").required = false; document.querySelector("#customIdeaField").hidden = true;});
 const cuisineInput = document.querySelector("#cuisineSearch");
 const cuisineSelect = document.querySelector("#briefCuisine");
 setupChoice(cuisineInput, document.querySelector("#cuisineSuggestions"), () => [...cuisineSelect.options].filter(option => option.value).map(option => ({value: option.value, label: option.textContent})), item => {
@@ -154,15 +155,19 @@ function syncEntryFields() {
     selectedIdea=null;ideaInput.value="";cuisineInput.value="";cuisineSelect.value="";
     document.querySelector("#briefPriceTier").value="";
     for (const id of ["briefBudget","briefPurchaseBudget","briefDeal","briefServiceStyle","briefAudience","briefDaypart"]) document.getElementById(id).value="";
+    document.querySelector("#monthlyBudgetField").hidden=false;
+    document.querySelector("#purchaseBudgetField").hidden=false;
     document.querySelector("#customIdeaField").hidden=true;
     document.querySelector("#customCuisineField").hidden=true;
+    document.querySelector("#briefSkip").textContent="Explore a sample";
     return;
   }
   const known = ideaOptions.find(item => item.label.toLowerCase() === state.conceptName.toLowerCase());
-  selectedIdea = known || {...ideaOptions.find(item => item.value === "other"), profile:state.profile};
+  selectedIdea = state.ideaChoice === "other" ? {...ideaOptions.find(item => item.value === "other"), profile:state.profile}
+    : known ? {...known,profile:state.profile} : {value:"restored",label:state.conceptName,profile:state.profile};
   ideaInput.value = selectedIdea.label;
   document.querySelector("#customIdeaField").hidden = selectedIdea.value !== "other";
-  document.querySelector("#briefCustomIdea").value = known ? "" : state.conceptName;
+  document.querySelector("#briefCustomIdea").value = selectedIdea.value === "other" ? state.conceptName : "";
   cuisineInput.value = cuisineSelect.selectedOptions[0]?.textContent || "";
   if (!cuisineSelect.value || cuisineSelect.value === "any") cuisineInput.value = "";
   document.querySelector("#customCuisineField").hidden = cuisineSelect.value !== "custom";
@@ -170,6 +175,7 @@ function syncEntryFields() {
   document.querySelector("#briefCustomCuisine").value = custom?.[1] || "";
   if (custom) descriptionField.value = state.description.slice(0, custom.index);
   document.querySelector("#briefSkip").hidden = false;
+  document.querySelector("#briefSkip").textContent = "Cancel";
 }
 
 function submitEntryBrief() {
@@ -179,7 +185,10 @@ function submitEntryBrief() {
   const exactCuisine = [...cuisineSelect.options].find(option => option.value && normalizeConceptText(option.textContent) === normalizeConceptText(cuisineInput.value));
   if (!cuisineSelect.value && exactCuisine) cuisineSelect.value=exactCuisine.value;
   const checks = [["ideaError",Boolean(selectedIdea && ideaInput.value === selectedIdea.label)], ["cuisineError",Boolean(cuisineSelect.value && cuisineSelect.value !== "any")], ["priceError",Boolean(price.value)]];
-  checks.forEach(([id,valid]) => document.getElementById(id).hidden=valid);
+  checks.forEach(([id,valid],index) => {
+    document.getElementById(id).hidden=valid;
+    [ideaInput,cuisineInput,price][index].setAttribute("aria-invalid",String(!valid));
+  });
   customIdea.required=selectedIdea?.value === "other";customCuisine.required=cuisineSelect.value === "custom";
   customIdea.setCustomValidity(customIdea.required && !customIdea.value.trim() ? "Enter your restaurant idea." : "");
   customCuisine.setCustomValidity(customCuisine.required && !customCuisine.value.trim() ? "Enter your cuisine." : "");
@@ -190,9 +199,10 @@ function submitEntryBrief() {
   Object.assign(state,{conceptName:selectedIdea.value === "other" ? customIdea.value.trim() : selectedIdea.label,
     profile:selectedIdea.profile,cuisine:cuisineSelect.value,priceTier:price.value,priceMode:"tier",averageCheck:PRICE_DEFAULTS[price.value],
     dietary:document.querySelector("#briefDietary").value || "none",description,
-    dealType:document.querySelector("#briefDeal").value || "lease",preferredArea:document.querySelector("#briefArea").value,
+    dealType:document.querySelector("#briefDeal").value || "either",preferredArea:document.querySelector("#briefArea").value,
     serviceStyle:document.querySelector("#briefServiceStyle").value || defaultServiceStyle(selectedIdea.profile),
     audience:document.querySelector("#briefAudience").value || "residents",daypart:document.querySelector("#briefDaypart").value || "all_day",
     rentCap:Number(document.querySelector("#briefBudget").value || 18000),purchaseBudget:Number(document.querySelector("#briefPurchaseBudget").value || 3000000)});
-  entryHasSubmitted=true;selectedId=null;syncBriefControls();persistBrief();closeBrief();selectView("discover");loadDashboard();
+  state.ideaChoice=selectedIdea.value; sampleMode=false;
+  entryHasSubmitted=true;selectedId=null;selectedPropertyId=null;syncBriefControls();persistBrief();closeBrief();selectView("discover");loadDashboard();
 }

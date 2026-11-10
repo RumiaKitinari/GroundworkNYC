@@ -20,3 +20,10 @@ test('empty or small inventories are not padded with invented recommendations',(
   assert.equal(vm.runInContext('overviewRecommendations().length',context),0);
   assert.equal(vm.runInContext('overviewRecommendations("areas").length',context),1);
 });
+
+for (const limit of [5,10,15,20,25,30,35]) test(`shared recommendations preserve order at Top ${limit}`,()=>{
+  const context=vm.createContext({OVERVIEW_RESULT_LIMIT:limit,mapInventory:'areas',dashboard:{locations:Array.from({length:35},(_,id)=>({id})),properties:Array.from({length:11},(_,id)=>({id}))}});
+  vm.runInContext(helper,context);
+  assert.deepEqual(Array.from(vm.runInContext('overviewRecommendations().map(row=>row.id)',context)),Array.from({length:limit},(_,id)=>id));
+  assert.equal(vm.runInContext('overviewRecommendations("properties").length',context),Math.min(11,limit));
+});

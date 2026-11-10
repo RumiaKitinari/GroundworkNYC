@@ -42,3 +42,19 @@ body:has(.welcome-overlay.is-open),body:has(.brief-overlay.is-open) {overflow:hi
   .brief-scroll {overflow:visible}
   .brief-actions {position:sticky;bottom:0}
 }
+
+/* A calm, aligned brief with a clear primary action. */
+.brief-dialog {grid-template-columns:minmax(220px,.6fr) minmax(0,1.4fr);height:min(790px,calc(100dvh - 40px))}
+.brief-heading {padding:28px 32px 18px}.brief-heading p {font-size:13px;line-height:1.6;max-width:460px}
+.brief-scroll {padding:0 32px 24px}.brief-fields {gap:18px 20px;align-items:start}
+.brief-fields .control-field {gap:7px}.brief-fields .control-field :is(span,label) {font-size:12px}
+.brief-fields input,.brief-fields select {height:42px}.brief-fields textarea {height:76px;font-size:13px}
+.brief-fields .money-input {height:42px}.brief-fields .money-input input {height:40px;min-height:0}
+.brief-fields .control-field[hidden] {display:none!important}
+.brief-fields .concept-search,.brief-fields .cuisine-search {min-width:0}
+.brief-actions {display:flex;justify-content:space-between;align-items:center;padding:18px 32px}.brief-actions button {padding:11px 18px}
+.brief-actions .quiet-action {border-color:transparent;background:transparent;color:var(--muted)}
+.sample-notice {display:flex;justify-content:space-between;align-items:center;gap:16px;border:1px solid var(--line);padding:12px 16px;border-radius:10px;margin-bottom:18px;font-size:12px;color:var(--muted)}
+.sample-notice[hidden] {display:none}.sample-notice strong {color:var(--text)}
+@media(max-width:900px) {.brief-dialog {grid-template-columns:1fr;height:auto}}
+@media(max-width:520px) {.brief-heading {padding:24px 20px 18px}.brief-scroll {padding:0 20px 20px}.brief-actions {padding:12px 20px}.sample-notice {align-items:start;flex-direction:column}}

@@ -12,6 +12,7 @@ from contextlib import closing
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
+from statistics import mean, median
 from urllib.parse import urlparse
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory, redirect, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -54,7 +55,7 @@ def account_db():
 
 
 WORKSPACE_BRIEF_FIELDS = {
-    "conceptName", "profile", "rentCap", "dealType", "preferredArea", "cuisine",
+    "ideaChoice", "conceptName", "profile", "rentCap", "dealType", "preferredArea", "cuisine",
     "averageCheck", "priceMode", "priceTier", "dietary", "description",
     "purchaseBudget", "otherFixedCosts", "variableCostPct", "operatingDays",
     "serviceStyle", "audience", "daypart",
@@ -876,6 +877,20 @@ def tuned_locations(profile: str, rent_cap: int, borough: str = "", concept: Con
     return ranked[:limit] if limit is not None else ranked
 
 
+def score_comparison(locations: list[dict], borough: str, sort_by: str) -> dict:
+    """Summarize the full eligible scoring population before response truncation."""
+    metric = "inverse_walkability" if sort_by == "inverse_walkability" else "opportunity"
+    eligible = [row for row in locations if row.get("assessment_policy", {}).get("recommendation_eligible", False)]
+    values = [row[metric] for row in eligible if isinstance(row.get(metric), (int, float))
+              and not isinstance(row[metric], bool) and math.isfinite(row[metric])]
+    return {"metric": metric, "label": "Customer Access" if metric == "inverse_walkability" else "Location Score",
+            "count": len(values), "eligible_count": len(eligible),
+            "mean": round(mean(values), 2) if values else None,
+            "median": median(values) if values else None,
+            "geography": borough or "New York City", "complete_population": True,
+            "definition": f"All evidence-eligible scored tracts in {borough or 'New York City'} for the active concept, format, price, audience and trading-period settings; before the 35-result response cap. Missing scores excluded. Property budgets and transaction filters apply to property inventory, not tract eligibility."}
+
+
 def matching_properties(locations: list[dict], deal_type: str, rent_cap: int, purchase_budget: int, concept: Concept | None = None, profile: str | None = None) -> list[dict]:
     package = integrated_package()
     location_lookup = {location["geoid"]: location for location in locations}
@@ -1695,7 +1710,7 @@ def dashboard():
         ranked_locations.sort(key=lambda row: (row["inverse_walkability"] is not None,
                                                row["inverse_walkability"] or 0), reverse=True)
         access_status["ranking_changed"] = True
-    locations = ranked_locations[:24]
+    locations = ranked_locations[:35]
     best = locations[0]
     requested_ids = list(dict.fromkeys(
         value for value in request.args.getlist("saved_id")[:4]
@@ -1732,6 +1747,7 @@ def dashboard():
             "saved_locations": saved_locations,
             "property_locations": property_locations,
             "selected": best["id"],
+            "comparison": score_comparison(ranked_locations, borough, sort_by),
             "feeds": data_feeds(),
             "whitespace": market_gap_rows(locations),
             "vendor_windows": VENDOR_WINDOWS,

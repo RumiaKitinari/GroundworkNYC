@@ -1,4 +1,5 @@
 let dashboard = null;
+let sampleMode = true;
 let selectedId = null;
 let activeLayer = "opportunity";
 let activeHeatMetric = "";
@@ -10,7 +11,7 @@ let economicsResult = null;
 let economicsInputTimer = null;
 let mapInventory = "properties";
 let selectedPropertyId = null;
-const OVERVIEW_RESULT_LIMIT = 5;
+let OVERVIEW_RESULT_LIMIT = [5, 10, 15, 20, 25, 30, 35].includes(Number(localStorage.getItem("groundwork-result-limit"))) ? Number(localStorage.getItem("groundwork-result-limit")) : 5;
 let propertyMapData = null;
 let nycBoundaryData = null;
 let nycBoundaryPending = false;
@@ -45,7 +46,7 @@ const catchmentCache = new Map();
 const customerAccessCache = new Map();
 let customerAccessRequest = 0;
 let competitionRequest = 0;
-let propertyView = "all";
+let propertyView = "opportunities";
 let propertyVisible = 12;
 const hexCache = new Map();
 let hexRequestId = 0;
@@ -129,6 +130,29 @@ function escapeHtml(value) {
   })[char]);
 }
 
+function destinationForView(view) {
+  if (["scorecard", "access", "whitespace"].includes(view)) return "analyze";
+  if (["lease", "finance", "menu", "workspace"].includes(view)) return "plan";
+  if (["reports", "layers"].includes(view)) return "report";
+  return view === "compare" ? "compare" : view === "settings" ? "settings" : "explore";
+}
+const destinationLastView = {explore:"discover", analyze:"scorecard", compare:"compare", plan:"lease", report:"reports"};
+
+function renderAnalysisNavigation() {
+  const destination = destinationForView(activeView);
+  if (destination !== "settings") destinationLastView[destination] = activeView;
+  document.querySelectorAll("[data-destination]").forEach(button => button.setAttribute("aria-current", button.dataset.destination === destination ? "page" : "false"));
+  document.querySelectorAll("[data-destination-group]").forEach(group => group.hidden = group.dataset.destinationGroup !== destination);
+  document.querySelector(".contextual-nav").hidden = !["analyze","plan","report"].includes(destination);
+  const nav = document.querySelector("#analysisNavigation");
+  nav.hidden = !dashboard || ["discover", "settings", "layers"].includes(activeView);
+  if (!dashboard) return;
+  document.querySelector("#analysisLocationName").textContent = selectedLocation().name;
+  const save = document.querySelector("#saveAnalysisLocation");
+  save.textContent = savedIds.includes(selectedId) ? "Saved to compare ✓" : "Save to compare";
+  save.setAttribute("aria-pressed", String(savedIds.includes(selectedId)));
+}
+
 function selectView(view) {
   activeView = view;
   document.querySelectorAll(".feature-tab").forEach((button) => {
@@ -155,15 +179,17 @@ function shortlistKey() {
 const accountOwner = window.GROUNDWORK_ACCESS === "account" ? window.GROUNDWORK_MENU_OWNER : null;
 const BRIEF_STORAGE_KEY = accountOwner ? `groundwork-active-brief-v1:${accountOwner}` : "groundwork-active-brief-v1";
 const BRIEFS_STORAGE_KEY = `groundwork-saved-briefs-v1:${accountOwner || "guest"}`;
-const briefFields = ["conceptName", "profile", "rentCap", "dealType", "preferredArea", "cuisine", "averageCheck", "priceMode", "priceTier", "dietary", "description", "purchaseBudget", "otherFixedCosts", "variableCostPct", "operatingDays", "serviceStyle", "audience", "daypart", "sortBy"];
+const briefFields = ["ideaChoice", "conceptName", "profile", "rentCap", "dealType", "preferredArea", "cuisine", "averageCheck", "priceMode", "priceTier", "dietary", "description", "purchaseBudget", "otherFixedCosts", "variableCostPct", "operatingDays", "serviceStyle", "audience", "daypart", "sortBy"];
 
 function restoreBrief() {
   try {
     const saved = JSON.parse(localStorage.getItem(BRIEF_STORAGE_KEY) || "null");
     if (!saved || typeof saved.conceptName !== "string") return false;
+    state.ideaChoice = typeof saved.ideaChoice === "string" ? saved.ideaChoice : "";
     briefFields.forEach(key => {
       if (typeof saved[key] === typeof state[key]) state[key] = saved[key];
     });
+    sampleMode = false;
     return true;
   } catch {
     return false;
@@ -171,6 +197,7 @@ function restoreBrief() {
 }
 
 function persistBrief() {
+  if (sampleMode || !state.conceptName.trim()) return;
   const brief = Object.fromEntries(briefFields.map(key => [key, state[key]]));
   const previous = localStorage.getItem(BRIEF_STORAGE_KEY);
   localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(brief));
@@ -230,7 +257,8 @@ function toggleSavedLocation(id) {
 }
 
 const state = {
-  conceptName: "Modern Bistro",
+  conceptName: "",
+  ideaChoice: "",
   profile: "restaurant",
   rentCap: 18000,
   dealType: "lease",
@@ -500,7 +528,8 @@ async function initializeWorkspace() {
   } else workspaceStatus("Saved on this device");
   const hasSavedBrief = restoreBrief();
   entryHasSavedBrief = hasSavedBrief;
-  if (window.GROUNDWORK_ACCESS) openBrief();
+  if (window.GROUNDWORK_ACCESS && !hasSavedBrief) openBrief();
+  else closeBrief();
   renderSavedBriefs();
   updateConceptImage(state.cuisine);
   syncBriefControls();
@@ -670,7 +699,7 @@ function rentDisplay(row) {
 }
 
 function conceptName() {
-  return state.conceptName.trim() || "Restaurant Concept";
+  return sampleMode ? "Sample restaurant" : state.conceptName.trim() || "Restaurant Concept";
 }
 
 function cuisineLabel() {
@@ -749,6 +778,7 @@ function chooseConceptSuggestion(item, input, preserveName = false) {
   }
   if (item.kind === "location") {
     selectedId = item.id;
+    selectedPropertyId = null;
     selectView("discover");
     renderAll();
     revealSelectedRanking();
@@ -764,6 +794,7 @@ function chooseConceptSuggestion(item, input, preserveName = false) {
     document.querySelector("#briefServiceStyle").value = defaultServiceStyle(item.profile);
     updateConceptImage(item.cuisine);
   } else {
+    sampleMode = false; entryHasSubmitted = true; state.ideaChoice = "";
     state.conceptName = preserveName ? input.value.trim() : item.title;
     state.cuisine = item.cuisine;
     state.dietary = item.dietary;
@@ -870,7 +901,8 @@ async function loadDashboard() {
     customerAccessRequest++;
     persistBrief();
     document.querySelector(".workspace").classList.remove("has-no-results");
-    selectedId = selectedId || dashboard.selected;
+    const restoredProperty = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
+    selectedId = restoredProperty?.location_id || selectedId || dashboard.selected;
     if (mapInventory === "properties" && !selectedPropertyId) {
       const property = (dashboard.properties || []).find(row => row.lead_type === "synthetic");
       if (property) { selectedPropertyId = property.id; selectedId = property.location_id; }
@@ -886,6 +918,7 @@ async function loadDashboard() {
   } catch (error) {
     if (currentRequest === requestId) {
       status.textContent = "Unable To Update Locations. Select Refresh To Retry.";
+      document.querySelector(".workspace").classList.add("has-no-results");
     }
     return false;
   } finally {
@@ -906,6 +939,12 @@ function selectedLocation() {
   return allLocations().find((location) => location.id === selectedId) || dashboard.locations[0];
 }
 
+function propertyRecordLabel(row) {
+  if (row?.lead_type === "synthetic") return "Synthetic scenario · not a listing";
+  if (row?.lead_type === "registry_record") return "Registry research · availability unverified";
+  return row?.lead_type === "listing" ? "Sourced lead · verify availability" : "Property record · evidence unavailable";
+}
+
 function overviewRecommendations(kind = mapInventory) {
   const rows = kind === "properties"
     ? (dashboard.properties || []).filter(row => row.lead_type !== "registry_record")
@@ -914,11 +953,11 @@ function overviewRecommendations(kind = mapInventory) {
 }
 
 function renderMetrics() {
-  const best = dashboard.locations[0];
+  const properties = dashboard.properties || [];
   const metrics = [
-    ["Leading Location", best.name, dashboard.meta.sort_by === "inverse_walkability" ? `${best.inverse_walkability ?? "--"}/100 Customer Access` : `${best.opportunity}/100 Location Score`],
-    [mapInventory === "properties" ? "Matching Properties" : "Areas Shortlisted", mapInventory === "properties" ? (dashboard.properties || []).filter(row => row.lead_type !== "registry_record").length : dashboard.locations.length, mapInventory === "properties" ? `${dashboard.property_search?.synthetic_matches ?? 0} Synthetic Scenarios` : state.preferredArea || "New York City"],
-    [state.dealType === "purchase" ? "Purchase Budget" : "Monthly Budget", state.dealType === "purchase" ? fmtPrice(state.purchaseBudget) : fmtMoney(state.rentCap), "Planning Assumption"],
+    ["Eligible areas", displayNumber(dashboard.comparison?.eligible_count ?? dashboard.locations.length), state.preferredArea || "All NYC · active concept"],
+    ["Sourced property leads", properties.filter(row => row.lead_type === "listing").length, "Source-reported · verify availability"],
+    ["Synthetic scenarios", properties.filter(row => row.lead_type === "synthetic").length, "Modeled spaces · not available listings"],
   ];
 
   document.querySelector("#metricRibbon").innerHTML = metrics.map(([label, value, sub]) => `
@@ -958,6 +997,30 @@ function resetToNYC() {
   });
 }
 
+const heatmapExplanations = {
+  concept_demand: "Concept-specific demand screening index.", demand: "Relative resident and worker demand.",
+  customer_fit: "Audience fit for the current restaurant brief.", access: "Transit and activity access for the concept.",
+  inverse_walkability: "Network-based customer access; a relative index, not walking time.",
+  walkability: "Relative built-environment walkability, not a measured route.",
+  competition_balance: "Competitive pressure balanced against local demand.", market_gap: "Cuisine supply context; sparse records can limit interpretation.",
+  economics: "Relative commercial fit; not a property rent quote.", location_score: "Combined location fit for the current concept."
+};
+
+function updateHeatmapHelp(message = "") {
+  const help = document.querySelector("#heatmapHelp");
+  if (!help) return;
+  help.hidden = !isHexLayer();
+  const guide = document.querySelector("#heatmapGuide");
+  if (guide) guide.hidden = help.hidden;
+  if (help.hidden) return;
+  const resolution = {sector: 7, cell: 8, fine: 9}[locationMap ? hexLevel() : "sector"];
+  if (activeLayer === "huff_demand") {
+    help.textContent = `Experimental Huff scenario · H3 resolution ${resolution}. Outside-option share and unserved-demand units require calibration; not measured visits or success probabilities. ${message}`;
+    return;
+  }
+  help.textContent = `${heatmapExplanations[activeHeatMetric || "concept_demand"]} 0–100 relative index; higher indicates stronger fit. H3 resolution ${resolution} (changes with zoom). Opacity shows evidence coverage, not confidence or success probability. Tract-based estimates; finer cells do not add building-level precision. ${message}`;
+}
+
 function clearHexLayer() {
   hoveredHexId = null;
   if (!locationMap?.getStyle()) return;
@@ -971,8 +1034,9 @@ function paintHexLayer(data) {
   const status = document.querySelector("#dashboardStatus");
   if (data.meta?.status === "no_feature_coverage") {
     status.textContent = "No Recorded Coverage For This Feature And Concept."; status.hidden = false;
-  } else if (status.textContent === "No Recorded Coverage For This Feature And Concept.") status.hidden = true;
+  } else if (status.textContent === "No Recorded Coverage For This Feature And Concept." || /Temporarily Unavailable\.$/.test(status.textContent)) status.hidden = true;
   if (!isHexLayer() || !locationMap?.getStyle()) return;
+  updateHeatmapHelp(data.meta?.status === "no_feature_coverage" ? "No recorded coverage for this metric and concept." : "Hover for scores; click to pin a cell.");
   clearHexLayer();
   const vector = data.tiles && data.source_layer;
   locationMap.addSource("concept-hexes", vector ? {type: "vector", tiles: data.tiles, minzoom: 0, maxzoom: 18} : {type: "geojson", data});
@@ -981,7 +1045,7 @@ function paintHexLayer(data) {
     activeBasemap === "buildings3d" ? locationMap.getStyle().layers.find(layer => layer.type === "symbol")?.id : undefined;
   locationMap.addLayer({id: "concept-hex-fill", type: "fill", source: "concept-hexes", ...sourceLayer, paint: {
     "fill-color": ["interpolate", ["linear"], ["get", "score"], 0, "#b2182b", 25, "#ef8a62", 45, "#fddc7a", 60, "#a6dba0", 78, "#1b9e77", 100, "#006837"],
-    "fill-opacity": ["interpolate", ["linear"], ["get", "coverage"], 0, .10, 35, .38, 70, .59, 100, .70],
+    "fill-opacity": ["case", ["all", ["has", "score"], ["!=", ["get", "score"], null], [">", ["coalesce", ["get", "coverage"], 0], 0]], ["interpolate", ["linear"], ["get", "coverage"], 0, .10, 35, .38, 70, .59, 100, .70], 0],
   }}, labelLayer);
   locationMap.addLayer({id: "concept-hex-outline", type: "line", source: "concept-hexes", ...sourceLayer, paint: {
     "line-color": "#ffffff", "line-opacity": .48, "line-width": ["interpolate", ["linear"], ["zoom"], 9, .35, 14, .8],
@@ -1008,7 +1072,7 @@ function showHexDetails(feature, lngLat, pinned = false) {
     const gap = Number(score), demand = Number(feature.properties.unserved_demand);
     detail.innerHTML = `<strong>Huff Market Gap Scenario</strong><div><span>Outside Option Share</span><b>${Number.isFinite(gap) ? gap.toFixed(1) : "--"}%</b></div><div><span>Unserved Demand Units</span><b>${Number.isFinite(demand) ? Math.round(demand).toLocaleString("en-US") : "--"}</b></div><small>Scenario estimate; weights and capacity require calibration.</small>`;
   } else {
-    detail.innerHTML = `<strong>${heatmapTitles[activeHeatMetric || "concept_demand"]}</strong><div><span>${level === "sector" ? "Sector Score" : "Local Score"}</span><b>${score}/100</b></div><div><span>Evidence Coverage</span><b>${coverage}%</b></div><small>Tract-Based Estimate${count ? ` · ${count} Local Cells` : ""}</small>`;
+    detail.innerHTML = `<strong>${heatmapTitles[activeHeatMetric || "concept_demand"]}</strong><div><span>${level === "sector" ? "Sector Score" : "Local Score"}</span><b>${score == null ? "Unavailable" : `${escapeHtml(score)}/100`}</b></div><div><span>Evidence Coverage</span><b>${coverage == null ? "Unavailable" : `${escapeHtml(coverage)}%`}</b></div><small>Tract-Based Estimate${count ? ` · ${count} Local Cells` : ""}</small>`;
   }
   mapPopup?.remove();
   mapPopup = new maplibregl.Popup({closeButton:pinned,closeOnClick:false,offset:12,maxWidth:"230px"})
@@ -1039,6 +1103,7 @@ function hexLevel() {
 async function showHexLayer() {
   if (!locationMap || !isHexLayer() || !dashboard) return;
   const level = hexLevel();
+  updateHeatmapHelp("Loading surface…");
   const params = conceptParams();
   params.set("level", level);
   params.set("metric", activeHeatMetric || "concept_demand");
@@ -1075,8 +1140,9 @@ async function showHexLayer() {
     if (currentRequest === hexRequestId && activeLayer === requestedLayer) {
       clearHexLayer();
       const status = document.querySelector("#dashboardStatus");
-      status.textContent = requestedLayer === "huff_demand" ? "Huff Market Gaps Are Temporarily Unavailable." : "Concept Demand Is Temporarily Unavailable.";
+      status.textContent = requestedLayer === "huff_demand" ? "Huff Market Gaps Are Temporarily Unavailable." : `${heatmapTitles[activeHeatMetric] || "Concept Demand"} Is Temporarily Unavailable.`;
       status.hidden = false;
+      updateHeatmapHelp("Surface unavailable. Change metric or retry.");
     }
   }
 }
@@ -1287,10 +1353,10 @@ function installNycBoundary() {
   if (!locationMap.getSource("nyc-city-partition")) {
     locationMap.addSource("nyc-city-partition", {type:"geojson",data:nycBoundaryData});
     locationMap.addLayer({id:ids[0],type:"fill",source:"nyc-city-partition",filter:["==",["get","kind"],"outside"],paint:{"fill-color":"#102030","fill-opacity":.27}});
-    locationMap.addLayer({id:ids[1],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#ffffff","line-opacity":.92,"line-width":["interpolate",["linear"],["zoom"],9,5,14,7]}});
-    locationMap.addLayer({id:ids[2],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#2764d8","line-opacity":1,"line-width":["interpolate",["linear"],["zoom"],9,2.4,14,3.2]}});
+    locationMap.addLayer({id:ids[1],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#ffffff","line-opacity":.35,"line-width":["interpolate",["linear"],["zoom"],9,2,14,3]}});
+    locationMap.addLayer({id:ids[2],type:"line",source:"nyc-city-partition",filter:["==",["get","kind"],"outline"],paint:{"line-color":"#2764d8","line-opacity":.6,"line-width":["interpolate",["linear"],["zoom"],9,1,14,1.6]}});
   }
-  const opacity = activeBasemap === "aerial" ? .38 : currentTheme === "dark" ? .4 : .23;
+  const opacity = activeBasemap === "aerial" ? .14 : currentTheme === "dark" ? .14 : .08;
   if (locationMap.getPaintProperty(ids[0],"fill-opacity") !== opacity) locationMap.setPaintProperty(ids[0],"fill-opacity",opacity);
   // Keep the city partition above heatmaps, but below every interactive marker and label.
   const foreground = ["restaurant-clusters", "restaurant-points", "property-clusters", "property-points", "property-selection",
@@ -1326,7 +1392,13 @@ function installPropertyLayers() {
     locationMap.addLayer({id:"property-cluster-count",type:"symbol",source:"property-opportunities",filter:["has","point_count"],layout:{"text-field":["get","point_count_abbreviated"],"text-font":font,"text-size":12,"text-allow-overlap":true},paint:{"text-color":"#ffffff"}});
     locationMap.addLayer({id:"property-rank-label",type:"symbol",source:"property-opportunities",filter:["!",["has","point_count"]],layout:{"text-field":["to-string",["get","rank"]],"text-font":font,"text-size":10,"text-allow-overlap":true},paint:{"text-color":"#102a33","text-halo-color":"#ffffff","text-halo-width":.7}});
   }
-  const selection = {type:"FeatureCollection", features:propertyMapData.features.filter(row => row.properties.selected)};
+  const selectedProperty = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
+  const selectedArea = selectedProperty && allLocations().find(row => row.id === selectedProperty.location_id);
+  const selection = {type:"FeatureCollection", features: selectedProperty && selectedArea && Number.isFinite(Number(selectedProperty.longitude)) && Number.isFinite(Number(selectedProperty.latitude)) ? [{
+    type:"Feature", geometry:{type:"Point",coordinates:[Number(selectedProperty.longitude),Number(selectedProperty.latitude)]},
+    properties:{property_id:selectedProperty.id,rank:selectedProperty.lead_type === "registry_record" ? "R" : (dashboard.properties || []).filter(row => row.lead_type !== "registry_record").findIndex(row => row.id === selectedProperty.id) + 1,
+      color:colorFor(activeLayer === "inverse_walkability" ? selectedProperty.customer_access?.index : activeMetric(selectedArea)), selected:true}
+  }] : []};
   if (!locationMap.getSource("property-selection")) {
     locationMap.addSource("property-selection", {type:"geojson", data:selection});
     locationMap.addLayer({id:"property-selection",type:"circle",source:"property-selection",paint:{"circle-color":["get","color"],"circle-radius":16,"circle-stroke-color":"#ffffff","circle-stroke-width":4}});
@@ -1340,8 +1412,14 @@ function installPropertyLayers() {
 }
 
 function renderMap() {
+  updateHeatmapHelp();
   if (!locationMap) {
-    locationMap = new maplibregl.Map({container: "mapStage", style: mapStyle(activeBasemap), center: [-73.96, 40.73], zoom: 11, minZoom: mapLimits[activeBasemap].minZoom, maxZoom: 19, maxBounds: mapLimits[activeBasemap].bounds, attributionControl: false});
+    try {
+      locationMap = new maplibregl.Map({container: "mapStage", style: mapStyle(activeBasemap), center: [-73.96, 40.73], zoom: 11, minZoom: mapLimits[activeBasemap].minZoom, maxZoom: 19, maxBounds: mapLimits[activeBasemap].bounds, attributionControl: false});
+    } catch {
+      setMapViewStatus("Map unavailable: WebGL could not initialize. Rankings and detailed analysis remain available.", true);
+      return;
+    }
     locationMap.addControl(new maplibregl.NavigationControl({showCompass: true}), "top-left");
     locationMap.addControl(new maplibregl.AttributionControl({compact: true}), "bottom-right");
     const resetButton = document.createElement("button");
@@ -1421,7 +1499,7 @@ function renderMap() {
       } else {
         const property = dashboard.properties.find(row => row.id === feature.properties.property_id);
         if (!property) return;
-        detail.innerHTML = `<strong>${escapeHtml(property.address)}</strong><small>${property.lead_type === "synthetic" ? "Synthetic Scenario · Approximate Location" : "Source-Reported Property Lead"}</small><div><span>${property.transaction === "purchase" ? "Purchase Price" : "Monthly Rent"}${property.lead_type === "synthetic" ? " (Modeled)" : ""}</span><b>${escapeHtml(property.price_label)}</b></div><div><span>Floor Area</span><b>${displayNumber(property.sqft)} Sq Ft</b></div><div><span>Area Score</span><b>${property.location_score}/100</b></div><div><span>Customer Access</span><b>${property.customer_access?.index == null ? "Unavailable" : `${property.customer_access.index}/100`}</b></div>${property.broker_name ? `<div><span>Broker / Owner</span><b>${escapeHtml(property.broker_name)}</b></div>` : ""}`;
+        detail.innerHTML = `<strong>${escapeHtml(property.address)}</strong><small>${propertyRecordLabel(property)}</small><div><span>${property.transaction === "purchase" ? "Purchase Price" : "Monthly Rent"}${property.lead_type === "synthetic" ? " (Modeled)" : ""}</span><b>${escapeHtml(property.price_label)}</b></div><div><span>Floor Area</span><b>${displayNumber(property.sqft)} Sq Ft</b></div><div><span>Area Score</span><b>${property.location_score}/100</b></div><div><span>Customer Access</span><b>${property.customer_access?.index == null ? "Unavailable" : `${property.customer_access.index}/100`}</b></div>${property.broker_name ? `<div><span>Broker / Owner</span><b>${escapeHtml(property.broker_name)}</b></div>` : ""}`;
       }
       mapPopup?.remove(); mapPopup = new maplibregl.Popup({closeButton:false,closeOnClick:false,offset:14,maxWidth:"290px"}).setLngLat(feature.geometry.coordinates).setDOMContent(detail).addTo(locationMap);
     });
@@ -1508,7 +1586,7 @@ function renderMap() {
         latitude: Number(property.latitude), longitude: Number(property.longitude), id: property.id, rank: index + 1,
       }))
     : overviewRecommendations("areas")
-      .map(location => ({location, latitude: location.latitude, longitude: location.longitude, id: location.id}));
+      .map((location,index) => ({location, latitude: location.latitude, longitude: location.longitude, id: location.id, rank:index + 1}));
   const locations = points.filter(row => row.location && Number.isFinite(row.latitude) && Number.isFinite(row.longitude) && row.latitude >= 40.45 && row.latitude <= 40.95 && row.longitude >= -74.3 && row.longitude <= -73.65);
   if (mapInventory === "properties") {
     propertyMapData = {type:"FeatureCollection",features:locations.map(point => ({type:"Feature",geometry:{type:"Point",coordinates:[point.longitude,point.latitude]},properties:{property_id:point.property.id,rank:point.rank,color:colorFor(activeLayer === "inverse_walkability" ? point.property.customer_access?.index : activeMetric(point.location)),selected:point.property.id === selectedPropertyId}}))};
@@ -1516,26 +1594,30 @@ function renderMap() {
   }
   installPropertyLayers();
   syncRestaurantVisibility();
+  document.querySelector(".map-options").hidden = isHexLayer();
   document.querySelector("#mapInventorySelect").disabled = isHexLayer();
   document.querySelector("#mapLayerSelect").disabled = !!activeHeatMetric;
   document.querySelector("#mapInventorySelect").hidden = isHexLayer();
   document.querySelector("#mapLayerSelect").hidden = !!activeHeatMetric;
   document.querySelector(".map-legend")?.classList.toggle("is-hex", isHexLayer());
   document.querySelector(".legend-recommendation-dot + span").textContent = mapInventory === "properties" && !isHexLayer() ? "Property Scenario / Lead" : "Recommended Area";
-  if (!isHexLayer() && mapInventory === "areas") locations.forEach((point,index) => {
+  const selectedArea = selectedLocation();
+  const areaPoints = mapInventory === "areas" && !locations.some(point => point.id === selectedId)
+    ? [...locations, {location:selectedArea, id:selectedArea.id, latitude:selectedArea.latitude, longitude:selectedArea.longitude, outsideShortlist:true}] : locations;
+  if (!isHexLayer() && mapInventory === "areas") areaPoints.filter(point => Number.isFinite(point.latitude) && Number.isFinite(point.longitude)).forEach((point,index) => {
     const {location, property} = point;
     const selected = property ? property.id === selectedPropertyId : location.id === selectedId;
     const element = document.createElement("button");
     element.className = `map-score-marker${property ? " map-property-marker" : ""}${selected ? " is-selected" : ""}`;
     element.dataset.propertyId = property?.id || "";
     element.type = "button";
-    element.textContent = String(index + 1);
+    element.textContent = point.outsideShortlist ? "●" : String(point.rank);
     element.style.backgroundColor = colorFor(activeMetric(location));
-    element.title = `${property?.address || location.name} · ${property?.price_label || `Area Score ${location.opportunity}`}`;
+    element.title = `${point.outsideShortlist ? "Selected location outside displayed Top " + OVERVIEW_RESULT_LIMIT + " · " : ""}${property?.address || location.name} · ${property?.price_label || `Area Score ${location.opportunity}`}`;
     element.setAttribute("aria-label", element.title);
     const showDetail = () => {
       mapPopup?.remove();
-      const propertyLabel = property?.lead_type === "synthetic" ? "Synthetic Scenario · Approximate Location" : property ? "Source-Reported Property Lead" : "Area Assessment";
+      const propertyLabel = property ? propertyRecordLabel(property) : "Area assessment";
       const detail = document.createElement("div");
       detail.className = "map-location-detail";
       detail.innerHTML = `
@@ -1589,14 +1671,13 @@ function renderIntel() {
   const property = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
   const summary = document.querySelector("#selectedPropertySummary");
   summary.hidden = !property;
-  summary.innerHTML = property ? `<span class="eyebrow">${property.lead_type === "synthetic" ? "Synthetic Property Scenario" : "Source-Reported Property Lead"}</span><strong>${escapeHtml(property.address)}</strong><div><span>${property.transaction === "purchase" ? "Purchase" : "Lease"}</span><b>${escapeHtml(property.price_label)}</b></div><div><span>Floor Area</span><b>${displayNumber(property.sqft)} Sq Ft</b></div><button type="button" class="quiet-action" id="inspectSelectedProperty">Property Details</button>` : "";
+  summary.innerHTML = property ? `<span class="eyebrow">${propertyRecordLabel(property)}</span><strong>${escapeHtml(property.address)}</strong><div><span>${property.transaction === "purchase" ? "Purchase" : property.transaction === "lease" ? "Lease" : "Terms"}</span><b>${property.lead_type === "registry_record" ? "Not recorded" : escapeHtml(property.price_label)}</b></div><div><span>Floor area</span><b>${property.sqft > 0 ? `${displayNumber(property.sqft)} SF` : "Unavailable"}</b></div><button type="button" class="quiet-action" id="inspectSelectedProperty">Property Details</button>` : "";
   document.querySelector("#inspectSelectedProperty")?.addEventListener("click", () => { propertyView = property.lead_type; propertyVisible = Math.max(12, (dashboard.properties || []).filter(row => row.lead_type === propertyView).findIndex(row => row.id === property.id) + 1); renderLease(); selectView("lease"); document.querySelector(`[data-property-card="${CSS.escape(property.id)}"]`)?.scrollIntoView({block:"center"}); });
   document.querySelector("#selectedName").textContent = location.name;
   document.querySelector("#selectedMeta").textContent = `${location.borough} · ${titleCase(location.archetype)}`;
   document.querySelector("#selectedScore").textContent = location.opportunity;
   document.querySelector("#scoreOrb").style.background = `conic-gradient(${colorFor(location.opportunity, "opportunity")} 0 ${location.opportunity}%, rgba(33,54,77,.95) ${location.opportunity}% 100%)`;
-  document.querySelector("#confidencePill").textContent = location.ranking_components ? "Experimental Model Ranking" : "Screening Estimate";
-  document.querySelector("#confidencePill").textContent += ` · ${assessmentBasis(location)}`;
+  document.querySelector("#confidencePill").textContent = `${location.confidence_score}% evidence strength`;
   document.querySelector("#confidencePill").title = "Assessment basis, not a calibrated probability of success";
   document.querySelector("#walkabilityPair").innerHTML = `
     <div><span>Walkability</span><strong>${location.walkability ?? "--"}<small>/100</small></strong></div>
@@ -1632,6 +1713,15 @@ function renderIntel() {
 }
 
 function renderRanking() {
+  const available = mapInventory === "properties" && !isHexLayer()
+    ? (dashboard.properties || []).filter(row => row.lead_type !== "registry_record").length : dashboard.locations.length;
+  document.querySelector("#opportunitiesHeading").textContent = available ? `Top ${Math.min(OVERVIEW_RESULT_LIMIT, available)} Opportunities` : "No matching recommendations";
+  document.querySelector("#recommendationCount").textContent = `${Math.min(OVERVIEW_RESULT_LIMIT, available)} of ${available} returned matches`;
+  document.querySelector("#recommendationLimit").value = String(OVERVIEW_RESULT_LIMIT);
+  document.querySelector("#rankingBasis").textContent = mapInventory === "properties" && !isHexLayer()
+    ? dashboard.meta.sort_by === "inverse_walkability" ? "Ordered by property customer access. Area scores describe the surrounding tract and do not determine this ordering."
+    : "Synthetic spaces use the existing match index: 70% area score, 23% modeled space readiness and format fit, and 7% budget fit. A better space match can outrank a higher-scoring area. Sourced leads use area score after budget screening. Registry research records are excluded. Match scores do not measure availability or success."
+    : "Areas follow the active location or customer-access ranking for your concept and borough. The shortlist is separate from the full eligible population used for averages and medians.";
   const rows = overviewRecommendations("areas");
   const table = document.querySelector("#rankingTable");
   const previousTop = table.scrollTop;
@@ -1640,13 +1730,13 @@ function renderRanking() {
   if (mapInventory === "properties" && !isHexLayer()) {
     const properties = overviewRecommendations("properties");
     const shown = properties;
-    table.innerHTML = `<div class="table-row header"><span>#</span><span>Property / Scenario</span><span>Area Score</span><span>Customer Access</span><span>Transaction</span><span>Price</span><span>Floor Area</span><span>Details</span></div>${shown.map((row, index) => `<div class="table-row${row.id === selectedPropertyId ? " is-selected" : ""}" data-opportunity-property="${escapeHtml(row.id)}" tabindex="0"><span>${index + 1}</span><button class="place-name" type="button">${escapeHtml(row.address)}<small>${row.lead_type === "synthetic" ? "Synthetic Scenario" : "Source-Reported Lead"}</small></button><span>${row.location_score}</span><span>${row.customer_access?.index ?? "Unavailable"}</span><span>${row.transaction === "purchase" ? "Purchase" : "Lease"}</span><span>${escapeHtml(row.price_label)}</span><span>${displayNumber(row.sqft)} Sq Ft</span><button type="button" class="quiet-action">Select</button></div>`).join("")}${!properties.length ? '<div class="property-empty"><h3>No Properties Match This Brief</h3><button type="button" class="quiet-action" id="editOpportunityBrief">Edit Brief</button></div>' : ""}`;
+    table.innerHTML = `<div class="table-row header"><span>#</span><span>Space / record type</span><span>Match</span><span>Area</span><span>Access</span><span>Price</span><span>Size</span></div>${shown.map((row, index) => `<div class="table-row${row.id === selectedPropertyId ? " is-selected" : ""}" data-opportunity-property="${escapeHtml(row.id)}" aria-current="${row.id === selectedPropertyId}" tabindex="0"><span>${index + 1}</span><button class="place-name" type="button">${escapeHtml(row.address)}<small>${row.lead_type === "synthetic" ? "Synthetic · not a listing" : "Sourced lead · verify"} · ${row.transaction === "purchase" ? "Purchase" : "Lease"}</small></button><span class="rank-score">${row.property_match_score ?? row.location_score}</span><span>${row.location_score}</span><span>${row.customer_access?.index ?? "—"}</span><span class="rank-price">${escapeHtml(row.price_label)}</span><span>${displayNumber(row.sqft)} SF</span></div>`).join("")}${!properties.length ? '<div class="property-empty"><h3>No Properties Match This Brief</h3><button type="button" class="quiet-action" id="editOpportunityBrief">Edit Brief</button></div>' : ""}`;
     document.querySelector("#editOpportunityBrief")?.addEventListener("click", () => openBrief());
     document.querySelectorAll("[data-opportunity-property]").forEach(row => {
       const choose = () => {
         const property = properties.find(item => item.id === row.dataset.opportunityProperty);
         selectedPropertyId = property.id; selectedId = property.location_id;
-        renderAll(); locationMap.flyTo({center: [Number(property.longitude), Number(property.latitude)], zoom: 14});
+        renderAll(); locationMap?.flyTo({center: [Number(property.longitude), Number(property.latitude)], zoom: 14});
       };
       row.addEventListener("click", choose);
       row.addEventListener("keydown", event => { if (event.target === row && ["Enter", " "].includes(event.key)) { event.preventDefault(); choose(); } });
@@ -1656,7 +1746,7 @@ function renderRanking() {
   }
   table.innerHTML = `
     <div class="table-row header">
-      <span>#</span><span>Location</span><span>Score</span><span>Customer Access</span><span>Walkability</span><span>Cuisine Supply</span><span>Commercial Fit</span><span>Compare</span>
+      <span>#</span><span>Location</span><span>Score</span><span>Access</span><span>Evidence</span><span>Compare</span>
     </div>
     ${rows.map((row, index) => `
       <div class="table-row${row.id === selectedId ? " is-selected" : ""}" data-id="${row.id}" tabindex="0" role="row" aria-current="${row.id === selectedId ? "true" : "false"}">
@@ -1664,9 +1754,7 @@ function renderRanking() {
         <button class="place-name" type="button">${escapeHtml(row.name)}</button>
         <span class="${scoreClass(row.opportunity)}">${row.opportunity}</span>
         <span>${row.inverse_walkability ?? "--"}</span>
-        <span>${row.walkability ?? "--"}</span>
-        <span>${row.score_components.find((item) => item.key === "market_gap").coverage > 0 ? row.score_components.find((item) => item.key === "market_gap").score : "Unavailable"}</span>
-        <span>${row.score_components.find((item) => item.key === "economics").score}</span>
+        <span>${row.confidence_score}%</span>
         <button class="save-row" type="button" data-save-id="${row.id}" aria-label="${savedIds.includes(row.id) ? "Remove" : "Save"} ${escapeHtml(row.name)} ${savedIds.includes(row.id) ? "from" : "to"} comparison" aria-pressed="${savedIds.includes(row.id)}">${savedIds.includes(row.id) ? "Saved" : "Save"}</button>
       </div>
     `).join("")}
@@ -1706,40 +1794,83 @@ function displayNumber(value) {
   return value === null || value === undefined ? "Unavailable" : Math.round(value).toLocaleString("en-US");
 }
 
+function householdIncome(value) {
+  if (value == null || value === "" || typeof value === "boolean" || !Number.isFinite(Number(value)) || Number(value) < 0) return "Unavailable";
+  // ACS B19013's upper open interval is exported as 250001, not an exact income.
+  return Number(value) === 250001 ? "$250,000+" : fmtDollar(Math.round(Number(value) / 100) * 100);
+}
+
+function locationComparisonMarkup(location) {
+  const comparison = dashboard.comparison;
+  if (!comparison?.complete_population || !comparison.count || comparison.median == null) return '<p class="decision-note">Population comparison unavailable. No median is inferred from the displayed shortlist.</p>';
+  const value = location[comparison.metric];
+  const inPopulation = location.assessment_policy?.recommendation_eligible && (comparison.geography === "New York City" || comparison.geography === location.borough);
+  const delta = typeof value === "number" && inPopulation ? value - comparison.median : null;
+  const cell = (label, score) => `<div><span>${label}</span><strong>${score}</strong></div>`;
+  const position = number => Math.max(0,Math.min(100,number));
+  return `<section class="score-comparison"><div class="card-heading"><h3>${escapeHtml(comparison.label)} in context</h3><span class="muted">${escapeHtml(comparison.geography)}</span></div>
+    <div class="comparison-scale" role="img" aria-label="Selected ${value ?? 'unavailable'}, population mean ${comparison.mean.toFixed(1)}, median ${comparison.median.toFixed(1)} out of 100">
+      <span class="scale-line"></span><i class="scale-mark scale-mean" style="left:${position(comparison.mean)}%" title="Mean ${comparison.mean.toFixed(1)}"></i><i class="scale-mark scale-median" style="left:${position(comparison.median)}%" title="Median ${comparison.median.toFixed(1)}"></i>${typeof value === "number" ? `<i class="scale-mark scale-selected" style="left:${position(value)}%" title="Selected ${value.toFixed(1)}"></i>` : ""}
+    </div><div class="scale-endpoints"><span>0 · Lower relative score</span><span>100 · Higher relative score</span></div>
+    <div class="comparison-values">
+    ${cell("Selected Location", value == null ? "Unavailable" : `${value.toFixed(1)}/100`)}
+    ${cell("Population Mean", `${comparison.mean.toFixed(1)}/100`)}
+    ${cell("Population Median", `${comparison.median.toFixed(1)}/100`)}
+    ${cell("Difference From Median", delta == null ? "Outside Comparable Population" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)} points`)}
+    </div><details class="comparison-method"><summary>${displayNumber(comparison.count)} comparable tracts · How this comparison works</summary><p>${displayNumber(comparison.eligible_count)} eligible tracts. ${escapeHtml(comparison.definition)}</p></details></section>`;
+}
+
 function renderMarketProfile() {
-  const location = selectedLocation();
-  const profile = location.market_profile || {};
-  const measure = (label, value, basis) => `<div class="market-measure"><span>${label}</span><strong>${value}</strong><small>${basis}</small></div>`;
+  const location = selectedLocation(), profile = location.market_profile || {};
+  const factors = [...location.score_components].filter(row => row.coverage > 0 && row.score != null).sort((a,b) => b.score - a.score);
+  const property = (dashboard.properties || []).find(row => row.id === selectedPropertyId && row.location_id === location.id);
+  const localProperties = (dashboard.properties || []).filter(row => row.location_id === location.id && row.lead_type !== "registry_record");
+  const scenarios = localProperties.filter(row => row.lead_type === "synthetic").length;
+  const sourced = localProperties.filter(row => row.lead_type === "listing").length;
+  const residentDetails = document.querySelector("#residentDetails"), transitDetails = document.querySelector("#transitDetails");
+  const score = value => value == null ? "Unavailable" : `${Math.round(value)}/100`;
+  const row = (label,value,note="") => `<div class="intelligence-row"><dt>${label}</dt><dd>${value}${note ? `<small>${note}</small>` : ""}</dd></div>`;
+  const factor = (item, type) => `<article class="factor-card ${type}"><span class="eyebrow">${type === "strength" ? "Strongest signal" : "Key tradeoff"}</span>${item ? `<div class="factor-heading"><h3>${escapeHtml(item.label)}</h3><strong>${score(item.score)}</strong></div><meter min="0" max="100" value="${item.score}" aria-label="${escapeHtml(item.label)}: ${item.score} out of 100"></meter><p>${escapeHtml(item.description || "Relative screening factor for this concept.")}</p><small>${item.coverage}% evidence coverage</small>` : '<p>No recorded evidence for this assessment.</p>'}</article>`;
   document.querySelector("#scorecardBoard").innerHTML = `
-    <div class="view-heading"><div><span class="eyebrow">${escapeHtml(location.borough)} / ${escapeHtml(profile.neighborhood || "NYC")}</span><h3>${escapeHtml(location.name)}</h3></div><button class="quiet-action" type="button" id="marketCompetition">View Competition</button></div>
-    <div class="market-group"><h3>Location Outlook</h3><div class="market-measures">
-      ${measure("Estimated Three-Year Survival", location.survival?.status === "available" ? `${(100 * location.survival.probability).toFixed(1)}%` : "Unavailable", location.survival?.status === "available" ? `Experimental estimate · ${Math.round(100 * location.survival.feature_coverage)}% feature coverage` : "Not available for this assessment")}
-      ${location.ranking_components ? measure("Ranking", "60% / 40%", location.ranking_components.general_fit_index != null ? "Survival percentile / general location fit; not a survival probability" : "Survival percentile / H3 cuisine supply; not a survival probability") : ""}
-    </div></div>
-    <div class="market-group"><h3>Local Customer Base</h3><div class="market-measures">
-      ${measure("Residents", displayNumber(profile.population), "2020-2024 ACS five-year estimate")}
-      ${measure("Jobs", displayNumber(profile.jobs), "2023 LODES workplace employment")}
-      ${measure("Median Household Income", profile.median_household_income == null ? "Unavailable" : fmtDollar(profile.median_household_income), profile.income_margin_of_error == null ? "2020-2024 ACS five-year estimate" : `2020-2024 ACS five-year estimate · ±${fmtDollar(profile.income_margin_of_error)}`)}
-    </div></div>
-    <div class="market-group"><h3>Access And Movement</h3><div class="market-measures">
-      ${measure("Walkability", location.walkability == null ? "Unavailable" : `${location.walkability}/100`, "EPA built-environment index")}
-      ${measure("Customer Access", location.inverse_walkability == null ? "Unavailable" : `${location.inverse_walkability}/100`, "Network-based inverse walkability · relative index")}
-      ${measure("Nearest Subway", profile.subway_distance_miles == null ? "Unavailable" : `${Number(profile.subway_distance_miles).toFixed(2)} mi`, escapeHtml(profile.nearest_subway_station || "Nearest complex"))}
-      ${measure("Subway Entries", displayNumber(profile.nearest_subway_weekly_ridership), escapeHtml(profile.subway_vintage || "Nearest station · one complete week"))}
-      ${profile.nearest_subway_dayparts ? measure("Weekday Morning Entries", displayNumber(profile.nearest_subway_dayparts.morning), "7-10 AM · four sampled 2025 weeks") : ""}
-      ${profile.nearest_subway_dayparts ? measure("Weekday Midday Entries", displayNumber(profile.nearest_subway_dayparts.midday), "11 AM-2 PM · four sampled 2025 weeks") : ""}
-      ${profile.nearest_subway_dayparts ? measure("Weekday Evening Entries", displayNumber(profile.nearest_subway_dayparts.evening), "5-9 PM · four sampled 2025 weeks") : ""}
-      ${measure("Citi Bike Departures", displayNumber(profile.bike_departures_latest_month ?? profile.bike_departures_august_2026), `Tract stations · ${profile.bike_activity_month ? new Date(`${profile.bike_activity_month}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }) : "August 2026"}`)}
-      ${measure("Pedestrian Count", displayNumber(profile.pedestrian_counter_latest), profile.pedestrian_counter_distance_miles == null ? "Nearest monitor · observation date unavailable" : `Nearest monitor · ${Number(profile.pedestrian_counter_distance_miles).toFixed(2)} mi away · date unavailable`)}
-    </div></div>
-    <div class="market-group"><h3>Commercial Context</h3><div class="market-measures">
-      ${measure("Recorded Restaurants", displayNumber(profile.active_restaurants), "DOHMH tract records")}
-      ${measure("Parcels With Reported Vacancy", displayNumber(profile.reported_vacant_storefronts), "DOF filings; availability unverified")}
-      ${measure("Business Fit", `${location.business_draw}/100`, "Concept-specific screening index")}
-    </div></div>
-    <div class="catchment-result" id="catchmentResult"><button class="primary-action" type="button" id="analyzeCatchment">Analyze 10-Minute Walk</button><span>From Tract Centroid</span></div>
+    <article class="location-hero">
+      <div><span class="eyebrow">${escapeHtml(location.borough)} · ${escapeHtml(profile.neighborhood || "Tract assessment")}</span><h2>${escapeHtml(location.name)}</h2><p>${escapeHtml(location.recommendation || "Review the available evidence before shortlisting this area.")}</p><div class="hero-evidence"><span>${assessmentBasis(location)}</span><span><b>${location.confidence_score}%</b> evidence strength</span></div></div>
+      <div class="hero-score"><strong>${location.opportunity}</strong><span>/ 100</span><small>Location score</small></div>
+    </article>
+    ${locationComparisonMarkup(location)}
+    <section class="profile-section"><div class="section-intro"><h3>What shapes this recommendation</h3><p>Compare the strongest available screening factor with the area’s main constraint.</p></div><div class="factor-pair">${factor(factors[0],"strength")}${factor(factors.length > 1 ? factors[factors.length-1] : null,"tradeoff")}</div>
+      <details class="factor-details"><summary>All scoring factors & evidence coverage</summary><div class="comparison-scroll"><table class="intelligence-table"><thead><tr><th>Factor</th><th>Relative score</th><th>Coverage</th></tr></thead><tbody>${location.score_components.map(item => `<tr><th scope="row">${escapeHtml(item.label)}<small>${escapeHtml(item.description || "")}</small></th><td>${item.coverage > 0 ? score(item.score) : "Unavailable"}</td><td>${item.coverage}%</td></tr>`).join("")}</tbody></table></div></details>
+    </section>
+    <section class="profile-section"><div class="section-intro"><h3>Market intelligence</h3><p>Source observations and area context. Open a section for deeper exploration.</p></div>
+      <div class="intelligence-grid">
+        <article class="intelligence-card"><div class="card-heading"><h3>People & workforce</h3><span class="source-tag">ACS · LODES</span></div><dl>
+          ${row("Residents",displayNumber(profile.population),"2020–2024 ACS estimate")}
+          ${row("Workplace jobs",displayNumber(profile.jobs),"2023 LODES · separate from residents")}
+          ${row("Median household income",householdIncome(profile.median_household_income),Number(profile.median_household_income) === 250001 ? 'ACS upper open interval · not an exact value' : profile.income_margin_of_error == null ? "ACS five-year estimate · rounded to $100" : `±${fmtDollar(profile.income_margin_of_error)} margin of error`)}
+          </dl><div id="demographicsDetailMount"></div></article>
+        <article class="intelligence-card"><div class="card-heading"><h3>Transit & customer access</h3><span class="source-tag">Indices + source data</span></div><dl>
+          ${row("Walkability",score(location.walkability),"EPA built-environment index")}
+          ${row("Network customer access",score(location.inverse_walkability),"Relative access · not travel time")}
+          ${row("Nearest subway",profile.subway_distance_miles == null ? "Unavailable" : `${Number(profile.subway_distance_miles).toFixed(2)} mi`,escapeHtml(profile.nearest_subway_station || ""))}
+          ${row("Station entries",displayNumber(profile.nearest_subway_weekly_ridership),escapeHtml(profile.subway_vintage || "Nearest station · sampled week"))}
+          </dl><div id="transitDetailMount"></div><button class="text-action" type="button" data-detail-view="access">Explore customer access →</button></article>
+        <article class="intelligence-card"><div class="card-heading"><h3>Competition & local activity</h3><span class="source-tag">Recorded activity</span></div><dl>
+          ${row("Recorded restaurants",displayNumber(profile.active_restaurants),"DOHMH records in this tract")}
+          ${row("Citi Bike departures",displayNumber(profile.bike_departures_latest_month ?? profile.bike_departures_august_2026),escapeHtml(profile.bike_activity_month || "Latest available month"))}
+          ${row("Pedestrian count",displayNumber(profile.pedestrian_counter_latest),profile.pedestrian_counter_distance_miles == null ? "Nearest monitor · observation date unavailable" : `${Number(profile.pedestrian_counter_distance_miles).toFixed(2)} mi to monitor · date unavailable`)}
+          </dl><button class="text-action" type="button" data-detail-view="whitespace">Explore nearby restaurants →</button>
+          <details class="inline-details"><summary>10-minute walking catchment</summary><div class="catchment-result" id="catchmentResult"><p>Analysis starts at the tract centroid, not a storefront.</p><button class="quiet-action" type="button" id="analyzeCatchment">Analyze walking network</button></div></details></article>
+        <article class="intelligence-card"><div class="card-heading"><h3>Space & cost context</h3><span class="source-tag">Planning inputs</span></div>
+          ${property ? `<div class="property-context-note"><span class="record-badge ${property.lead_type}">${propertyRecordLabel(property)}</span><strong>${escapeHtml(property.address)}</strong><span>${escapeHtml(property.price_label)}</span></div>` : '<p class="muted">Select a property scenario or sourced lead to carry its assumptions into your plan.</p>'}
+          <dl>${row("Space candidates in this tract",`${scenarios} scenarios · ${sourced} sourced leads`,"Scenarios are not available listings")}
+          ${row("Reported vacant parcels",displayNumber(profile.reported_vacant_storefronts),"DOF filings · not verified availability")}
+          ${row(state.dealType === "purchase" ? "Purchase budget" : "Rent budget / month",state.dealType === "purchase" ? fmtPrice(state.purchaseBudget) : fmtDollar(state.rentCap),"Your brief assumption")}</dl><button class="text-action" type="button" data-detail-view="lease">Explore space options →</button></article>
+      </div>
+    </section>
+    <details class="profile-limitations" id="analysisLimitations"><summary>Evidence, limitations & due diligence <span>${location.confidence_score}% evidence strength</span></summary><p>Tract-level screening estimates and relative indices are not building-level demand measurements or validated restaurant-success probabilities. Finer H3 cells do not increase the precision of their source data. Property scenarios are synthetic; sourced terms and availability require verification.</p><ul>${(location.risk_flags || []).map(risk => `<li>${escapeHtml(risk)}</li>`).join("")}</ul><p>ACS median household income of $250,000+ is an upper open interval. <a href="https://data.census.gov/table/ACSDT5Y2024.B19013" target="_blank" rel="noopener noreferrer">Census B19013 documentation</a>.</p><button class="text-action" type="button" data-detail-view="layers">Sources & research →</button></details>
   `;
-  document.querySelector("#marketCompetition").addEventListener("click", () => selectView("whitespace"));
+  document.querySelector("#demographicsDetailMount").append(residentDetails);
+  document.querySelector("#transitDetailMount").append(transitDetails);
+  document.querySelectorAll("[data-detail-view]").forEach(button => button.addEventListener("click", () => selectView(button.dataset.detailView)));
   const cached = catchmentCache.get(`${location.id}:${dashboard.meta.concept.cuisine}`);
   if (cached) renderCatchmentResult(cached);
   else document.querySelector("#analyzeCatchment").addEventListener("click", analyzeSelectedCatchment);
@@ -1759,7 +1890,7 @@ function renderCustomerAccess() {
   const measure = (label, value, caption) => `<div class="market-measure"><span>${label}</span><strong>${value}</strong><small>${caption}</small></div>`;
   board.innerHTML = `
     <div class="access-heading"><div><span class="eyebrow">${escapeHtml(location.borough)}</span><h3>${escapeHtml(location.name)}</h3></div><span class="access-status">${access.index == null ? "Limited Coverage" : "Network Assessment"}</span></div>
-    ${property ? `<div class="selected-property-access"><div><span>${property.lead_type === "synthetic" ? "Synthetic Property Scenario" : "Source-Reported Lead"}</span><strong>${escapeHtml(property.address)}</strong></div><div><span>Property Access</span><strong>${property.customer_access?.index == null ? "Unavailable" : `${property.customer_access.index}/100`}</strong></div></div>` : ""}
+    ${property ? `<div class="selected-property-access"><div><span>${propertyRecordLabel(property)}</span><strong>${escapeHtml(property.address)}</strong></div><div><span>Property Access</span><strong>${property.customer_access?.index == null ? "Unavailable" : `${property.customer_access.index}/100`}</strong></div></div>` : ""}
     <form class="access-controls" id="customerAccessForm" data-price-mode="${state.priceMode}">
       <label class="control-field"><span>Dining Style</span><select name="serviceStyle">${options([["quick_service", "Quick Service"], ["casual", "Casual Dining"], ["fine_dining", "Fine Dining"]], state.serviceStyle)}</select></label>
       <label class="control-field"><span>Customer Focus</span><select name="audience">${options([["residents", "Local Residents"], ["workers", "Nearby Workers"], ["destination", "Destination Diners"]], state.audience)}</select></label>
@@ -1890,6 +2021,7 @@ function renderCompare() {
   document.querySelectorAll("[data-remove-id]").forEach(button => button.addEventListener("click", () => toggleSavedLocation(button.dataset.removeId)));
   document.querySelectorAll("[data-open-id]").forEach(button => button.addEventListener("click", () => {
     selectedId = button.dataset.openId;
+    selectedPropertyId = null;
     renderAll();
     selectView("scorecard");
   }));
@@ -1904,9 +2036,10 @@ function renderLease() {
   const listingCount = candidates.filter(row => row.lead_type === "listing").length;
   const syntheticCount = candidates.filter(row => row.lead_type === "synthetic").length;
   const registryCount = candidates.filter(row => row.lead_type === "registry_record").length;
-  const filter = `<div class="property-toolbar"><span>${listingCount} Sourced Leads · ${syntheticCount} Synthetic Scenarios · ${registryCount} Registry Records</span><div class="segmented-control" role="group" aria-label="Property Records"><button type="button" data-property-view="all" aria-pressed="${propertyView === "all"}">All</button><button type="button" data-property-view="listing" aria-pressed="${propertyView === "listing"}">Sourced</button><button type="button" data-property-view="synthetic" aria-pressed="${propertyView === "synthetic"}">Scenarios</button>${state.dealType !== "purchase" ? `<button type="button" data-property-view="registry_record" aria-pressed="${propertyView === "registry_record"}">Registry</button>` : ""}</div></div>`;
-  if (state.dealType === "purchase" && propertyView === "registry_record") propertyView = "all";
-  if (propertyView !== "all") candidates = candidates.filter(row => row.lead_type === propertyView);
+  const filter = `<p class="property-intro">Explore modeled spaces, source-reported leads and historical registry records. These are different kinds of evidence; none confirms current availability.</p><details class="ranking-explanation"><summary>Why space match can differ from area score</summary><p>The existing synthetic match index combines 70% area score, 23% modeled space readiness/format fit and 7% budget fit. Sourced leads use area score after budget screening. Access-ranked searches use property access instead.</p></details><div class="property-toolbar"><span>${listingCount} Sourced Leads · ${syntheticCount} Synthetic Scenarios · ${registryCount} Registry Records</span><label class="property-record-filter">Record type<select id="propertyRecordType"><option value="opportunities" ${propertyView === "opportunities" ? "selected" : ""}>Spaces & scenarios</option><option value="listing" ${propertyView === "listing" ? "selected" : ""}>Sourced leads</option><option value="synthetic" ${propertyView === "synthetic" ? "selected" : ""}>Synthetic scenarios</option>${state.dealType !== "purchase" ? `<option value="registry_record" ${propertyView === "registry_record" ? "selected" : ""}>Registry research</option>` : ""}<option value="all" ${propertyView === "all" ? "selected" : ""}>All records</option></select></label></div>`;
+  if (state.dealType === "purchase" && propertyView === "registry_record") propertyView = "opportunities";
+  if (propertyView === "opportunities") candidates = candidates.filter(row => row.lead_type !== "registry_record");
+  else if (propertyView !== "all") candidates = candidates.filter(row => row.lead_type === propertyView);
   if (!candidates.length) {
     const emptyTitle = propertyView === "synthetic" ? "No Scenarios Match This Budget" : propertyView === "listing" ? "No Sourced Leads Match" : "No Property Records Found";
     document.querySelector("#leaseBoard").innerHTML = `
@@ -1930,29 +2063,31 @@ function renderLease() {
     const contactUrl = row.broker_contact && /^https:\/\/[^\s]+$/i.test(row.broker_contact) ? row.broker_contact : null;
     return `
       <article data-property-card="${escapeHtml(row.id)}" class="property-card${row.lead_type === "synthetic" ? " synthetic-card" : ""}${row.id === selectedPropertyId ? " is-selected-property" : ""}">
-        ${row.lead_type === "synthetic" ? "" : `<div class="${imageClass}"${imageStyle}>
+        ${row.image ? `<div class="${imageClass}"${imageStyle}>
           <span>${escapeHtml(badge)}</span>
           ${row.image ? "" : "<strong>Photo Unavailable</strong>"}
-        </div>`}
+        </div>` : ""}
         <div class="property-body">
-          ${row.lead_type === "synthetic" ? '<span class="scenario-badge">Synthetic Scenario</span>' : ""}
+          <span class="record-badge ${row.lead_type}">${row.lead_type === "synthetic" ? "Synthetic scenario · not a listing" : row.lead_type === "registry_record" ? "Registry research · availability unknown" : "Sourced lead · verify availability"}</span>
           <div class="property-title">
             <div>
-              <h3>${escapeHtml(row.title)}</h3>
-              <p>${escapeHtml(row.address)}</p>
+              <h3>${escapeHtml(row.address)}</h3>
+              <p>${escapeHtml(row.title)}</p>
             </div>
-            <div class="property-area-score"><span>Area Score</span><strong class="${scoreClass(row.fit_score)}">${row.fit_score}</strong></div>
+            <div class="property-area-score"><span>${row.property_match_score == null ? "Area score" : "Space match"}</span><strong>${row.property_match_score ?? row.location_score}</strong></div>
           </div>
+          <div class="property-price${row.lead_type === "registry_record" ? " unpriced" : ""}"><strong>${row.lead_type === "registry_record" ? "Price not recorded" : escapeHtml(priceLine)}</strong><span>${row.lead_type === "synthetic" ? "Modeled" : "Source-reported"} · ${row.transaction === "purchase" ? "Purchase" : row.transaction === "lease" ? "Lease" : "Terms unverified"}</span></div>
           <div class="property-specs">
             <span>${escapeHtml(row.lead_type === "synthetic" ? row.corridor_context.replace(" scenario", "") : row.location_name)}</span>
             ${row.sqft ? `<span>${sqft}</span>` : ""}
             ${row.lead_type === "synthetic" ? `<span>${escapeHtml(row.condition.replace(" (Simulated)", ""))}</span>` : ""}
           </div>
+          ${row.property_match_score != null ? `<div class="kv"><span>Area score</span><strong>${row.location_score}/100</strong></div>` : ""}<div class="kv"><span>Customer access</span><strong>${row.customer_access?.index == null ? "Unavailable" : `${row.customer_access.index}/100`}</strong></div>
+          <details class="property-record-details"><summary>Details & evidence</summary>
           ${row.site_evidence?.status === "available" ? `<div class="kv"><span>Approx. 10-Minute Walk</span><strong>${row.site_evidence.recorded_restaurants.toLocaleString()} Restaurants · ${row.site_evidence.nearby_subway_stations} Subway Stations</strong></div>` : ""}
-          <div class="kv"><span>Customer Access</span><strong>${row.customer_access?.index == null ? "Unavailable" : `${row.customer_access.index}/100`}</strong></div>
+
           ${row.site_evidence?.same_cuisine_restaurants != null ? `<div class="kv"><span>Recorded Same-Cuisine Restaurants</span><strong>${row.site_evidence.same_cuisine_restaurants}</strong></div>` : ""}
           ${row.site_evidence?.status === "unavailable" && row.lead_type !== "synthetic" ? '<div class="kv"><span>Walking Catchment</span><strong>Unavailable</strong></div>' : ""}
-          <div class="kv"><span>${row.lead_type === "synthetic" ? "Modeled Price" : row.transaction === "purchase" ? "Asking Price" : row.transaction === "lease" ? "Asking Rent" : "Asking Price / Rent"}</span><strong>${escapeHtml(priceLine)}</strong></div>
           ${row.lead_type === "synthetic" ? `<div class="kv"><span>${row.transaction === "purchase" ? "Modeled Price / SF" : "Modeled Annual Rent / SF"}</span><strong>${escapeHtml(fmtDollar(row.transaction === "purchase" ? row.asking_price_psf : row.annual_rent_psf))}</strong></div>
           <div class="property-source-note">Approximate area · Not an available listing</div>
           <details class="property-details"><summary>Space Details</summary>
@@ -1970,9 +2105,12 @@ function renderLease() {
           ${row.lead_type === "registry_record" ? '<div class="property-source-note">Registry Record · Transaction And Contact Unverified</div>' : ""}
           ${row.source_url ? `<a class="property-link" href="${escapeHtml(row.source_url)}" target="_blank" rel="noopener noreferrer">Source Listing</a>` : ""}
           ${contactUrl ? `<a class="property-link" href="${escapeHtml(contactUrl)}" target="_blank" rel="noopener noreferrer">Contact Leasing Office</a>` : ""}
+          </details>
+          <div class="property-card-actions">
           ${row.latitude && row.longitude ? `<button type="button" class="quiet-action" data-property-map="${escapeHtml(row.id)}">Show On Map</button>` : ""}
           <button type="button" class="quiet-action" data-save-property="${escapeHtml(row.id)}" aria-pressed="${currentPlan().property_ids.includes(row.id)}">${currentPlan().property_ids.includes(row.id) ? "Saved Property" : "Save Property"}</button>
           ${row.lead_type !== "synthetic" ? `<a class="property-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${row.address}, ${row.borough}, New York`)}" target="_blank" rel="noopener noreferrer">View Address</a>` : ""}
+          </div>
         </div>
       </article>
     `;
@@ -1985,13 +2123,16 @@ function renderLease() {
     mapInventory = "properties"; document.querySelector("#mapInventorySelect").value = mapInventory;
     if (isHexLayer()) setActiveLayer("opportunity");
     renderAll(); selectView("discover");
-    locationMap.flyTo({center: [Number(property.longitude), Number(property.latitude)], zoom: 15});
+    locationMap?.flyTo({center: [Number(property.longitude), Number(property.latitude)], zoom: 15});
   }));
   bindPropertyFilters();
   renderPropertyShortlist();
 }
 
 function bindPropertyFilters() {
+  document.querySelector("#propertyRecordType")?.addEventListener("change", event => {
+    propertyView = event.target.value; propertyVisible = 12; renderLease();
+  });
   document.querySelectorAll("[data-property-view]").forEach(button => button.addEventListener("click", () => {
     propertyView = button.dataset.propertyView;
     propertyVisible = 12;
@@ -2068,9 +2209,10 @@ function renderReports() {
       <h2>${escapeHtml(conceptName())}</h2>
       <p>${profileLabel(state.profile)} · ${escapeHtml(cuisineLabel())} · ${state.priceMode === "tier" ? `${state.priceTier} Price Range` : `$${state.averageCheck} Per Guest`} · ${dealLabel(state.dealType)} · ${state.dealType === "purchase" ? `${fmtPrice(state.purchaseBudget)} Purchase Budget` : `${fmtMoney(state.rentCap)}/Month Budget`}</p>
       <section class="report-recommendation"><div><span class="eyebrow">Selected Location</span><h3>${escapeHtml(location.name)}</h3><p>${escapeHtml(location.recommendation)}</p></div><strong>${location.opportunity}<small>/100</small></strong></section>
-      ${property ? `<h3>Selected Property Scenario</h3><div class="report-factors"><div class="kv"><span>${escapeHtml(property.address)}</span><strong>${escapeHtml(property.price_label)}</strong></div><div class="kv"><span>${property.transaction === "purchase" ? "Purchase" : "Lease"} · ${displayNumber(property.sqft)} Sq Ft</span><strong>${property.lead_type === "synthetic" ? "Synthetic · Approximate Location" : "Source-Reported Lead"}</strong></div></div>` : ""}
+      ${property ? `<h3>Selected property record</h3><div class="report-factors"><div class="kv"><span>${escapeHtml(property.address)}</span><strong>${escapeHtml(property.price_label)}</strong></div><div class="kv"><span>${property.transaction === "purchase" ? "Purchase" : "Lease"} · ${property.sqft > 0 ? `${displayNumber(property.sqft)} SF` : "Size unavailable"}</span><strong>${propertyRecordLabel(property)}</strong></div></div>` : ""}
       ${alternatives.length ? `<h3>Saved Alternatives</h3><div class="report-factors">${alternatives.map(row => `<div class="kv"><span>${escapeHtml(row.name)}</span><strong>${row.opportunity}/100</strong></div>`).join("")}</div>` : ""}
       <p>${assessmentBasis(location)} · ${location.ranking_components ? "Experimental Model Ranking" : "Screening Estimate"}</p>
+      ${locationComparisonMarkup(location)}
       <h3>Location Factors</h3>
       <div class="report-factors">${location.score_components.map((item) => `<div class="kv"><span>${escapeHtml(item.label)}</span><strong>${item.coverage > 0 ? `${item.score}/100` : "Unavailable"}</strong></div>`).join("")}</div>
       <h3>Due Diligence</h3><ul>${location.risk_flags.map((risk) => `<li>${escapeHtml(risk)}</li>`).join("")}</ul>
@@ -2085,8 +2227,14 @@ function renderDataLayers() {
   document.querySelector("#layerBoard").innerHTML = `
     <div class="view-heading"><div><span class="eyebrow">Data Register</span><h3>Sources & Coverage</h3></div></div>
     <div class="assessment-status-strip"><div><span>Location Ranking</span><strong>${dashboard.survival_model?.ranking_mode?.startsWith("survival_") ? "Experimental Survival Ranking" : "Location-Fit Screening"}</strong></div><div><span>Survival Inference</span><strong>${dashboard.survival_model?.status === "available" ? "Experimental Artifact Connected" : "Not Deployed"}</strong></div><div><span>Customer Access</span><strong>${dashboard.customer_access_model?.status === "available" ? "Network-Based Scenario" : "Unavailable"}</strong></div><div><span>Property Inventory</span><strong>${dashboard.property_search?.synthetic_inventory_total ?? "--"} Synthetic Scenarios</strong></div></div>
-    <div class="source-table"><div class="source-row source-row--head"><span>Source</span><span>Vintage / Geography</span><span>Coverage</span></div>
-    ${dashboard.feeds.map(row => `<div class="source-row"><strong>${row.url ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.name)}</a>` : escapeHtml(row.name)}</strong><span>${escapeHtml(row.vintage)}<small>${escapeHtml(row.grain)}</small></span><span>${escapeHtml(row.coverage)}<small>${escapeHtml(row.purpose)}</small></span></div>`).join("")}</div>
+    <section class="research-results planning-section" aria-labelledby="researchResultsHeading">
+      <div class="view-heading"><div><span class="eyebrow">Offline Research · November 2, 2026</span><h3 id="researchResultsHeading">Concept Scenario Results</h3></div></div>
+      <p>Otis’s published benchmark evaluates 50 concepts at three guest prices across 1,000 synthetic properties. Screening and experimental walking Huff rankings are separate from live dashboard scoring. The offline map shows selection frequency and scenario top-five properties, not measured demand or validated success probabilities.</p>
+      <div class="intel-actions"><a class="quiet-action" href="https://github.com/RumiaKitinari/GroundworkNYC/blob/main/reports/2026-11-02-model-results/README.md" target="_blank" rel="noopener noreferrer">Read Research & Limitations</a><a class="quiet-action" href="https://github.com/RumiaKitinari/GroundworkNYC/blob/main/reports/2026-11-02-model-results/maps/heatmaps.html?raw=1" target="_blank" rel="noopener noreferrer">Download Offline Interactive Map</a><a class="quiet-action" href="https://github.com/RumiaKitinari/GroundworkNYC/tree/main/reports/2026-11-02-model-results/scenarios" target="_blank" rel="noopener noreferrer">Scenario Tables & Rankings</a></div>
+      <p class="decision-note">Download the HTML map and open it locally in a browser; GitHub previews HTML as source. These published exports use fixed research assumptions and do not follow your active brief or filters. Properties are synthetic, screening is uncalibrated, and archive-disappearance predictions do not establish verified closure or restaurant-success probabilities. No research artifact is activated by these links.</p>
+    </section>
+    <details class="source-register"><summary>Source register · ${dashboard.feeds.length} datasets</summary><div class="source-table"><div class="source-row source-row--head"><span>Source</span><span>Vintage / Geography</span><span>Coverage</span></div>
+    ${dashboard.feeds.map(row => `<div class="source-row"><strong>${row.url ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.name)}</a>` : escapeHtml(row.name)}</strong><span>${escapeHtml(row.vintage)}<small>${escapeHtml(row.grain)}</small></span><span>${escapeHtml(row.coverage)}<small>${escapeHtml(row.purpose)}</small></span></div>`).join("")}</div></details>
     <div class="source-limitations"><h3>Not Available In This Search</h3><div>${dashboard.meta.unsupported_values.map(value => `<span>${escapeHtml(value)}</span>`).join("")}</div></div>`;
 }
 
@@ -2241,6 +2389,7 @@ async function calculateEconomics() {
   const request = ++economicsRequestId;
   const params = new URLSearchParams(new FormData(form));
   const status = document.querySelector("#economicsStatus");
+  status.hidden = false;
   status.textContent = "Calculating Scenario...";
   try {
     const response = await fetch(`/api/economics/scenario?${params}`);
@@ -2251,12 +2400,13 @@ async function calculateEconomics() {
       localStorage.setItem(economicsContext, JSON.stringify(Object.fromEntries(params)));
       const plan = currentPlan(); plan.draft = Object.fromEntries(params); savePlan(plan);
     } catch { /* Calculation does not require browser storage. */ }
-    status.textContent = "Illustrative Demand Assumptions · Not A Sales Or Profit Forecast";
+    status.textContent = ""; status.hidden = true;
     renderEconomicsCharts(result);
     renderScenarioLibrary();
   } catch (error) {
     if (request !== economicsRequestId) return;
     economicsResult = null;
+    status.hidden = false;
     status.textContent = error.message;
     economicsCharts.forEach(chart => chart.destroy()); economicsCharts = [];
     document.querySelector("#economicsResults").replaceChildren();
@@ -2264,18 +2414,29 @@ async function calculateEconomics() {
 }
 
 function renderEconomicsCharts(result) {
+  const advancedWasOpen = document.querySelector("#advancedEconomics")?.open || false;
   economicsResult = result;
   document.querySelector("#economicsResults").hidden = false;
   economicsCharts.forEach(chart => chart.destroy()); economicsCharts = [];
   const best = result.modeled_optimum;
-  const kpis = [["Daily Operating Profit", money(result.current_daily_profit)],
-    ["Break-Even Volume", result.break_even_covers == null ? "Not Feasible Within Capacity" : `${result.break_even_covers} Covers / Day`],
-    ["Profit Target Volume", result.target_profit_covers == null ? "Not Feasible Within Capacity" : `${result.target_profit_covers} Covers / Day`],
-    ["Capacity Utilization", `${Math.round(result.capacity_utilization*100)}%`]];
+  const dollars = value => fmtDollar(Math.round(value));
+  const chartSection = (id,title) => `<section class="economics-chart-section"><h4>${title}</h4><div class="economics-chart"><canvas id="${id}" role="img" aria-label="${title}"></canvas></div></section>`;
+  const kpis = [["Scenario operating profit / day", dollars(result.current_daily_profit)],
+    ["Break-even guests / day", result.break_even_covers == null ? "Beyond capacity" : `${result.break_even_covers} guests`],
+    ["Daily sales at assumed volume", dollars(result.current_daily_sales)],
+    ["Capacity used", `${Math.round(result.capacity_utilization*100)}%`]];
   document.querySelector("#economicsResults").innerHTML = `<div class="economics-kpis">${kpis.map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join("")}</div>
-    <div class="economics-chart-grid">${[["econRevenue","Revenue & Total Cost","Daily Covers","USD / Day"],["econProfit","Daily Profit & Volume","Daily Covers","USD / Day"],["econMarginal","Demand, Marginal Revenue & Marginal Cost","Daily Covers","USD / Guest"],["econPricing","Price & Modeled Daily Profit","Spend Per Guest ($)","USD / Day"]].map(([id,title])=>`<section class="economics-chart-section"><h4>${title}</h4><div class="economics-chart"><canvas id="${id}" role="img" aria-label="${title}"></canvas></div></section>`).join("")}</div>
-    <div class="economics-optimum"><div><span>Best Modeled Spend</span><strong>${money(best.price)}</strong></div><div><span>Best Modeled Covers</span><strong>${best.covers.toFixed(1)} / Day</strong></div><div><span>Best Modeled Daily Profit</span><strong>${money(best.daily_profit)}</strong></div><div><span>Capacity Constraint</span><strong>${best.capacity_binding ? "Binding" : "Not Binding"}</strong></div></div>
-    <details class="economics-assumptions"><summary>Scenario Assumptions</summary><ul>${result.assumptions.map(value=>`<li>${escapeHtml(value)}</li>`).join("")}</ul><p>At an interior optimum, marginal revenue equals marginal cost. Capacity and zero-volume boundaries are included.</p></details>`;
+    <div class="scenario-basis"><span>Based on <b>${dollars(result.inputs.price)} / guest</b> · <b>${Math.round(result.inputs.daily_covers)} guests / day</b> · <b>${dollars(result.inputs.monthly_rent)} monthly rent</b> · ${Math.round(result.inputs.operating_days)} days / month</span><button type="button" class="text-action" id="editEconomicsInputs">Edit assumptions</button></div>
+    <div class="economics-primary-chart">${chartSection("econRevenue","Revenue, cost & break-even")}</div>
+    <p class="economics-chart-caption">At your assumed spend per guest. ${result.break_even_covers == null ? "No break-even volume is feasible within the entered capacity." : `Break-even requires at least ${result.break_even_covers} guests per day.`} Unentered costs and financing are excluded.</p>
+    <details class="economics-advanced" id="advancedEconomics"><summary>Advanced analysis · profit, marginal cost & price sensitivity</summary><div class="economics-chart-grid">${chartSection("econProfit","Operating profit at different volumes")}${chartSection("econMarginal","Assumed demand, marginal revenue & cost")}${chartSection("econPricing","Price sensitivity under assumed demand")}</div>
+      <div class="economics-optimum"><div><span>Conditional optimum · spend</span><strong>${dollars(best.price)}</strong></div><div><span>Conditional optimum · guests</span><strong>${Math.round(best.covers)} / day</strong></div><div><span>Conditional optimum · profit</span><strong>${dollars(best.daily_profit)} / day</strong></div><div><span>Capacity constraint</span><strong>${best.capacity_binding ? "Binding" : "Not binding"}</strong></div></div><p class="muted">Mathematical results depend on the entered elasticity and cost assumptions; no demand curve is fitted to observed customers.</p>
+      <p>Profit target: ${result.target_profit_covers == null ? "Not feasible within capacity" : `${result.target_profit_covers} guests / day`} at ${dollars(result.inputs.profit_target)} per day.</p>
+    </details>
+    <details class="economics-assumptions"><summary>Calculation notes & limitations</summary><ul>${result.assumptions.map(value=>`<li>${escapeHtml(value)}</li>`).join("")}</ul><p>At an interior optimum, marginal revenue equals marginal cost. Capacity and zero-volume boundaries are included.</p></details>`;
+  document.querySelector("#editEconomicsInputs").addEventListener("click", () => {
+    const editor = document.querySelector("#economicsEditor"); editor.open = true; editor.scrollIntoView({block:"start",behavior:"smooth"});
+  });
   const colors = getComputedStyle(document.documentElement);
   const text = colors.getPropertyValue("--text").trim() || "#38515a";
   const line = colors.getPropertyValue("--line").trim() || "#d6e1e8";
@@ -2284,10 +2445,18 @@ function renderEconomicsCharts(result) {
     economicsCharts.push(new Chart(document.querySelector(`#${id}`),{type:"line",data:{datasets},options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{intersect:false,mode:"nearest"},plugins:{legend:{labels:{color:text,boxWidth:12,font:{size:11}}},tooltip:{callbacks:{label:context=>`${context.dataset.label}: ${money(context.parsed.y)}`}}},scales:{x:{type:"linear",title:{display:true,text:xTitle,color:text},ticks:{color:text,maxTicksLimit:6},grid:{color:line}},y:{title:{display:true,text:yTitle,color:text},ticks:{color:text,maxTicksLimit:6},grid:{color:line}}}}}));
   };
   const rows = result.volume_curve;
-  draw("econRevenue",[series("Revenue",rows,"covers","revenue","#15836e"),series("Total Cost",rows,"covers","total_cost","#c44b55")],"Daily Covers","USD / Day");
+  const mainSeries = [series("Revenue",rows,"covers","revenue","#15836e"),series("Total cost",rows,"covers","total_cost","#c44b55")];
+  if (result.break_even_covers != null) mainSeries.push(series(`Break-even: ${result.break_even_covers} guests`,[{covers:result.break_even_covers,amount:0},{covers:result.break_even_covers,amount:Math.max(...rows.map(row=>Math.max(row.revenue,row.total_cost)))}],"covers","amount","#bb7b17",[5,4]));
+  draw("econRevenue",mainSeries,"Guests per day","USD per day");
+  const advanced = document.querySelector("#advancedEconomics");
+  advanced.addEventListener("toggle", () => {
+    if (!advanced.open || advanced.dataset.rendered) return;
+    advanced.dataset.rendered = "true";
   draw("econProfit",[series("Operating Profit",rows,"covers","profit","#246da5"),series("Break-Even",rows.map(row=>({...row,zero:0})),"covers","zero","#717982",[5,4]),series("Profit Target",rows.map(row=>({...row,target:result.inputs.profit_target})),"covers","target","#bb7b17",[5,4])],"Daily Covers","USD / Day");
   draw("econMarginal",[series("Demand Price",rows,"covers","demand_price","#246da5"),series("Marginal Revenue",rows,"covers","marginal_revenue","#b0609e"),series("Marginal Cost",rows,"covers","marginal_cost","#c44b55")],"Daily Covers","USD / Guest");
   draw("econPricing",[series("Demand-Adjusted Profit",result.price_curve,"price","profit","#15836e")],"Spend Per Guest ($)","USD / Day");
+  });
+  advanced.open = advancedWasOpen;
 }
 
 function exportMenu() {
@@ -2307,6 +2476,7 @@ function exportMenu() {
 }
 
 function renderPanels() {
+  renderAnalysisNavigation();
   const section = ["lease", "finance", "menu"].includes(activeView) ? "lease" : ["workspace", "reports", "layers", "settings"].includes(activeView) ? "reports" : "discover";
   document.querySelectorAll("[data-section-view]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.sectionView === section)));
   document.querySelectorAll(".nav-group").forEach(group => group.classList.toggle("has-active-tab", !!group.querySelector(".is-active")));
@@ -2319,6 +2489,8 @@ function renderPanels() {
 }
 
 function renderAll() {
+  const property = (dashboard.properties || []).find(row => row.id === selectedPropertyId);
+  if (property && property.location_id !== selectedId) selectedPropertyId = null;
   rememberPropertySelection();
   const modelStatus = document.querySelector("#survivalModelStatus");
   if (modelStatus) {
@@ -2350,9 +2522,11 @@ function renderAll() {
 function renderConceptChrome() {
   const name = conceptName();
   const titles = {discover: "Location Search", scorecard: "Market Profile", access: "Customer Access", whitespace: "Competition", compare: "Location Comparison", lease: "Property Search", finance: "Operating Economics", menu: "Menu Studio", workspace: "Business Plan", reports: "Decision Report", layers: "Sources & Coverage", settings: "Workspace Settings"};
-  document.querySelector("#workspaceTitle").textContent = `${name} ${titles[activeView] || "Location Search"}`;
+  document.querySelector("#workspaceTitle").textContent = titles[activeView] || "Explore NYC";
   document.title = `${titles[activeView] || "Location Search"} | Groundwork NYC`;
   document.querySelector("#activeConceptName").textContent = name;
+  document.querySelector("#sampleNotice").hidden = !sampleMode;
+  document.querySelector("#briefSkip").textContent = sampleMode ? "Explore a sample" : "Cancel";
   document.querySelector("#activeFormat").textContent = `${dealLabel(state.dealType)} · ${profileLabel(state.profile)}`;
   document.querySelector("#activeCuisine").textContent = state.cuisine === "custom"
     ? (document.querySelector("#briefCustomCuisine").value.trim() || "Other Cuisine") : cuisineLabel();
@@ -2531,8 +2705,9 @@ document.querySelector("#dealSelect").addEventListener("change", (event) => {
 });
 
 document.querySelector("#briefDeal").addEventListener("change", (event) => {
-  state.dealType = event.target.value || "lease";
-  syncTransactionFields();
+  const deal = event.target.value || "either";
+  document.querySelector("#monthlyBudgetField").hidden = deal === "purchase";
+  document.querySelector("#purchaseBudgetField").hidden = deal === "lease";
 });
 
 document.querySelector("#briefPriceTier").addEventListener("change", (event) => {
@@ -2641,7 +2816,7 @@ document.querySelector("#viewAnalysis").addEventListener("click", () => selectVi
 document.querySelector("#mapLayerSelect").addEventListener("change", event => setActiveLayer(event.target.value));
 document.querySelector("#heatmapMetricSelect").addEventListener("change", event => {
   const status = document.querySelector("#dashboardStatus");
-  if (status.textContent === "No Recorded Coverage For This Feature And Concept.") status.hidden = true;
+  if (status.textContent === "No Recorded Coverage For This Feature And Concept." || /Temporarily Unavailable\.$/.test(status.textContent)) status.hidden = true;
   activeHeatMetric = event.target.value;
   mapPopup?.remove();
   if (activeLayer === "huff_demand" || activeLayer === "concept_demand") activeLayer = "opportunity";
@@ -2683,8 +2858,10 @@ document.querySelector("#savedBriefs").addEventListener("click", event => {
   const rows = readStoredBriefs();
   if (open && rows[Number(open.dataset.openBrief)]) {
     const brief = rows[Number(open.dataset.openBrief)];
+    state.ideaChoice = typeof brief.ideaChoice === "string" ? brief.ideaChoice : "";
     briefFields.forEach(key => { if (typeof brief[key] === typeof state[key]) state[key] = brief[key]; });
-    selectedId = null;
+    sampleMode = false; entryHasSavedBrief = true;
+    selectedId = null; selectedPropertyId = null;
     syncBriefControls();
     selectView("discover");
     loadDashboard();
@@ -2726,3 +2903,29 @@ initializePlanningControls();
 initializeMenuLab();
 initializeBusinessWorkspace();
 setActiveLayer(activeLayer);
+
+document.querySelector("#recommendationLimit").addEventListener("change", event => {
+  const limit = Number(event.target.value);
+  if (![5, 10, 15, 20, 25, 30, 35].includes(limit)) return;
+  OVERVIEW_RESULT_LIMIT = limit;
+  try { localStorage.setItem("groundwork-result-limit", String(limit)); } catch { /* Optional device preference. */ }
+  renderRanking(); renderMap();
+});
+
+document.querySelectorAll("[data-analysis-view]").forEach(button => button.addEventListener("click", () => {
+  selectView(button.dataset.analysisView);
+  const section = document.getElementById(button.dataset.analysisSection || "analysisNavigation");
+  if (section) {
+    if (section.tagName === "DETAILS") {section.open = true; renderTeamExplorers();}
+    section.scrollIntoView({block:"start", behavior:"smooth"});
+    if (section.hasAttribute("tabindex")) section.focus({preventScroll:true});
+  }
+}));
+
+document.querySelector("#saveAnalysisLocation").addEventListener("click", () => toggleSavedLocation(selectedId));
+
+document.querySelectorAll("[data-destination]").forEach(button => button.addEventListener("click", () => selectView(destinationLastView[button.dataset.destination])));
+
+document.addEventListener("invalid", event => {
+  for (let parent=event.target.parentElement;parent;parent=parent.parentElement) if (parent.tagName === "DETAILS") parent.open = true;
+}, true);

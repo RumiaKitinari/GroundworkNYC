@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Groundwork | Location Intelligence</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261027-access" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261109-product" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20261029-planning" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/explorers.css') }}?v=20261029" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/entry.css') }}?v=20261029-jas" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/entry.css') }}?v=20261109-product" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/product.css') }}?v=20261109-product" />
   </head>
   <body>
     <div class="app-frame">
@@ -23,7 +24,7 @@
 
         <div class="rail-brief">
           <div class="rail-brief__label">Active Restaurant Idea</div>
-          <strong id="activeConceptName">Modern Bistro</strong>
+          <strong id="activeConceptName">Sample restaurant</strong>
           <div class="concept-facts" aria-label="Current Restaurant Brief">
             <span id="activeFormat">Sit-Down Restaurant</span>
             <span id="activeCuisine">Cuisine</span>
@@ -32,11 +33,11 @@
           </div>
         </div>
 
-        <div class="control-group">
-          <div class="control-title">Search Brief</div>
+        <button class="brief-edit" id="briefEditButton" type="button">Edit restaurant brief</button>
+        <details class="control-group rail-filters"><summary>Quick filters</summary>
           <div class="control-field concept-search">
             <span>Restaurant Idea</span>
-            <input id="conceptInput" type="text" value="Modern Bistro" maxlength="48" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sidebarConceptSuggestions" />
+            <input id="conceptInput" type="text" value="" maxlength="80" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sidebarConceptSuggestions" />
             <div id="sidebarConceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
           </div>
           <label class="control-field">
@@ -68,10 +69,9 @@
             <input id="rentRange" type="range" min="2" max="100" value="18" />
           </div>
           <div class="purchase-target" id="purchaseTarget" hidden>Purchase Target <strong id="purchaseTargetValue">$3M</strong></div>
-          <button class="brief-edit" id="briefEditButton" type="button">Edit Search Brief</button>
-        </div>
+        </details>
 
-        <div class="control-group">
+        <div class="control-group" hidden>
           <div class="control-title">Signal Layers</div>
           <div class="layer-stack">
             <button class="layer is-active" data-layer="opportunity" type="button">
@@ -95,10 +95,9 @@
         <header class="topbar">
           <div>
             <div class="eyebrow">Location Intelligence</div>
-            <h1 id="workspaceTitle">Modern Bistro Location Search</h1>
+            <h1 id="workspaceTitle">Explore New York City</h1>
           </div>
           <div class="top-actions">
-            <button class="primary-action edit-brief-top" type="button" onclick="openBrief()">Edit Brief</button>
             <select id="locationSelect" class="location-select" aria-label="Selected Location"></select>
             <div class="search concept-search">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -114,57 +113,38 @@
                 <path d="M3 4v5h5"></path>
               </svg>
             </button>
-            <div class="header-theme segmented-control" role="group" aria-label="Dashboard Appearance"><button type="button" data-theme-choice="system" aria-pressed="true">System</button><button type="button" data-theme-choice="light" aria-pressed="false">Light</button><button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button></div>
-            {% if access %}<div class="account-bar"><span>{{ email if email else 'Guest' }}</span>{% if access == 'guest' %}<button type="button" data-auth-open="login">Log In</button><button type="button" data-auth-open="signup">Sign Up</button>{% else %}<button type="button" data-logout>Log Out</button>{% endif %}</div>{% endif %}
+            <button class="quiet-action settings-shortcut" type="button" onclick="selectView('settings')" aria-label="Workspace settings">Settings</button>
           </div>
         </header>
 
-        <div class="mobile-section-nav segmented-control" role="group" aria-label="Workspace Section"><button type="button" data-section-view="discover" aria-pressed="true">Explore</button><button type="button" data-section-view="lease" aria-pressed="false">Plan</button><button type="button" data-section-view="reports" aria-pressed="false">Workspace</button></div>
-        <nav class="feature-tabs" aria-label="Groundwork Feature Modules">
-          <div class="nav-group" aria-label="Explore"><span class="nav-group-label">Explore</span>
-          <button class="feature-tab is-active" data-view="discover" type="button">
-            <strong>Overview</strong>
-          </button>
-          <button class="feature-tab" data-view="scorecard" type="button">
-            <strong>Market Profile</strong>
-          </button>
-          <button class="feature-tab" data-view="access" type="button">
-            <strong>Customer Access</strong>
-          </button>
-          <button class="feature-tab" data-view="whitespace" type="button">
-            <strong>Competition</strong>
-          </button>
-          <button class="feature-tab" data-view="compare" type="button">
-            <strong>Compare <span id="compareCount" class="tab-count">0</span></strong>
-          </button>
+        <nav class="destination-nav" aria-label="Main navigation">
+          <button type="button" data-destination="explore" aria-current="page">Explore</button>
+          <button type="button" data-destination="analyze">Analyze</button>
+          <button type="button" data-destination="compare">Compare <span id="compareCount" class="tab-count">0</span></button>
+          <button type="button" data-destination="plan">Plan</button>
+          <button type="button" data-destination="report">Report</button>
+        </nav>
+        <nav class="feature-tabs contextual-nav" aria-label="Section navigation" hidden>
+          <div class="nav-group" data-destination-group="analyze">
+            <button class="feature-tab" data-view="scorecard" type="button">Market profile</button>
+            <button class="feature-tab" data-view="access" type="button">Customer access</button>
+            <button class="feature-tab" data-view="whitespace" type="button">Competition</button>
           </div>
-          <div class="nav-group" aria-label="Plan"><span class="nav-group-label">Plan</span>
-          <button class="feature-tab" data-view="lease" type="button">
-            <strong>Properties</strong>
-          </button>
-          <button class="feature-tab" data-view="finance" type="button">
-            <strong>Economics</strong>
-          </button>
-          <button class="feature-tab" data-view="menu" type="button">
-            <strong>Menu Studio</strong>
-          </button>
+          <div class="nav-group" data-destination-group="plan">
+            <button class="feature-tab" data-view="lease" type="button">Properties</button>
+            <button class="feature-tab" data-view="finance" type="button">Economics</button>
+            <button class="feature-tab" data-view="menu" type="button">Menu studio</button>
+            <button class="feature-tab" data-view="workspace" type="button">Business plan</button>
           </div>
-          <div class="nav-group" aria-label="Workspace"><span class="nav-group-label">Workspace</span>
-          <button class="feature-tab" data-view="workspace" type="button"><strong>Business Plan</strong></button>
-          <button class="feature-tab" data-view="reports" type="button">
-            <strong>Report</strong>
-          </button>
-          <button class="feature-tab feature-tab--utility" data-view="layers" type="button">
-            <strong>Sources</strong>
-          </button>
-          <button class="feature-tab feature-tab--utility" data-view="settings" type="button">
-            <strong>Settings</strong>
-          </button>
+          <div class="nav-group" data-destination-group="report">
+            <button class="feature-tab" data-view="reports" type="button">Decision report</button>
+            <button class="feature-tab" data-view="layers" type="button">Sources & research</button>
           </div>
         </nav>
 
         <div class="dashboard-status" id="dashboardStatus" role="status" hidden></div>
         <div class="model-status" id="survivalModelStatus" role="status" hidden></div>
+        <div id="sampleNotice" class="sample-notice" hidden><span><strong>You’re exploring a sample.</strong> General restaurant assumptions, $35 per guest. Submit your idea for a tailored search.</span><button type="button" class="quiet-action" onclick="openBrief()">Create your brief</button></div>
         <section class="metric-ribbon" id="metricRibbon" aria-label="Dashboard Metrics"></section>
 
         <section class="command-grid">
@@ -174,14 +154,16 @@
                 <h2 id="mapModeTitle">NYC Score Surface</h2>
               </div>
               <div class="module-tabs">
-                <select id="mapInventorySelect" aria-label="Map Inventory"><option value="properties">Property Scenarios</option><option value="areas">Recommended Areas</option></select>
-                <select id="heatmapMetricSelect" aria-label="Color Map By" title="Color Map By"><option value="">Heatmap Off</option><option value="concept_demand">Concept Demand</option><option value="location_score">Location Fit</option><option value="demand">Area Demand</option><option value="customer_fit">Customer Fit</option><option value="access">Accessibility</option><option value="inverse_walkability">Customer Access (Network)</option><option value="walkability">Walkability</option><option value="competition_balance">Competition Balance</option><option value="market_gap">Cuisine Supply</option><option value="economics">Commercial Fit</option></select>
-                <label class="restaurant-toggle" hidden><input id="showRestaurantsToggle" type="checkbox" /> Existing Restaurants</label>
-                <select id="mapBasemapSelect" aria-label="Map View">
-                  <option value="streets">Streets</option>
-                  <option value="aerial">Aerial</option>
-                  <option value="buildings3d">3D</option>
+                <select id="mapInventorySelect" aria-label="Map Inventory"><option value="properties">Spaces & scenarios</option><option value="areas">Recommended Areas</option></select>
+                <select id="heatmapMetricSelect" aria-label="Heatmap metric" aria-describedby="heatmapHelp">
+                  <option value="">Heatmap Off</option>
+                  <optgroup label="Demand & Audience"><option value="concept_demand">Concept Demand</option><option value="demand">Area Demand</option><option value="customer_fit">Customer Fit</option></optgroup>
+                  <optgroup label="Accessibility"><option value="access">Transit & Activity Access</option><option value="inverse_walkability">Network Customer Access</option></optgroup>
+                  <optgroup label="Walkability"><option value="walkability">Walkability</option></optgroup>
+                  <optgroup label="Competition"><option value="competition_balance">Competition Balance</option><option value="market_gap">Cuisine Supply</option></optgroup>
+                  <optgroup label="Commercial Fit"><option value="economics">Commercial Fit</option><option value="location_score">Overall Location Fit</option></optgroup>
                 </select>
+                <details class="map-options"><summary>Display options</summary><label class="restaurant-toggle" hidden><input id="showRestaurantsToggle" type="checkbox" /> Existing Restaurants</label>
                 <select id="mapLayerSelect" aria-label="Map Layer">
                   <option value="opportunity">Location Score</option>
                   <option value="walkability">Walkability</option>
@@ -193,8 +175,16 @@
                   <option value="concept_demand">Concept Demand Index</option>
                   {% if spatial_backend_enabled|default(false) %}<option value="huff_demand" disabled>Huff Market Gaps (Unavailable)</option>{% endif %}
                 </select>
+                </details>
+                <select id="mapBasemapSelect" aria-label="Map View">
+                  <option value="streets">Streets</option>
+                  <option value="aerial">Aerial</option>
+                  <option value="buildings3d">3D</option>
+                </select>
+
               </div>
             </div>
+            <details class="heatmap-guide" id="heatmapGuide" hidden><summary>Heatmap legend & evidence guide</summary><p id="heatmapHelp" class="heatmap-help" role="status" hidden></p></details>
             <div class="map-stage" id="mapStage"><div class="map-view-status" id="mapViewStatus" role="status" hidden></div></div>
           </div>
 
@@ -207,29 +197,35 @@
               </div>
               <div class="score-orb" id="scoreOrb"><span id="selectedScore">--</span></div>
             </div>
-            <div class="walkability-pair" id="walkabilityPair"></div>
+
             <div id="selectedPropertySummary" class="selected-property-summary" hidden></div>
-            <div class="bar-stack" id="barStack"></div>
+            <details class="selected-extra"><summary>Quick factors & access</summary><div class="walkability-pair" id="walkabilityPair"></div><div class="bar-stack" id="barStack"></div><ul id="driverList"></ul></details>
             <div class="driver-list">
               <div class="module-title-row">
-                <h3>Decision Summary</h3>
+                <h3>Area outlook</h3>
                 <span id="confidencePill">--</span>
               </div>
-              <ul id="driverList"></ul>
               <p class="decision-note" id="selectedRecommendation"></p>
-              <div class="intel-actions"><button class="quiet-action" id="saveLocation" type="button" aria-pressed="false">Save Location</button><button class="quiet-action" id="viewAnalysis" type="button">Market Profile</button></div>
+              <div class="intel-actions"><button class="quiet-action" id="saveLocation" type="button" aria-pressed="false">Save Location</button><button class="quiet-action" id="viewAnalysis" type="button">Analyze this location →</button></div>
             </div>
           </aside>
         </section>
 
+        <div id="analysisNavigation" class="location-context" hidden>
+          <div><button type="button" class="text-action" data-analysis-view="discover">← Map</button><span class="context-divider"></span><strong id="analysisLocationName"></strong><span class="context-caption">Selected area</span></div>
+          <button type="button" id="saveAnalysisLocation" class="quiet-action" aria-pressed="false">Save to compare</button>
+        </div>
         <section class="lower-grid">
           <div class="table-module" data-panel="discover">
             <div class="module-head compact">
               <div>
-                <h2>Top 5 Opportunities</h2>
+                <h2 id="opportunitiesHeading">Top 5 Opportunities</h2>
+                <small id="recommendationCount" aria-live="polite"></small>
+              </div>
+              <div class="recommendation-controls"><label for="recommendationLimit">Show</label><select id="recommendationLimit"><option value="5">Top 5</option><option value="10">Top 10</option><option value="15">Top 15</option><option value="20">Top 20</option><option value="25">Top 25</option><option value="30">Top 30</option><option value="35">Top 35</option></select>
               </div>
             </div>
-            <div class="data-table" id="rankingTable"></div>
+            <details class="ranking-explanation" id="rankingExplanation"><summary>How are these recommendations ordered?</summary><p id="rankingBasis"></p></details><div class="data-table" id="rankingTable"></div>
           </div>
 
           <div class="table-module is-hidden" data-panel="scorecard">
@@ -290,24 +286,30 @@
               <button class="primary-action" type="submit">Update Scenario</button>
             </form>
             <div class="finance-board" id="financeBoard"></div>
-            <section class="planning-section" aria-labelledby="scenarioLibraryHeading"><h3 id="scenarioLibraryHeading">Saved Scenarios</h3><form id="saveScenarioForm" class="planning-toolbar"><label>Scenario Name<input id="scenarioName" maxlength="60" value="Expected" list="scenarioNames" required /></label><datalist id="scenarioNames"><option value="Conservative"><option value="Expected"><option value="Optimistic"></datalist><button type="submit" class="quiet-action">Save Scenario</button><button id="economicsUseBasket" type="button" class="quiet-action">Use Menu Basket</button></form><div id="scenarioLibrary" aria-live="polite"></div><div class="economics-chart" id="scenarioComparisonWrap" hidden><canvas id="scenarioComparison" role="img" aria-label="Saved Scenario Daily Profit Comparison"></canvas></div></section>
+
             <section class="economics-lab" aria-labelledby="economicsLabHeading">
               <div class="view-heading"><div><span class="eyebrow">Scenario Workspace</span><h3 id="economicsLabHeading">Daily Profit & Pricing</h3></div><span class="card-status">User-Assumed Demand</span></div>
+              <p class="analysis-intro">Explore how your assumptions affect operating profit. These calculations are scenarios, not predictions of restaurant performance.</p>
+              <div id="economicsStatus" role="status"></div><div id="economicsResults"></div>
+              <details class="economics-editor" id="economicsEditor"><summary>Edit operating assumptions</summary>
               <form id="economicsLabForm" class="economics-inputs">
                 <label class="control-field"><span>Monthly Rent / Occupancy ($)</span><input name="monthly_rent" type="number" min="0" max="1000000" step="any" required /></label>
                 <label class="control-field"><span>Other Monthly Fixed Costs ($)</span><input name="monthly_fixed" type="number" min="0" max="2000000" step="any" required /></label>
                 <label class="control-field"><span>Operating Days / Month</span><input name="operating_days" type="number" min="1" max="31" step="1" required /></label>
                 <label class="control-field"><span>Spend Per Guest ($)</span><input name="price" type="number" min="1" max="1000" step="any" required /></label>
                 <label class="control-field"><span>Variable Cost Per Guest ($)</span><input name="unit_cost" type="number" min="0" max="1000" step="any" required /></label>
-                <label class="control-field"><span>Expected Daily Covers</span><input name="daily_covers" type="number" min="1" max="5000" step="1" required /></label>
-                <label class="control-field"><span>Daily Capacity</span><input name="capacity" type="number" min="1" max="5000" step="1" required /></label>
+                <label class="control-field"><span>Assumed guests / day</span><input name="daily_covers" type="number" min="1" max="5000" step="1" required /></label>
+                <label class="control-field"><span>Maximum guests / day</span><input name="capacity" type="number" min="1" max="5000" step="1" required /></label>
+                <details class="advanced-economics-inputs"><summary>Price response & profit target</summary><div class="economics-input-grid">
                 <label class="control-field" title="Absolute price elasticity at the entered price and volume. This is an assumption, not fitted customer demand."><span>Assumed Price Elasticity</span><input name="elasticity" type="number" min="0.1" max="10" step="0.1" required /></label>
                 <label class="control-field" title="Additional marginal cost per guest at full capacity, such as overtime or congestion."><span>Capacity Cost Premium ($)</span><input name="congestion_cost" type="number" min="0" max="1000" step="any" required /></label>
                 <label class="control-field"><span>Daily Profit Target ($)</span><input name="profit_target" type="number" min="0" max="100000" step="any" required /></label>
+                </div></details>
                 <div class="economics-actions"><button class="primary-action" type="submit">Calculate Scenario</button><button class="quiet-action" id="economicsUseProperty" type="button">Use Selected Property Rent</button></div>
               </form>
-              <div id="economicsStatus" role="status"></div><div id="economicsResults"></div>
+              </details>
             </section>
+            <details class="planning-section scenario-library"><summary id="scenarioLibraryHeading">Save & compare scenarios</summary><form id="saveScenarioForm" class="planning-toolbar"><label>Scenario Name<input id="scenarioName" maxlength="60" value="Expected" list="scenarioNames" required /></label><datalist id="scenarioNames"><option value="Conservative"><option value="Expected"><option value="Optimistic"></datalist><button type="submit" class="quiet-action">Save Scenario</button><button id="economicsUseBasket" type="button" class="quiet-action">Use Menu Basket</button></form><div id="scenarioLibrary" aria-live="polite"></div><div class="economics-chart" id="scenarioComparisonWrap" hidden><canvas id="scenarioComparison" role="img" aria-label="Saved Scenario Daily Profit Comparison"></canvas></div></details>
           </div>
 
           <div class="table-module is-hidden" data-panel="menu">
@@ -350,7 +352,7 @@
             <div class="module-head compact"><h2>Business Plan</h2><span class="card-status">User-Assumed Scenario</span></div>
             <div class="business-workspace">
               <div id="businessPlanContext" class="business-context"></div>
-              <form id="businessPlanForm" class="business-plan-inputs">
+              <details class="business-input-details"><summary>Cash plan assumptions</summary><form id="businessPlanForm" class="business-plan-inputs">
                 <label>Operating Scenario<select name="scenario_name" id="businessScenario"><option value="">Current Economics Draft</option></select></label>
                 <label>Starting Cash ($)<input name="opening_cash" type="number" min="0" max="10000000" step="any" value="100000" required /></label>
                 <label>One-Time Opening Costs ($)<input name="startup_cost" type="number" min="0" max="10000000" step="any" value="50000" required /></label>
@@ -360,6 +362,7 @@
                 <label>Planning Horizon<select name="months"><option value="6">6 Months</option><option value="12" selected>12 Months</option><option value="18">18 Months</option><option value="24">24 Months</option></select></label>
                 <button type="submit" class="primary-action">Update Cash Plan</button>
               </form>
+              </details>
               <div id="businessPlanStatus" role="status"></div>
               <div id="businessPlanResults"></div>
               <section class="planning-section"><div class="view-heading"><h3>Due Diligence</h3><span id="businessChecklistCount"></span></div><div id="businessChecklist" class="business-checklist"></div></section>
@@ -447,21 +450,21 @@
         <div id="briefPhoto" class="brief-photo" aria-hidden="true"><div class="photo-caption">A better location starts with a clearer idea.</div></div>
         <form class="brief-form" id="briefForm" novalidate>
           <div class="brief-heading">
-            <div><div class="eyebrow">CONCEPT STUDIO</div><h2 id="briefTitle">Define your restaurant</h2><p>A few details help shape your location search.</p></div>
+            <div><div class="eyebrow">CONCEPT STUDIO</div><h2 id="briefTitle">Define your restaurant</h2><p>Start with your idea. We’ll use your choices to compare areas and explore space scenarios.</p></div>
           </div>
           <div class="brief-scroll">
             <p class="required-note">* Required</p>
             <div class="brief-fields">
               <div class="control-field concept-search">
                 <label for="briefConceptName">Restaurant Idea <b>*</b></label>
-                <input id="briefConceptName" type="text" placeholder="Search ideas, e.g. Café" maxlength="48" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="conceptSuggestions" aria-required="true" />
+                <input id="briefConceptName" type="text" placeholder="Choose a format, e.g. Café" maxlength="80" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="conceptSuggestions" aria-describedby="ideaError" aria-required="true" />
                 <div id="conceptSuggestions" class="concept-suggestions" role="listbox" hidden></div>
                 <small id="ideaError" class="field-error" hidden>Choose an idea from the suggestions.</small>
               </div>
               <label class="control-field" id="customIdeaField" hidden><span>Custom Restaurant Idea <b>*</b></span><input id="briefCustomIdea" type="text" maxlength="80" placeholder="Describe your idea" /></label>
               <div class="control-field cuisine-search">
                 <label for="cuisineSearch">Cuisine <b>*</b></label>
-                <input id="cuisineSearch" type="text" placeholder="Select cuisine" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cuisineSuggestions" aria-required="true" />
+                <input id="cuisineSearch" type="text" placeholder="Select cuisine" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cuisineSuggestions" aria-describedby="cuisineError" aria-required="true" />
                 <div id="cuisineSuggestions" class="concept-suggestions" role="listbox" hidden></div>
                 <select id="briefCuisine" aria-label="Selected cuisine" hidden>
                 <option value="">Select cuisine</option>
@@ -521,11 +524,11 @@
                 <small id="cuisineError" class="field-error" hidden>Select a cuisine from the list.</small>
               </div>
               <label class="control-field" id="customCuisineField" hidden><span>Other Cuisine <b>*</b></span><input id="briefCustomCuisine" type="text" maxlength="80" placeholder="Describe the cuisine" /></label>
-              <label class="control-field" id="briefTierField"><span>Price Range <b>*</b></span><select id="briefPriceTier" required><option value="">Select price range</option><option value="$">$ · Everyday</option><option value="$$">$$ · Midrange</option><option value="$$$">$$$ · Premium</option><option value="$$$$">$$$$ · Fine Dining</option></select><small id="priceError" class="field-error" hidden>Select a price range.</small></label>
+              <label class="control-field" id="briefTierField"><span>Spend per guest <b>*</b></span><select id="briefPriceTier" required><option value="">Select price range</option><option value="$">$ · About $18</option><option value="$$">$$ · About $35</option><option value="$$$">$$$ · About $65</option><option value="$$$$">$$$$ · About $110</option></select><small id="priceError" class="field-error" hidden>Select a price range.</small></label>
               <label class="control-field"><span>Dietary Focus <em>Optional</em></span><select id="briefDietary"><option value="none">No preference</option><option value="vegan">Vegan</option><option value="vegetarian">Vegetarian</option><option value="halal">Halal</option><option value="kosher">Kosher</option><option value="gluten_free">Gluten-Free</option></select></label>
               <label class="control-field"><span>Space Preference <em>Optional</em></span><select id="briefDeal"><option value="">No preference</option><option value="lease">Lease a space</option><option value="purchase">Purchase a property</option><option value="either">Show lease and purchase</option></select></label>
-              <label class="control-field" id="monthlyBudgetField"><span>Monthly Rent Budget <em>Optional</em></span><div class="money-input"><span>$</span><input id="briefBudget" type="number" min="2000" max="100000" step="1000" placeholder="Amount" /><span>per month</span></div></label>
-              <label class="control-field" id="purchaseBudgetField" hidden><span>Purchase Budget <em>Optional</em></span><div class="money-input"><span>$</span><input id="briefPurchaseBudget" type="number" min="100000" max="50000000" step="50000" placeholder="Amount" /></div></label>
+              <label class="control-field" id="monthlyBudgetField"><span>Monthly Rent Budget <em>Optional</em></span><div class="money-input"><span>$</span><input id="briefBudget" type="number" min="2000" max="100000" step="1000" placeholder="Default 18,000" /><span>per month</span></div></label>
+              <label class="control-field" id="purchaseBudgetField" hidden><span>Purchase Budget <em>Optional</em></span><div class="money-input"><span>$</span><input id="briefPurchaseBudget" type="number" min="100000" max="50000000" step="50000" placeholder="Default 3,000,000" /></div></label>
               <label class="control-field"><span>Preferred Area <em>Optional</em></span><select id="briefArea"><option value="">Anywhere in NYC</option><option value="Brooklyn">Brooklyn</option><option value="Queens">Queens</option><option value="Manhattan">Manhattan</option><option value="Bronx">Bronx</option><option value="Staten Island">Staten Island</option></select></label>
               <div class="control-field wide description-field"><label for="briefDescription">Describe Your Concept <em>Optional</em></label><textarea id="briefDescription" maxlength="500" rows="2" placeholder="e.g. A neighborhood café with seasonal pastries" aria-controls="descriptionSuggestions" aria-expanded="false"></textarea><small>What makes your restaurant different?</small><div class="description-suggestions" id="descriptionSuggestions" aria-label="Description suggestions" hidden></div></div>
             </div>
@@ -554,11 +557,11 @@
     <script>window.GROUNDWORK_MENU_OWNER = {{ (email or 'guest')|tojson }}; window.GROUNDWORK_ACCESS = {{ access|tojson }}; window.GROUNDWORK_CSRF = {{ csrf|tojson }}; window.GROUNDWORK_SPATIAL_BACKEND = {{ (spatial_backend_enabled|default(false))|tojson }};</script>
     <script src="{{ url_for('static', filename='vendor/maplibre/maplibre-gl.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/explorers.js') }}?v=20261029"></script>
+    <script src="{{ url_for('static', filename='js/explorers.js') }}?v=20261109-product"></script>
     <script src="{{ url_for('static', filename='js/planning.js') }}?v=20261028"></script>
     <script src="{{ url_for('static', filename='js/menu_lab.js') }}?v=20261029"></script>
     <script src="{{ url_for('static', filename='js/business_workspace.js') }}?v=20261029"></script>
-    <script src="{{ url_for('static', filename='js/entry.js') }}?v=20261029-jas"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261029-top-five"></script>
+    <script src="{{ url_for('static', filename='js/entry.js') }}?v=20261109-product"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261109-product"></script>
   </body>
 </html>

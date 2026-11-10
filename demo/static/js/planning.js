@@ -1,6 +1,7 @@
 /* Concept-scoped plans use the existing private, revisioned account workspace. */
 let scenarioComparisonChart = null;
 let scenarioComparisonRevision = 0;
+let reportPrintDetails = [];
 
 function reconcileWorkspace(base, remote, local) {
   // Three-way comparison preserves remote-only edits and intentional local deletions.
@@ -45,7 +46,7 @@ function openPlanProperty(id) {
   mapInventory = "properties"; document.querySelector("#mapInventorySelect").value = "properties";
   if (isHexLayer()) setActiveLayer("opportunity");
   renderAll(); selectView("discover");
-  if (property.latitude && property.longitude) locationMap.flyTo({center: [+property.longitude, +property.latitude], zoom: 15});
+  if (property.latitude && property.longitude) locationMap?.flyTo({center: [+property.longitude, +property.latitude], zoom: 15});
 }
 
 function renderPropertyShortlist() {
@@ -55,10 +56,11 @@ function renderPropertyShortlist() {
     document.querySelector("#leaseBoard").before(board);
   }
   const ids = currentPlan().property_ids;
+  if (!ids.length) {board.innerHTML='<div class="shortlist-empty"><strong>Your space shortlist</strong><span>Save up to four records to compare costs and access.</span></div>'; return;}
   board.innerHTML = `<div class="view-heading"><h3>Property Shortlist</h3><span>${ids.length} / 4 Saved</span></div>` + (ids.length ?
     `<div class="comparison-scroll"><table class="comparison-table"><thead><tr><th>Property</th><th>Price</th><th>Area</th><th>Kitchen</th><th>Access</th><th>Area Score</th><th>Actions</th></tr></thead><tbody>${ids.map(id => {
       const row = dashboard.properties.find(item => item.id === id);
-      return `<tr><th scope="row">${escapeHtml(row?.address || id)}<small>${row ? row.lead_type === "synthetic" ? "Synthetic Scenario" : "Source-Reported Record" : "Outside Current Search"}</small></th><td>${escapeHtml(row?.price_label || "Unavailable")}</td><td>${row?.sqft ? `${displayNumber(row.sqft)} SF` : "Unavailable"}</td><td>${escapeHtml(row?.kitchen_status || "Unavailable")}</td><td>${row?.customer_access?.index ?? "Unavailable"}</td><td>${row?.fit_score ?? "Unavailable"}</td><td>${row ? `<button type="button" class="quiet-action" data-open-property="${escapeHtml(id)}">Open</button>` : ""}<button type="button" class="quiet-action" data-save-property="${escapeHtml(id)}" aria-label="Remove Saved Property ${escapeHtml(id)}">Remove</button></td></tr>`;
+      return `<tr><th scope="row">${escapeHtml(row?.address || id)}<small>${row ? propertyRecordLabel(row) : "Outside Current Search"}</small></th><td>${escapeHtml(row?.price_label || "Unavailable")}</td><td>${row?.sqft ? `${displayNumber(row.sqft)} SF` : "Unavailable"}</td><td>${escapeHtml(row?.kitchen_status || "Unavailable")}</td><td>${row?.customer_access?.index ?? "Unavailable"}</td><td>${row?.fit_score ?? "Unavailable"}</td><td>${row ? `<button type="button" class="quiet-action" data-open-property="${escapeHtml(id)}">Open</button>` : ""}<button type="button" class="quiet-action" data-save-property="${escapeHtml(id)}" aria-label="Remove Saved Property ${escapeHtml(id)}">Remove</button></td></tr>`;
     }).join("")}</tbody></table></div>` : '<p class="planning-empty">No Saved Properties</p>');
   document.querySelectorAll("[data-save-property]").forEach(button => {
     if (!ids.includes(button.dataset.saveProperty) && ids.length >= 4) button.disabled = true;
@@ -91,14 +93,15 @@ function renderMenuPlanning() {
     for (const ingredient of ingredients) ingredientCounts.set(ingredient, (ingredientCounts.get(ingredient) || 0) + 1);
   }
   const shared = [...ingredientCounts].filter(([, count]) => count > 1).sort((a,b) => b[1]-a[1]);
-  board.innerHTML = `<div class="view-heading"><h3>Menu Composition</h3><span>${savedMenu.filter(item => plan.menu_details[item.id]?.complexity === "complex").length} Complex Dishes</span></div>
+  if (!savedMenu.length) {board.innerHTML = '<p class="planning-empty">Build your menu below. Add ingredient costs and a guest basket when you’re ready to connect it to Economics.</p>'; return;}
+  board.innerHTML = `<details class="menu-composition-summary"><summary>Menu composition, preparation & guest basket</summary><div class="view-heading"><h3>Menu Composition</h3><span>${savedMenu.filter(item => plan.menu_details[item.id]?.complexity === "complex").length} Complex Dishes</span></div>
     <div class="section-balance">${menuSections.map(section => { const count = savedMenu.filter(item => item.section === section).length;
       return `<div><span>${section}</span><meter min="0" max="${Math.max(1,savedMenu.length)}" value="${count}" aria-label="${section} Share"></meter><b>${count}</b></div>`; }).join("")}</div>
     <details><summary>Ingredients & Preparation</summary><div class="planning-item-grid">${savedMenu.map(item => {
       const detail = plan.menu_details[item.id] || {};
       return `<div><strong>${escapeHtml(item.name)}</strong><label>Ingredients<input data-plan-ingredients="${escapeHtml(item.id)}" maxlength="300" value="${escapeHtml(detail.ingredients || "")}" placeholder="Tomato, basil, olive oil" /></label><label>Preparation<select data-plan-complexity="${escapeHtml(item.id)}">${["simple","standard","complex"].map(value => `<option value="${value}" ${value === (detail.complexity || "standard") ? "selected" : ""}>${titleCase(value)}</option>`).join("")}</select></label></div>`;
     }).join("") || '<p class="planning-empty">No Dishes Added</p>'}</div><p>Shared Ingredients: ${shared.length ? shared.map(([name,count]) => `${escapeHtml(name)} (${count})`).join(" · ") : "None Recorded"}</p></details>
-    <details><summary>Guest Basket · ${basket.priced ? money(basket.price) : "Not Priced"}</summary><div class="planning-basket">${savedMenu.map(item => `<label><span>${escapeHtml(item.name)}</span><input data-basket-qty="${escapeHtml(item.id)}" type="number" min="0" max="10" step="1" value="${plan.basket[item.id] || 0}" aria-label="${escapeHtml(item.name)} Portions Per Guest" /></label>`).join("")}</div><div class="kv"><span>Spend Per Guest</span><strong>${basket.priced ? money(basket.price) : "Prices Required"}</strong></div><div class="kv"><span>Ingredient Cost Per Guest</span><strong>${basket.costed ? money(basket.cost) : "Costs Required"}</strong></div><button type="button" class="quiet-action" data-use-menu-basket ${!basket.priced || basket.price > 1000 ? "disabled" : ""}>Use Basket In Economics</button></details>`;
+    <details><summary>Guest Basket · ${basket.priced ? money(basket.price) : "Not Priced"}</summary><div class="planning-basket">${savedMenu.map(item => `<label><span>${escapeHtml(item.name)}</span><input data-basket-qty="${escapeHtml(item.id)}" type="number" min="0" max="10" step="1" value="${plan.basket[item.id] || 0}" aria-label="${escapeHtml(item.name)} Portions Per Guest" /></label>`).join("")}</div><div class="kv"><span>Spend Per Guest</span><strong>${basket.priced ? money(basket.price) : "Prices Required"}</strong></div><div class="kv"><span>Ingredient Cost Per Guest</span><strong>${basket.costed ? money(basket.cost) : "Costs Required"}</strong></div><button type="button" class="quiet-action" data-use-menu-basket ${!basket.priced || basket.price > 1000 ? "disabled" : ""}>Use Basket In Economics</button></details></details>`;
 }
 
 function useMenuBasket() {
@@ -147,6 +150,13 @@ function renderPlanReport() {
     <p>Guest Basket: ${basket.priced ? `${money(basket.price)} / Guest` : "Not Configured"}</p>
     <h3>Operating Assumptions</h3>${Object.entries(plan.draft).map(([name,value])=>`<div class="kv"><span>${escapeHtml(titleCase(name.replaceAll("_"," ")))}</span><strong>${escapeHtml(value)}</strong></div>`).join("") || '<p>No Financial Scenario Saved</p>'}
     <div id="reportScenarioResults" aria-live="polite"></div><h3>Outstanding Checks</h3><ul><li>Confirm property availability, permitted use and occupancy costs.</li><li>Verify kitchen, ventilation, accessibility and licensing requirements.</li><li>Validate demand assumptions and full operating costs.</li></ul><p>Integrated Release: ${escapeHtml(dashboard.meta.data_release || "Unavailable")}. Synthetic properties are scenarios, not verified offers. Financial results use user assumptions, not estimated restaurant demand.</p></section>`);
+  report.querySelectorAll(".report-plan > h3").forEach(heading => {
+    const disclosure=document.createElement("details"); disclosure.className="report-detail";
+    const summary=document.createElement("summary"); summary.textContent=heading.textContent; disclosure.append(summary);
+    heading.before(disclosure);
+    while(heading.nextSibling && heading.nextSibling.nodeName !== "H3") disclosure.append(heading.nextSibling);
+    heading.remove();
+  });
   const reportContext = menuKey();
   const entries = Object.entries(plan.scenarios);
   if (Object.keys(plan.draft).length) entries.unshift(["Current Draft",plan.draft]);
@@ -161,6 +171,13 @@ function renderPlanReport() {
 }
 
 function initializePlanningControls() {
+
+window.addEventListener("beforeprint", () => {
+  reportPrintDetails = [...document.querySelectorAll("#reportBoard details")].map(element => [element, element.open]);
+  reportPrintDetails.forEach(([element]) => element.open = true);
+});
+window.addEventListener("afterprint", () => reportPrintDetails.forEach(([element,open]) => element.open = open));
+
   const settings = document.querySelector('[data-panel="settings"]');
   const profile = storedObject(`groundwork-profile:${accountOwner || "guest"}`) || {};
   settings.insertAdjacentHTML("beforeend", `<section class="planning-section"><h3>Business Profile</h3><form id="businessProfileForm" class="planning-toolbar"><label>Your Name<input name="display_name" maxlength="100" value="${escapeHtml(profile.display_name || "")}" autocomplete="name" /></label><label>Company<input name="company" maxlength="100" value="${escapeHtml(profile.company || "")}" autocomplete="organization" /></label><button class="quiet-action" type="submit">Save Profile</button></form><p id="profileStatus" role="status">${accountOwner ? "Private Account Workspace" : "Guest Workspace · This Device Only"}</p></section>`);

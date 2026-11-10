@@ -8,7 +8,7 @@ const functions = dashboard.slice(dashboard.indexOf('function clearHexLayer()'),
 
 function environment(fetch, layer = 'concept_demand') {
   const sources = new Map(), layers = new Map(), status = {hidden: true};
-  const context = vm.createContext({URL, URLSearchParams, Map, fetch, installNycBoundary: () => {},
+  const context = vm.createContext({URL, URLSearchParams, Map, fetch, installNycBoundary: () => {}, updateHeatmapHelp: () => {}, heatmapTitles: {walkability:"Walkability"},
     window: {location: {origin: 'https://groundwork.example'}, GROUNDWORK_SPATIAL_BACKEND: true},
     document: {querySelector: () => status},
     locationMap: {
