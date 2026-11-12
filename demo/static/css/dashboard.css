@@ -2063,7 +2063,20 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--cyan); outline-
 .advisor-chat-card ul, .advisor-chat-sources ul { padding-left: 18px; }
 .advisor-chat-card li, .advisor-chat-sources li { margin: 4px 0; }
 .advisor-chat-reply a { color: var(--cyan); }
+.advisor-chat-area-comparison { margin-top: 12px; }
+.advisor-chat-area-comparison h4, .advisor-chat-area-comparison h5 { margin: 0; color: var(--bright); font-size: 14px; }
+.advisor-chat-area-comparison dl { display: flex; flex-wrap: wrap; column-gap: 16px; row-gap: 4px; margin: 6px 0; }
+.advisor-chat-area-comparison dt { color: var(--muted); font-size: 12px; }
+.advisor-chat-area-comparison dd { margin: 0; font-weight: 650; }
+.advisor-chat-scenario { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.advisor-chat-scenario h4, .advisor-chat-scenario h5 { margin: 0; color: var(--bright); font-size: 14px; }
+.advisor-chat-scenario dl, .advisor-chat-scenario-target dl { display: grid; gap: 8px; margin: 8px 0; }
+.advisor-chat-scenario dt, .advisor-chat-scenario-target dt { color: var(--muted); font-size: 12px; }
+.advisor-chat-scenario dd, .advisor-chat-scenario-target dd { margin: 0; }
+.advisor-chat-scenario-target { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .advisor-chat-sources, .advisor-chat-actions { margin-top: 12px; }
+.advisor-chat-card .advisor-chat-actions { margin-top: 8px; }
+.advisor-chat-card .advisor-chat-actions .quiet-action { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 #advisorChatForm { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 8px; }
 #advisorChatMessage { min-width: 0; min-height: 48px; max-height: 160px; resize: vertical; padding: 10px 12px; border: 1px solid var(--line-bright); border-radius: 8px; background: var(--void); color: var(--bright); font: inherit; font-size: 14px; }
 #advisorChatMessage::placeholder { color: var(--muted); }

@@ -2,6 +2,18 @@
 
 Open **Advisor** or go to `/?advisor=live`. Ask a question such as “Where should I look for a $35 Italian dinner spot in Queens?” Follow up with “What if I charge $45?” or “Why the first one?” The Advisor keeps the conversation’s scope and uses the dashboard’s ranking, evidence, and operating calculator. It asks for clarification when a tract name or constraint is ambiguous. The chat uses no model or hosted service.
 
+The Advisor ships on the `ai-site-advisor` branch. The published sample runs from the files in the checkout. Live chat and rankings also need the integrated release described in the [local setup guide](OTIS_LOCAL_SETUP.md).
+
+Ask “Where should I look in Astoria?” or “Compare Astoria and Long Island City.” The comparison shows how many tracts matched the neighborhood names in the screening dataset and summarizes only those that earned scores. The leading tract cards open property and evidence details. The chat remembers the shortlist after you ask about one tract, and a follow-up scenario stays within the named areas until you pick a new scope.
+
+Guest-spend and trading-period what-ifs open a **preview**. Follow-up evidence questions use that preview until you **Apply scenario** or **Discard preview**. Repeated tests compare against the conversation’s applied guest spend and trading period. Apply changes only the conversation; **Undo applied scenario** restores the previous conversation settings and shortlist. A new explicit search starts from the applied settings. Dashboard filter or data-release changes still require a new chat.
+
+Ask “What if I charge $50 per guest for the first tract?” to see that tract’s own before-and-after score and tie-aware rank within the full conversation scope. The cards show supported screening-factor changes separately from the total score change. Neighborhood scenarios retain both named groups and compare their medians and scored-tract coverage. Missing scores and changed coverage remain visible. Hypothetical rent calculations, including any paired guest spend, apply only to that calculation. These features reuse the existing ranker and make no model calls.
+
+The chat retains dietary preferences in its scope and asks for clarification on facility requirements, geographic exclusions, walking-distance limits, or price ranges it cannot apply. When it asks which cuisine or amount to use, a short reply completes the original request. Saving a comparison location preserves the conversation, and selecting a different map location preserves completed research results. Changing the actual search or data release refreshes the relevant results.
+
+The published sample ships as the compact public export in `demo/examples/site_advisor_sample.csv`, including in the standard Docker image. It uses nine existing synthetic screening selections across the three supported guest-spend samples.
+
 Open **Research tools** for the Decision Lab, site brief, and two-scenario comparison. The Decision Lab compares up to nine combinations of guest spend and trading period. Its results show where candidates clearly reach the top three, where ties span the cutoff, and which supporting evidence is missing.
 
 **Generate Site Brief** uses the current search settings and up to three saved locations, or the first three dashboard results when nothing is saved. `POST /api/site-brief` uses the existing server-side dashboard calculation.

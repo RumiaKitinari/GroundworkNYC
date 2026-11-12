@@ -31,10 +31,11 @@ from survival_inference import DEFAULT_CONFIG, attach_model, model_state
 from customer_access_inference import DEFAULT_ACCESS_CONFIG, attach_access, access_engine
 from evidence_policy import VERSION as EVIDENCE_POLICY_VERSION, catalog as evidence_catalog, property_policy, attach_runtime_policy
 from advisor_dossier import build_dossier
-from advisor_chat import parse_message
-from advisor_chat_answers import compose_answer
+from advisor_chat import parse_message, resolve_pending
+from advisor_chat_answers import compose_answer, compose_area_answer
+from advisor_chat_state import active_view as chat_active_view, transition as chat_transition, scenario_actions
 from decision_lab import analyze_scenarios, scenario_grid
-from site_advisor import build_evidence, compare_rankings, evidence_version, published_sample, scenario_arguments, site_brief
+from site_advisor import build_evidence, compare_rankings, evidence_version, published_sample, scenario_arguments, screening_factor_changes, site_brief
 
 
 app = Flask(__name__)
@@ -1889,6 +1890,7 @@ def _dashboard(args, *, advisor_snapshot=False):
                 "sort_by": sort_by,
                 "primary_dataset": f"{package['data_path']}/master_tract_features.csv",
                 "data_release": package["data_release"],
+                "release_id": package["release_id"],
                 "unsupported_values": unsupported_values(properties),
             },
         }
@@ -1917,7 +1919,7 @@ def site_brief_sample_api():
     if comparison and (not isinstance(changes, dict) or set(changes) != {"average_check"}
                        or changes["average_check"] not in (18, 65)):
         return jsonify({"error": "Choose the saved $18 or $65 sample."}), 400
-    path = PROJECT_ROOT / "reports/2026-11-02-model-results/scenarios/top_selections.csv"
+    path = PROJECT_ROOT / "demo/examples/site_advisor_sample.csv"
     try:
         base = published_sample(path, 35)
         if comparison:
@@ -2161,7 +2163,7 @@ def chat_check_label(concept):
     return f"${concept.average_check:,.2f}".rstrip("0").rstrip(".") + f" per guest, {CHAT_DAYPARTS[concept.daypart]}"
 
 
-def chat_scope(inputs):
+def chat_scope(inputs, areas=()):
     concept = inputs.concept
     cuisine = concept.cuisine.replace("_", " ").title() if concept.cuisine != "any" else "Any cuisine"
     limits = []
@@ -2169,38 +2171,69 @@ def chat_scope(inputs):
         limits.append(f"Lease up to ${inputs.rent_cap:,}/mo")
     if inputs.deal_type != "lease":
         limits.append(f"Purchase up to ${inputs.purchase_budget:,}")
-    return " · ".join([inputs.borough or "All NYC", cuisine, chat_check_label(concept), *limits])
+    geography = [" + ".join(area["label"] for area in areas)] if areas else []
+    dietary = [concept.dietary.replace("_", " ").title()] if concept.dietary != "none" else []
+    return " · ".join([*geography, inputs.borough or "All NYC", cuisine, *dietary, chat_check_label(concept), *limits])
 
 
-def chat_actions(intent, cards, inputs):
+def chat_actions(intent, cards, inputs, areas=()):
     if not cards:
-        return [{"label": "Find areas", "prompt": "Where should I start looking?"}]
+        return [chat_broader_search(inputs)] if areas else [{"label": "Find areas", "prompt": "Where should I start looking?"}]
     actions = []
-    if intent != "why":
-        actions.append({"label": "Why this area?", "prompt": "Why the first one?"})
     if len(cards) >= 2 and intent != "compare":
         actions.append({"label": "Compare these areas", "prompt": "Compare these areas."})
-    if intent != "property":
-        actions.append({"label": "Check property leads", "prompt": "Can I tour the first one?"})
     period = "lunch" if inputs.concept.daypart == "evening" else "dinner"
     actions.append({"label": f"Try {period}", "prompt": f"What if I switch to {period}?"})
-    return actions[:3]
+    if areas:
+        actions.append(chat_broader_search(inputs))
+    return actions
 
 
-def chat_scenario(before, after, before_inputs, after_inputs, survival):
+def chat_broader_search(inputs):
+    geography = inputs.borough or "NYC"
+    return {"label": f"Search all of {geography}", "prompt": f"Where should I look in {geography}?"}
+
+
+def chat_scenario(before, after, before_inputs, after_inputs, survival, *, focus_ids=(), targeted=False, areas=()):
     settings = [before_inputs.concept, after_inputs.concept]
     variants = [{"id": key, "average_check": concept.average_check, "daypart": concept.daypart}
                 for key, concept in zip(("before", "after"), settings)]
     result = {"before_label": chat_check_label(settings[0]), "after_label": chat_check_label(settings[1]),
               "matched": sum(variants[0][key] != variants[1][key] for key in ("average_check", "daypart")) == 1,
-              "inert": after_inputs.sort_by == "opportunity" and survival["ranking_mode"] == "survival_cuisine_gap"}
+              "inert": after_inputs.sort_by == "opportunity" and survival["ranking_mode"] == "survival_cuisine_gap",
+              "targeted": targeted}
     try:
-        compared = analyze_scenarios(variants, [before, after])
+        compared = analyze_scenarios(variants, [before, after], focus_ids)
     except ValueError:
         return {**result, "comparison_unavailable": True}
     if compared["summary"]["comparable_count"] != 2:
         return {**result, "comparison_unavailable": True}
     baseline, variant = compared["scenarios"]
+    old, new = ({row["id"]: row for row in snapshot["locations"]} for snapshot in (before, after))
+    factors_available = after_inputs.sort_by == "opportunity" and survival["ranking_mode"] == "screening"
+    targets = []
+    for candidate in compared["candidates"]:
+        if candidate["id"] not in focus_ids:
+            continue
+        left, right = candidate["results"]
+        scored = left["status"] == right["status"] == "ranked"
+        targets.append({"id": candidate["id"], "name": candidate["name"], "before": left, "after": right,
+                        "score_delta": round(right["score"] - left["score"], 2) if scored else None,
+                        "factors": screening_factor_changes(old.get(candidate["id"], {}), new.get(candidate["id"], {}))
+                        if scored and factors_available else []})
+    by_target = {target["id"]: target for target in targets}
+    targets = [by_target[identity] for identity in focus_ids if identity in by_target]
+    groups = []
+    if areas and not targeted:
+        old_groups, _ = chat_area_statistics(areas, before["locations"], after_inputs.sort_by)
+        new_groups, _ = chat_area_statistics(areas, after["locations"], after_inputs.sort_by)
+        for area, left, right in zip(areas, old_groups, new_groups):
+            ids = set(area["ids"])
+            metric = after_inputs.sort_by
+            old_scored = {identity for identity in ids & old.keys() if old[identity].get(metric) is not None}
+            new_scored = {identity for identity in ids & new.keys() if new[identity].get(metric) is not None}
+            groups.append({"label": area["label"], "before": left, "after": right,
+                           "coverage_changed": old_scored != new_scored})
     entries, exits = [], []
     for row in compared["candidates"]:
         left, right = row["results"]
@@ -2209,10 +2242,12 @@ def chat_scenario(before, after, before_inputs, after_inputs, survival):
                 entries.append(row["name"])
             if left["possible"] and not right["possible"]:
                 exits.append(row["name"])
-    return {**result, "entrants": entries, "departures": exits,
+    return {**result, "entrants": entries, "departures": exits, "targets": targets, "groups": groups,
             "before_ids": [row["id"] for row in baseline["displayed_top_three"]],
             "after_ids": [row["id"] for row in variant["displayed_top_three"]],
             "tied_cutoff": baseline["cutoff_tied"] or variant["cutoff_tied"],
+            "coverage_changed": {row["id"] for row in before["locations"] if row.get(after_inputs.sort_by) is not None}
+            != {row["id"] for row in after["locations"] if row.get(after_inputs.sort_by) is not None},
             "comparison_unavailable": False}
 
 
@@ -2230,9 +2265,38 @@ def chat_cards(inputs, package, snapshot, focus, survival, access, *, deep=False
         low, high = rank["rank_min"], rank["rank_max"]
         label = ("Score unavailable" if low is None else f"Rank {low}" if low == high
                  else f"Tied across ranks {low}–{high}")
-        cards.append({"id": row["id"], "name": row["name"], "label": label,
-                      "score": rank["score"], "dossier": dossiers.get(row["id"])})
+        identity = row["id"]
+        actions = [{"label": "Why this tract?", "prompt": f"Why is tract {identity} ranked here?"}]
+        if not deep:
+            actions.append({"label": "Check property leads", "prompt": f"Can I tour tract {identity}?"})
+        cards.append({"id": identity, "name": row["name"], "label": label,
+                      "score": rank["score"], "dossier": dossiers.get(identity), "actions": actions})
     return cards
+
+
+def chat_area_statistics(areas, rows, metric):
+    groups, leading_rows = [], []
+    for area in areas:
+        members = set(area["ids"])
+        eligible = [row for row in rows if row["id"] in members]
+        scored = [row for row in eligible if row.get(metric) is not None]
+        scores = [row[metric] for row in scored]
+        groups.append({"label": area["label"], "matched_count": len(members), "eligible_count": len(eligible),
+                       "scored_count": len(scores), "median_score": round(median(scores), 2) if scores else None,
+                       "low_score": min(scores) if scores else None, "high_score": max(scores) if scores else None})
+        if scored:
+            leading_rows.append(scored[0])
+    return groups, leading_rows
+
+
+def chat_followup(previous, plan, topic, card_ids, by_id, *, same_scope):
+    prior_focus = previous.get("candidate_ids", []) if same_scope else []
+    shortlist = previous.get("shortlist_ids", prior_focus) if same_scope else []
+    if not plan.get("restore") and (plan["intent"] in {"recommend", "what_if", "compare"} or topic == "property_search"):
+        shortlist = card_ids
+    return {"intent": plan["intent"], "changes": plan["changes"], "topic": topic,
+            "candidate_ids": card_ids or [identity for identity in prior_focus if identity in by_id],
+            "shortlist_ids": [identity for identity in (shortlist or card_ids) if identity in by_id]}
 
 
 @app.post("/api/site-brief/chat")
@@ -2256,77 +2320,139 @@ def site_advisor_chat_api():
     serializer = URLSafeTimedSerializer(app.secret_key, salt="groundwork-advisor-chat-v1")
     try:
         package = integrated_package()
-        anchor = revision_id(request.args.to_dict(flat=False), package["release_id"])
+        search = request.args.to_dict(flat=False)
+        search.pop("saved_id", None)
+        anchor = revision_id(search, package["release_id"])
         state = serializer.loads(context, max_age=4 * 3600) if context else {}
         if state and state["anchor"] != anchor:
             return jsonify({"error": "The dashboard settings or data changed. Start a new chat to use them."}), 409
         accepted = state.get("changes", {})
-        prior = chat_inputs(request.args, accepted)
+        prior_changes, prior_areas = chat_active_view(state)
+        prior_reference = state.get("previous", {})
+        prior = chat_inputs(request.args, prior_changes)
+        question = resolve_pending(message, state.get("pending")) or message
         candidates = [{"id": row["geoid"], "name": tract_display_name(row), "borough": row.get("borough"),
                        "neighborhood": row.get("nta_name")} for row in package["tracts"]]
-        plan = parse_message(message, {**decision_lab_assumptions(prior), "average_check": prior.concept.average_check,
+        plan = parse_message(question, {**decision_lab_assumptions(prior), "average_check": prior.concept.average_check,
                                       "daypart": prior.concept.daypart}, candidates=candidates,
                              selected_ids=saved_tract_ids(request.args), map_selected_id=selected,
-                             previous=state.get("previous"))
+                             previous=prior_reference)
         if plan["clarification"]:
-            return jsonify({"answer": plan["clarification"], "context": context, "cards": [],
-                            "actions": plan.get("actions", []), "scope": chat_scope(prior)})
+            token = serializer.dumps({**state, "anchor": anchor, "pending": plan.get("pending")})
+            return jsonify({"answer": plan["clarification"], "context": token, "cards": [],
+                            "actions": [*scenario_actions(state), *plan.get("actions", [])],
+                            "preview": bool(state.get("preview")), "scope": chat_scope(prior, prior_areas)})
+        next_state, changes, areas, prior_reference, notice, execute = chat_transition(state, plan)
+        if not execute:
+            return jsonify({"answer": notice, "context": serializer.dumps({**next_state, "anchor": anchor}),
+                            "cards": [], "actions": scenario_actions(next_state),
+                            "preview": bool(next_state.get("preview")), "scope": chat_scope(prior, prior_areas)})
+        if plan["intent"] in {"apply_scenario", "discard_scenario", "undo_scenario"}:
+            plan = {"intent": "recommend", "changes": {}, "topic": None,
+                    "candidate_ids": prior_reference.get("candidate_ids", []), "restore": True}
         intent, topic = plan["intent"], plan["topic"]
-        changes = {**accepted, **plan["changes"]}
         hypothetical_rent = plan["changes"].get("rent_cap") if topic == "rent_scenario" else None
-        if hypothetical_rent is not None:
-            changes = {**accepted, **{key: value for key, value in plan["changes"].items() if key != "rent_cap"}}
         inputs = chat_inputs(request.args, changes)
+        explicit_areas = plan.get("area_groups", [])
+        area_ids = {identity for area in areas for identity in area["ids"]}
+        groups_comparison = intent == "compare" and bool(explicit_areas)
+        scope = chat_scope(inputs, areas)
         predictions = {}
         rows, survival, access = rank_locations(inputs, package, prediction_cache=predictions)
+        if area_ids:
+            rows = [row for row in rows if row["id"] in area_ids]
         snapshot = rank_snapshot(inputs, package, rows, survival, access)
         ranked = [row for row in rows if row.get(inputs.sort_by) is not None]
         by_id = {row["id"]: row for row in rows}
         requested = plan["candidate_ids"]
         if any(key not in by_id for key in requested):
-            return jsonify({"answer": "One of those areas is outside this search or lacks core screening data. "
-                            "Name a different tract or specify the borough you want to use.", "context": context,
-                            "cards": [], "actions": [], "scope": chat_scope(inputs)})
+            response = {"answer": "One of those tracts is outside this search or lacks core screening data. "
+                        "Name a different tract or specify the borough you want to use.", "context": context,
+                        "cards": [], "actions": [chat_broader_search(prior)] if prior_areas else [],
+                        "scope": chat_scope(prior, prior_areas)}
+            return jsonify(response)
         focus = [by_id[key] for key in requested]
         if intent == "recommend" and focus:
             topic = "focused_area"
+        area_stats, area_leaders = chat_area_statistics(areas, rows, inputs.sort_by)
         properties = None
-        if intent == "property" and not focus:
+        if groups_comparison or (intent == "what_if" and len(areas) == 2 and not requested):
+            focus = area_leaders
+        elif intent == "property" and not focus:
             topic = "property_search"
             properties = matching_properties(rows, inputs.deal_type, inputs.rent_cap, inputs.purchase_budget,
                                              inputs.concept, inputs.profile, package=package, include_site_evidence=False)
             source_ids = {item["location_id"] for item in properties if item.get("lead_type") == "listing"}
             focus = [row for row in rows if row["id"] in source_ids][:3]
-        if not focus and intent != "break_even":
+        if not focus and intent != "break_even" and not groups_comparison:
             focus = ranked[:1] if intent == "why" else ranked[:3]
         cards = chat_cards(inputs, package, snapshot, focus, survival, access,
                            deep=intent == "property", properties=properties) if focus else []
+        labels = {identity: area["label"] for area in areas for identity in area["ids"]}
+        for card in cards:
+            if card["id"] in labels:
+                card["context_label"] = (f"Leading scored tract in {labels[card['id']]}" if groups_comparison
+                                         else f"Matched in {labels[card['id']]}")
+                if card["score"] is not None:
+                    card["label"] += " among matched tracts"
         scenario = None
         if intent == "what_if":
             # A change of borough or cuisine establishes the scope for both sides of the comparison.
-            baseline_changes = {**changes, "average_check": prior.concept.average_check, "daypart": prior.concept.daypart}
+            applied = chat_inputs(request.args, accepted)
+            baseline_changes = {**changes, "average_check": applied.concept.average_check, "daypart": applied.concept.daypart}
             baseline = chat_inputs(request.args, baseline_changes)
             base_rows, base_survival, base_access = rank_locations(baseline, package, prediction_cache=predictions)
+            if area_ids:
+                base_rows = [row for row in base_rows if row["id"] in area_ids]
             scenario = chat_scenario(rank_snapshot(baseline, package, base_rows, base_survival, base_access),
-                                     snapshot, baseline, inputs, survival)
+                                     snapshot, baseline, inputs, survival,
+                                     focus_ids=[card["id"] for card in cards], targeted=bool(requested), areas=areas)
+            scenario["before_scope"], scenario["after_scope"] = chat_scope(baseline, areas), scope
         finance = None if focus and intent == "break_even" else inputs.finance
         if hypothetical_rent is not None:
             finance = operating_scenario(request.args, hypothetical_rent, inputs.concept.average_check, inputs.deal_type)
         ranking_basis = ("customer-access index" if inputs.sort_by == "inverse_walkability" else
                          "experimental location index" if survival["ranking_mode"].startswith("survival_") else
                          "location screening score")
-        if not ranked and inputs.sort_by == "inverse_walkability" and intent in {"recommend", "compare", "what_if"}:
+        if groups_comparison:
+            answer = compose_area_answer(area_stats, cards, topic=topic, ranking_basis=ranking_basis)
+        elif not ranked and inputs.sort_by == "inverse_walkability" and intent in {"recommend", "compare", "what_if"}:
             answer = ("Customer-access scores are unavailable for this search. Switch the dashboard to location screening "
                       "to get a shortlist on that basis.")
         else:
             answer = compose_answer(intent, topic, cards, ranking_basis=ranking_basis, finance=finance, scenario=scenario)
+            if explicit_areas and intent in {"recommend", "why"}:
+                area = area_stats[0]
+                if not cards:
+                    answer = f"None of the {area['matched_count']} matched tracts in {area['label']} have a score on this ranking basis."
+                else:
+                    example = "The evidence below is for the leading scored tract. " if intent == "why" else ""
+                    answer = (f"{area['scored_count']} of {area['matched_count']} matched tracts in {area['label']} have a score. "
+                              f"{example}{answer}")
+        if intent in {"recommend", "what_if"} and cards:
+            if inputs.concept.cuisine != "any" and any(
+                    row.get("assessment_policy", {}).get("cuisine_mode") != "cuisine_supply_supported" for row in focus):
+                answer += " These areas have limited cuisine-specific evidence. Confirm local customer fit for this concept."
+            if inputs.concept.dietary != "none":
+                answer += f" {inputs.concept.dietary.replace('_', ' ').title()} customer fit and premises requirements need verification."
+        if notice:
+            answer = f"{notice} {answer}"
+        elif next_state.get("preview"):
+            answer += " This is a preview; apply it to keep these settings or discard it to return to the applied settings."
         if integrated_package()["release_id"] != package["release_id"]:
             return jsonify({"error": "The data changed while answering. Start a new chat with the new data."}), 409
-        previous = {"intent": intent, "changes": plan["changes"], "topic": topic,
-                    "candidate_ids": [card["id"] for card in cards] or state.get("previous", {}).get("candidate_ids", [])}
-        token = serializer.dumps({"anchor": anchor, "changes": changes, "previous": previous})
-        return jsonify({"answer": answer, "context": token, "cards": cards,
-                        "actions": chat_actions(intent, cards, inputs), "scope": chat_scope(inputs)})
+        previous = chat_followup(prior_reference, plan, topic, [card["id"] for card in cards], by_id,
+                                 same_scope=plan.get("restore") or (inputs.borough == prior.borough and areas == prior_areas))
+        token = serializer.dumps({**next_state, "anchor": anchor, "previous": previous})
+        result = {"answer": answer, "context": token, "cards": cards,
+                  "actions": [*scenario_actions(next_state), *chat_actions(intent, cards, inputs, areas)],
+                  "preview": bool(next_state.get("preview")) and hypothetical_rent is None,
+                  "temporary_calculation": hypothetical_rent is not None, "scope": scope}
+        if scenario:
+            result["scenario"] = scenario
+        if groups_comparison:
+            result["area_comparison"] = {"metric_label": ranking_basis.capitalize(), "groups": area_stats}
+        return jsonify(result)
     except BadData:
         return jsonify({"error": "This conversation expired or could not be read. Start a new chat."}), 409
     except FileNotFoundError:

@@ -9,6 +9,11 @@ from scoring import CUISINES, CUISINE_ALIASES
 
 
 _TOKEN = re.compile(r"[a-z0-9]+(?:\.[0-9]+)?")
+_SCENARIO_COMMANDS = {
+    "apply_scenario": re.compile(r"(?:apply|use|keep|adopt) (?:this |that |the )?(?:scenario|preview)(?: settings)?[.!?]?"),
+    "discard_scenario": re.compile(r"(?:(?:discard|cancel|exit) (?:this |that |the )?(?:scenario|preview)|(?:go |switch )?back to (?:the )?(?:baseline|applied settings))[.!?]?"),
+    "undo_scenario": re.compile(r"(?:undo|revert)(?: (?:the |that |my |last )?(?:applied scenario|scenario|change))?[.!?]?"),
+}
 _BOROUGHS = {
     "Bronx": ("bronx", "bronx county"),
     "Brooklyn": ("brooklyn", "kings county"),
@@ -24,6 +29,11 @@ _DAYPARTS = {
     "evening": ("dinner", "dinners", "evening", "evenings", "dinner service", "supper"),
 }
 _SHORT_AREAS = {"long island city": "lic", "upper west side": "uws", "upper east side": "ues"}
+_DIETARY = {"vegan": ("vegan", "plant based", "plant-based"), "vegetarian": ("vegetarian",),
+            "halal": ("halal",), "kosher": ("kosher",), "gluten_free": ("gluten free", "gluten-free")}
+_EXCLUSION = re.compile(r"\b(?:anywhere but|everywhere but|other than|apart from|outside (?:of )?|leave out|omit)\b|\b(?:don't|do not|never)\s+(?:want|show|include|recommend|search|use|consider)\b|\b(?:no|without)\s+(?:nearby\s+)?(?:bars?|competitors?|restaurants?)\b")
+_FACILITIES = re.compile(r"\b(?:step[- ]free|wheelchair|accessible entrance|ada compliant|hood|ventilation|outdoor patio|patio|outdoor seating)\b")
+_DISTANCE_REQUIREMENT = re.compile(r"\b(?:under|within|less than|at most|no more than)\s+\d+(?:\.\d+)?\s*(?:minutes?|blocks?|miles?|meters?|metres?|feet)\b")
 _OUTSIDE_NYC = re.compile(
     r"\b(?:outside (?:of )?(?:nyc|new york city|the five boroughs)|new jersey|jersey city|hoboken|newark|"
     r"yonkers|westchester|long island(?! city)|nassau county|suffolk county|boston|miami|philadelphia|"
@@ -60,11 +70,11 @@ _CAP = re.compile(r"\b(?:under|below|up to|at most|no more than|max(?:imum)?|cap
 _PRICE_CAP = re.compile(r"\b(?:under|below|up to|at most|no more than|max(?:imum)?)\s*$")
 _WHAT_IF = re.compile(r"\b(?:what if|what would change|how would (?:it|that|this|the shortlist) change|what about|how about|instead|suppose)\b")
 _FIND = re.compile(
-    r"\b(?:recommend(?:ations?)?|shortlist|where (?:in [a-z][a-z ]{0,45} )?(?:should|could|would|can) (?:i|we) (?:look|start|open|"
+    r"\b(?:recommend(?:ations?)?|shortlist|where (?:in (?:[a-z][a-z ]{0,45} )?)?(?:should|could|would|can) (?:i|we) (?:look|start|open|"
     r"search|find)|best (?:places?|areas?|sites?|locations?|neighbou?rhoods?)|"
     r"(?:find|show|suggest) (?:me )?(?:a |some |the |good |potential )?(?:areas?|sites?|locations?|neighbou?rhoods?))\b"
 )
-_COMPARE = re.compile(r"\b(?:compare|versus|vs\.?|side.by.side|difference between)\b")
+_COMPARE = re.compile(r"\b(?:compare|versus|vs\.?|side.by.side|difference between|which (?:one|of (?:these|those|them)) (?:is |are |would be )?better)\b")
 _PURCHASE_TRANSACTION = re.compile(r"\b(?:for (?:purchase|sale)|purchase (?:options?|listings?|properties|price))\b")
 _LEASE_TRANSACTION = re.compile(r"\b(?:leas(?:e|es|ing)|for rent|rental properties|asking rent)\b")
 _PROPERTY = re.compile(r"\b(?:leas(?:e|es|ing)|listings?|storefronts?|tour(?:ing)?|asking rent|available (?:space|properties)|rental properties|(?:find|show|any) (?:commercial |available )?properties|for (?:purchase|sale|rent))\b")
@@ -81,10 +91,15 @@ _PRIOR_GROUP = re.compile(r"\b(?:these|those|them|previous (?:shortlist|areas?|o
 _PRIOR_ONE = re.compile(r"\b(?:there|it|that (?:area|site|location|tract|one))\b")
 _ORDINALS = {"first": 0, "1st": 0, "top": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2,
              "fourth": 3, "4th": 3, "last": -1}
-_ORDINAL = re.compile(r"\b(first|1st|top|second|2nd|third|3rd|fourth|4th|last)\b(?=\s+(?:one|area|site|tract|location|option)\b|\s+and\s+(?:the\s+)?(?:first|second|third|fourth|last)\b|[?.!]?$)")
+_ORDINAL = re.compile(r"\b(first|1st|top|second|2nd|third|3rd|fourth|4th|last)\b(?=\s+(?:one|area|site|tract|location|option)\b|\s+(?:and|with|versus)\s+(?:the\s+)?(?:first|second|third|fourth|last)\b|[?.!]?$)")
 _TOP_COUNT = re.compile(r"\b(?:first|top) (two|three|four|2|3|4)\b")
 _TOP_COUNTS = {"two": 2, "three": 3, "four": 4, "2": 2, "3": 3, "4": 4}
 _COORDINATOR = re.compile(r",?\s+(?:and|or|versus|vs\.?)\s+")
+_AREA_EXCLUSION = re.compile(r"\b(?:not|without|rather than|instead of)\s+(?:(?:in|near|around|within)\s+)?(?:the\s+)?$")
+_UNRESOLVED_TRACT_SUFFIX = re.compile(r"\s+\d+(?:\.\d+)?(?=$|[?.!,]|\s+(?:and|or|versus|vs\.?|with)\b)")
+_GENERIC_AREA_FRAGMENTS = {"co", "green", "park", "unknown"}
+_NEIGHBORHOOD_LIMIT = 120
+_MONEY_RANGE = re.compile(r"(?<![\w.])\$?\d+(?:\.\d+)?\s*(?:-|to|through)\s*\$?\d+(?:\.\d+)?")
 
 
 def _normalized(value):
@@ -98,11 +113,15 @@ def _tokens(value):
 
 
 def _alias_index(groups):
-    return {_tokens(alias): label for label, aliases in groups.items() for alias in aliases}
+    index = {_tokens(alias): label for label, aliases in groups.items() for alias in aliases}
+    # Explicit catalog names take precedence over aliases shared with broader categories.
+    index.update({_tokens(label.replace("_", " ")): label for label in groups if label})
+    return index
 
 
 _BOROUGH_INDEX = _alias_index(_BOROUGHS)
 _DAYPART_INDEX = _alias_index(_DAYPARTS)
+_DIETARY_INDEX = _alias_index(_DIETARY)
 _CUISINE_INDEX = _alias_index({key: (key.replace("_", " "), *CUISINE_ALIASES.get(key, ()))
                                for key in CUISINES if key not in {"any", "custom", "vegan", "vegetarian"}})
 
@@ -132,29 +151,87 @@ def _masked(text, matches):
 @lru_cache(maxsize=2)
 def _candidate_index(candidates):
     index = defaultdict(dict)
-    for identifier, name, borough in candidates:
+    for identifier, name, borough, neighborhood in candidates:
         aliases = {identifier, f"tract {identifier}"}
+        areas = {}
         label = re.split(r"\s+tract\s+", name, maxsplit=1, flags=re.IGNORECASE)
-        if len(label) == 2:
-            area, number = label
+        number = label[1] if len(label) == 2 else None
+        if number:
             aliases.add(f"tract {number}")
-            parts = {area, re.sub(r"\s*\([^)]*\)", "", area), *re.split(r"[-–—/]", area)}
-            for part in parts:
-                aliases.update((part, f"{part} tract {number}", f"{part} {number}"))
+        area = neighborhood or (label[0] if number else None)
+        if area:
+            parts = {area, *re.split(r"[-–—/]", area)}
+            parts.update(re.sub(r"\s*\([^)]*\)", "", part) for part in tuple(parts))
+            for part in sorted(parts):
+                part = part.strip()
+                phrase = _tokens(part)
+                if not phrase or _normalized(part) in _GENERIC_AREA_FRAGMENTS:
+                    continue
+                areas[phrase] = part
                 short = _SHORT_AREAS.get(_normalized(part))
                 if short:
-                    aliases.update((short, f"{short} tract {number}", f"{short} {number}"))
-        elif name:
+                    areas[_tokens(short)] = part
+                if number:
+                    aliases.update((f"{part} tract {number}", f"{part} {number}"))
+                    if short:
+                        aliases.update((f"{short} tract {number}", f"{short} {number}"))
+        if name:
             aliases.add(name)
+        for phrase, area in areas.items():
+            if phrase not in _BOROUGH_INDEX:
+                index[phrase][identifier] = (borough, name, area)
         for alias in aliases:
             phrase = _tokens(alias)
             if phrase and phrase not in _BOROUGH_INDEX:
-                index[phrase][identifier] = borough
+                index[phrase][identifier] = (borough, name, None)
     return index
 
 
-def _clarify(message):
-    return {"intent": "clarify", "changes": {}, "candidate_ids": [], "topic": None, "clarification": message}
+def _clarify(message, pending=None):
+    plan = {"intent": "clarify", "changes": {}, "candidate_ids": [], "topic": None, "clarification": message}
+    if pending:
+        plan["pending"] = pending
+        if pending["slot"] == "cuisine":
+            plan["actions"] = [{"label": cuisine.replace("_", " ").title(),
+                                "prompt": _resolved_question(pending, cuisine.replace("_", " "))}
+                               for cuisine in pending["choices"][:3]]
+    return plan
+
+
+def _resolved_question(pending, replacement):
+    return pending["message"][:pending["start"]] + replacement + pending["message"][pending["end"]:]
+
+
+def _pending_amount(text):
+    span = _MONEY_RANGE.search(text)
+    if span is None:
+        mentions = [match for match in _MONEY.finditer(text) if match["currency"]
+                    or _GUEST_RIGHT.match(text[match.end():]) or _RENT_RIGHT.match(text[match.end():])]
+        if len(mentions) != 1:
+            return None
+        span = mentions[0]
+    unit = _GUEST_RIGHT.match(text[span.end():]) or _RENT_RIGHT.match(text[span.end():]) or _MONTH_RIGHT.match(text[span.end():])
+    return {"slot": "money", "message": text, "start": span.start(),
+            "end": span.end() + (unit.end() if unit else 0)}
+
+
+def resolve_pending(message, pending):
+    """Complete a signed clarification only when the reply supplies its missing value."""
+    if not pending:
+        return None
+    text = _normalized(message)
+    if pending["slot"] == "cuisine":
+        matches = list(_matches(text, _CUISINE_INDEX, 4))
+        remainder = re.sub(r"\b(?:please|use|choose|the)\b|[.!?]", "", _masked(text, matches)).strip()
+        choices = {choice for choice, _, _ in matches}
+        if not remainder and len(choices) == 1 and choices <= set(pending["choices"]):
+            return _resolved_question(pending, next(iter(choices)).replace("_", " "))
+    if pending["slot"] == "money" and re.fullmatch(r"[\d$.,\s/]+(?:per guest|per person|monthly rent|per month|a month)[.!?]?", text):
+        check, rent, problem = _spending(text)
+        if problem is None and (check is not None or rent is not None):
+            replacement = f"${check:g} per guest" if check is not None else f"${rent} monthly rent"
+            return _resolved_question(pending, replacement)
+    return None
 
 
 def _check_places(text, known):
@@ -164,11 +241,39 @@ def _check_places(text, known):
         if marker[0].startswith("around") and re.match(r"\$?\d", tail):
             continue
         if marker.end() not in starts and tail and not _NON_PLACE.match(tail):
-            return "Which NYC borough or exact tract do you mean? Use a tract name with its number for a specific area."
+            return "Which NYC borough, neighborhood, or exact tract do you mean?"
     return None
 
 
+def _named_areas(text, area_matches, borough):
+    areas = []
+    for matches, start, stop in area_matches:
+        if _AREA_EXCLUSION.search(text[:start]):
+            return None, "Name the area you want to include. The Advisor does not apply neighborhood exclusions."
+        possible = {identifier: place for identifier, place in matches.items()
+                    if not borough or borough == "All NYC" or not place[0] or place[0] == borough}
+        if any(place[2] for place in possible.values()) and _UNRESOLVED_TRACT_SUFFIX.match(text[stop:]):
+            return None, "That tract could not be resolved. Give the exact name and number shown in the dashboard."
+        if len(possible) == 1:
+            identifier, (_, name, area) = next(iter(possible.items()))
+            areas.append({"label": name or area or identifier, "ids": [identifier]})
+            continue
+        locations = {place[0] for place in possible.values()}
+        if not possible or len(locations) != 1 or None in locations or any(not place[2] for place in possible.values()):
+            return None, "That area is ambiguous or outside the current borough. Specify a borough or give an exact tract name and number."
+        if len(possible) > _NEIGHBORHOOD_LIMIT:
+            return None, "That neighborhood matches too many tracts. Name a smaller neighborhood or an exact tract."
+        if re.search(r"\b(?:near|around)\s+(?:the\s+)?$", text[:start]):
+            return None, "I can screen tracts labeled with a neighborhood. For this search, name the neighborhood directly or give an exact tract."
+        label = next(iter(possible.values()))[2]
+        areas.append({"label": label, "ids": sorted(possible)})
+    return areas, None
+
+
 def _spending(text):
+    price_range = _MONEY_RANGE.search(text)
+    if price_range and ("$" in price_range[0] or _GUEST_RIGHT.match(text[price_range.end():]) or _RENT_WORD.search(text)):
+        return None, None, "Choose one average spend per guest or one monthly rent to test."
     checks, rents = set(), set()
     recognized_dollars = 0
     for mention in _MONEY.finditer(text):
@@ -192,6 +297,8 @@ def _spending(text):
         if guest:
             if not 5 <= amount <= 250:
                 return None, None, "Choose one spend between $5 and $250 per guest."
+            if amount != round(amount, 2):
+                return None, None, "Enter guest spend in dollars and cents, such as $35 or $35.50."
             if _PRICE_CAP.search(left):
                 return None, None, "Give an exact average guest spend to test, such as $45 per guest."
             checks.add(amount)
@@ -226,7 +333,9 @@ def _intent(text, changes, topic):
 
 
 def _references(text, named_ids, selected_ids, map_selected_id, previous, intent, *, keep_focus=True):
-    prior_ids = list((previous or {}).get("candidate_ids") or ())
+    previous = previous or {}
+    prior_ids = list(previous.get("candidate_ids") or ())
+    shortlist_ids = list(previous.get("shortlist_ids", prior_ids) or ())
     ids = list(named_ids)
     has_reference = bool(ids)
     if _SAVED.search(text):
@@ -242,28 +351,28 @@ def _references(text, named_ids, selected_ids, map_selected_id, previous, intent
     group = _TOP_COUNT.search(text)
     if group and intent != "recommend":
         count = _TOP_COUNTS[group[1]]
-        if len(prior_ids) < count:
+        if len(shortlist_ids) < count:
             return None, "I don’t have that many areas in the previous shortlist. Give me exact tract names."
         has_reference = True
-        ids.extend(prior_ids[:count])
+        ids.extend(shortlist_ids[:count])
     for match in _ORDINAL.finditer(text):
         order = _ORDINALS[match[1]]
-        if not prior_ids or order >= len(prior_ids):
+        if not shortlist_ids or order >= len(shortlist_ids):
             return None, "I don’t have that position in the previous shortlist. Give me an exact tract name."
         has_reference = True
-        ids.append(prior_ids[order])
+        ids.append(shortlist_ids[order])
     if _PRIOR_GROUP.search(text) and not has_reference:
-        if not prior_ids:
+        if not shortlist_ids:
             return None, "Which areas do you mean? Give me exact tract names or choose your saved areas."
         has_reference = True
-        ids.extend(prior_ids)
-    if intent in {"compare", "why", "property", "break_even"} and _PRIOR_ONE.search(text) and not has_reference:
+        ids.extend(shortlist_ids)
+    if intent in {"compare", "why", "property", "break_even", "what_if"} and _PRIOR_ONE.search(text) and not has_reference:
         if len(prior_ids) != 1:
             return None, "Which area do you mean? Use its tract name or say ‘the first area’ for the previous shortlist."
         has_reference = True
         ids.extend(prior_ids)
     if not has_reference and keep_focus and intent == "compare":
-        ids.extend(prior_ids if len(prior_ids) >= 2 else selected_ids)
+        ids.extend(shortlist_ids if len(shortlist_ids) >= 2 else selected_ids)
     if not has_reference and keep_focus and intent in {"why", "property", "break_even"}:
         ids.extend(prior_ids or ([map_selected_id] if map_selected_id else []))
     ids = list(dict.fromkeys(ids))
@@ -279,10 +388,19 @@ def parse_message(message, assumptions, *, candidates=(), selected_ids=(), map_s
     if not isinstance(message, str) or not message.strip() or len(message) > 500:
         return _clarify("Enter a site-selection question of 1 to 500 characters.")
     text = _normalized(message)
+    for intent, pattern in _SCENARIO_COMMANDS.items():
+        if pattern.fullmatch(text):
+            return {"intent": intent, "changes": {}, "candidate_ids": [], "topic": None, "clarification": None}
+    if _EXCLUSION.search(text):
+        return _clarify("Choose the areas to include directly. Exclusions and competitor-avoidance requirements need a more specific search.")
+    if _FACILITIES.search(text):
+        return _clarify("Step-free access, kitchen ventilation and outdoor space require confirmation for a specific address. Name a tract to review its property leads and verification steps.")
+    if _DISTANCE_REQUIREMENT.search(text):
+        return _clarify("A maximum walking distance or time needs a verified address and routing evidence. Name a tract to review the available access evidence.")
     if _UNSUPPORTED.search(text):
         return _clarify("I can change borough, cuisine, guest spend, trading period, or monthly rent here. Use the dashboard for other supported filters.")
 
-    candidate_keys = tuple((row["id"], row.get("name") or "", row.get("borough")) for row in candidates)
+    candidate_keys = tuple((row["id"], row.get("name") or "", row.get("borough"), row.get("neighborhood")) for row in candidates)
     area_matches = list(_matches(text, _candidate_index(candidate_keys), 14))
     words = _masked(text, area_matches)
     if _OUTSIDE_NYC.search(words):
@@ -298,18 +416,22 @@ def parse_message(message, assumptions, *, candidates=(), selected_ids=(), map_s
     if borough_matches:
         changes["borough"] = next(iter(boroughs), "")
     current_borough = changes.get("borough", assumptions.get("borough"))
-    named_ids = []
-    for matches, _, _ in area_matches:
-        possible = [identifier for identifier, borough in matches.items()
-                    if not current_borough or current_borough == "All NYC" or not borough or borough == current_borough]
-        if len(possible) != 1:
-            return _clarify("That area name is ambiguous or outside the current borough. Give the exact tract name and number, or change the borough.")
-        named_ids.extend(possible)
+    areas, problem = _named_areas(text, area_matches, current_borough)
+    if problem:
+        return _clarify(problem)
     if re.search(r"\btract\s+\d", words):
         return _clarify("That tract could not be resolved. Give the exact name and number shown in the dashboard.")
 
+    dietary_matches = list(_matches(words, _DIETARY_INDEX, 3))
+    dietary_values = {diet for diet, _, _ in dietary_matches}
+    if any(re.search(r"\b(?:not |without |no |non-)$", text[:start]) for _, start, _ in dietary_matches):
+        return _clarify("Choose the dietary focus to include directly, or update it in the dashboard.")
+    if len(dietary_values) > 1:
+        return _clarify("Choose one dietary focus to apply to this search.")
+    if dietary_values:
+        changes["dietary"] = next(iter(dietary_values))
     part_matches = list(_matches(words, _DAYPART_INDEX, 4))
-    cuisine_matches = list(_matches(_masked(words, part_matches), _CUISINE_INDEX, 4))
+    cuisine_matches = list(_matches(_masked(words, [*part_matches, *dietary_matches]), _CUISINE_INDEX, 4))
     starts = {start for _, start, _ in [*area_matches, *borough_matches, *part_matches, *cuisine_matches]}
     borough_starts = {start: borough for borough, start, _ in borough_matches}
     for _, start, stop in [*area_matches, *borough_matches]:
@@ -322,10 +444,12 @@ def parse_message(message, assumptions, *, candidates=(), selected_ids=(), map_s
     if any(re.search(r"\b(?:not |without |non-)$", text[:start]) for _, start, _ in cuisine_matches):
         return _clarify("Choose one cuisine directly, or set cuisine in the dashboard.")
     if len(cuisines) > 1:
-        return _clarify("Choose one restaurant cuisine to use for this search.")
+        pending = {"slot": "cuisine", "message": text, "start": min(start for _, start, _ in cuisine_matches),
+                   "end": max(stop for _, _, stop in cuisine_matches), "choices": sorted(cuisines)}
+        return _clarify("Choose one restaurant cuisine to use for this search.", pending)
     if cuisines:
         changes["cuisine"] = next(iter(cuisines))
-    elif re.search(r"\b(?:for\s+an?|an?) (?!new\b|existing\b|current\b|restaurant\b|site\b|property\b)\w+(?:[- ]\w+){0,2} (?:restaurant|cuisine|concept)\b", words):
+    elif not dietary_values and re.search(r"\b(?:for\s+an?|an?) (?!new\b|existing\b|current\b|restaurant\b|site\b|property\b)\w+(?:[- ]\w+){0,2} (?:restaurant|cuisine|concept)\b", words):
         return _clarify("Which supported cuisine in the dashboard should I use for that concept?")
     dayparts = {part for part, _, _ in part_matches}
     if len(dayparts) > 1:
@@ -335,7 +459,7 @@ def parse_message(message, assumptions, *, candidates=(), selected_ids=(), map_s
     words = " ".join(words.split())
     check, rent, problem = _spending(words)
     if problem:
-        return _clarify(problem)
+        return _clarify(problem, _pending_amount(text))
     if check is not None:
         changes["average_check"] = check
     if rent is not None:
@@ -344,6 +468,8 @@ def parse_message(message, assumptions, *, candidates=(), selected_ids=(), map_s
     topic = ("next_check" if _NEXT.search(words) else "competition" if _COMPETITION.search(words)
              else "access" if _ACCESS.search(words) else "rent" if _RENT_EVIDENCE.search(words) else None)
     intent = _intent(words, changes, topic)
+    if intent is None and area_matches and (_FIND.search(text) or _WHAT_IF.search(words) or not words.strip("?.!, ")):
+        intent = "recommend"
     if intent is None and previous and (borough_matches or cuisine_matches):
         remainder = _masked(text, [*area_matches, *borough_matches, *cuisine_matches])
         remainder = re.sub(r"\b(?:in|for|and|the|only)\b|[?.!,]", "", remainder)
@@ -364,12 +490,22 @@ def parse_message(message, assumptions, *, candidates=(), selected_ids=(), map_s
         return _clarify("The current search is for leases. Switch the dashboard to purchase to look for sale listings.")
     if deal_type == "either" and intent == "property" and (wants_lease or wants_purchase):
         changes["deal_type"] = "lease" if wants_lease else "purchase"
+    if any(len(area["ids"]) > 1 for area in areas):
+        if intent == "compare":
+            if len(areas) != 2 or any(pattern.search(words) for pattern in (_SAVED, _MAP, _TOP_COUNT, _ORDINAL, _PRIOR_GROUP)):
+                return _clarify("Name two neighborhoods or exact tracts to compare.")
+            if set(areas[0]["ids"]) & set(areas[1]["ids"]):
+                return _clarify("Those areas include some of the same tracts. Name two areas that do not overlap.")
+        elif intent not in {"recommend", "why", "what_if", "property"} or len(areas) != 1:
+            return _clarify("Choose one neighborhood to screen, or give an exact tract for a property or rent question.")
+        return {"intent": intent, "changes": changes, "candidate_ids": [], "area_groups": areas,
+                "topic": topic, "clarification": None}
     old_borough = assumptions.get("borough") or ""
     if old_borough == "All NYC":
         old_borough = ""
     new_scope = "borough" in changes and changes["borough"] != old_borough
     broad_property = intent == "property" and (rent is not None or _PROPERTY_SEARCH.search(words))
-    ids, problem = _references(words, named_ids, selected_ids, map_selected_id, previous, intent,
+    ids, problem = _references(words, [area["ids"][0] for area in areas], selected_ids, map_selected_id, previous, intent,
                                keep_focus=not (new_scope or broad_property))
     if problem:
         return _clarify(problem)

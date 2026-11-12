@@ -1,0 +1,10 @@
+method,cuisine_key,average_check,rank,property_id,neighborhood,selected_score
+screening,italian,18,1,GW-SYN-0176,Upper West Side-Lincoln Square,78.0
+screening,italian,18,2,GW-SYN-0065,Upper East Side-Carnegie Hill,77.0
+screening,italian,18,3,GW-SYN-0159,Greenwich Village,77.0
+screening,italian,35,1,GW-SYN-0176,Upper West Side-Lincoln Square,78.0
+screening,italian,35,2,GW-SYN-0065,Upper East Side-Carnegie Hill,77.0
+screening,italian,35,3,GW-SYN-0159,Greenwich Village,77.0
+screening,italian,65,1,GW-SYN-0174,West Village,77.0
+screening,italian,65,2,GW-SYN-0009,Upper West Side-Lincoln Square,76.0
+screening,italian,65,3,GW-SYN-0029,Tribeca-Civic Center,76.0

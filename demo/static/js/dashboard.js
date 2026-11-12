@@ -2005,6 +2005,9 @@ const decisionLabCurrency = new Intl.NumberFormat("en-US", {style: "currency", c
 let advisorRevision = 0;
 let advisorEvidenceVersion = null;
 let decisionLabController = null;
+let advisorResearchKey = null;
+let advisorBriefKey = null;
+let dashboardModulesInitialized = false;
 
 function updateAdvisorMode() {
   for (const element of document.querySelectorAll("[data-advisor-mode]")) {
@@ -2016,7 +2019,10 @@ function updateAdvisorMode() {
   resetAdvisorResults();
 }
 
-advisorModeControl.addEventListener("change", updateAdvisorMode);
+advisorModeControl.addEventListener("change", () => {
+  updateAdvisorMode();
+  if (advisorModeControl.value === "live") initializeDashboardModules({showBrief: false});
+});
 updateAdvisorMode();
 
 function renderSiteBrief(result, panel) {
@@ -2531,8 +2537,126 @@ function clearAdvisorChat(status = "") {
 
 function syncAdvisorChatScope() {
   advisorChat.scope.textContent = `Dashboard search · ${conceptName()} · ${state.preferredArea || "All NYC"}`;
-  if (advisorChat.query !== null && advisorChat.query !== conceptParams().toString()) {
+  if (advisorChat.query !== null && advisorChat.query !== advisorSearchKey()) {
     clearAdvisorChat("Your dashboard search changed. Start a new conversation for the current search.");
+  }
+}
+
+function advisorSearchKey() {
+  const params = conceptParams();
+  params.delete("saved_id");
+  return params.toString();
+}
+
+function advisorEvidenceKey() {
+  return JSON.stringify([advisorSearchKey(), dashboard?.meta?.release_id || dashboard?.meta?.data_release,
+    dashboard?.meta?.model_version, dashboard?.scoring?.ranking_mode, dashboard?.customer_access_model?.artifact_id]);
+}
+
+function renderAdvisorChatActions(parent, items, description) {
+  if (!Array.isArray(items)) return;
+  const actions = document.createElement("div");
+  actions.className = "advisor-chat-prompts advisor-chat-actions";
+  actions.setAttribute("role", "group");
+  actions.setAttribute("aria-label", description);
+  for (const item of items) {
+    const {label, prompt} = item || {};
+    if (typeof label !== "string" || !label.trim() || typeof prompt !== "string" || !prompt.trim()) continue;
+    const button = decisionLabText(actions, "button", label);
+    button.type = "button";
+    button.className = "quiet-action";
+    button.dataset.advisorChatPrompt = prompt;
+  }
+  if (actions.childElementCount) parent.append(actions);
+}
+
+function renderAdvisorAreaComparison(parent, comparison) {
+  if (!Array.isArray(comparison?.groups) || !comparison.groups.length) return;
+  const section = decisionLabText(parent, "section");
+  section.className = "advisor-chat-area-comparison";
+  decisionLabText(section, "h4", comparison.metric_label || "Area comparison");
+  const groups = decisionLabText(section, "div");
+  groups.className = "advisor-chat-cards";
+  const score = value => Number.isFinite(value) ? value.toLocaleString("en-US", {maximumFractionDigits: 2}) : "Unavailable";
+  for (const group of comparison.groups) {
+    const item = decisionLabText(groups, "div");
+    item.className = "advisor-chat-card";
+    decisionLabText(item, "h5", group.label);
+    const stats = decisionLabText(item, "dl");
+    const range = Number.isFinite(group.low_score) && Number.isFinite(group.high_score)
+      ? `${score(group.low_score)}–${score(group.high_score)}` : "Unavailable";
+    for (const [label, value] of [["Median score", score(group.median_score)], ["Score range", range]]) {
+      const stat = decisionLabText(stats, "div");
+      decisionLabText(stat, "dt", label);
+      decisionLabText(stat, "dd", value);
+    }
+    const {matched_count: matched, eligible_count: eligible, scored_count: scored} = group;
+    const coverage = [matched, eligible, scored].every(Number.isInteger)
+      ? `${displayNumber(scored)} scored · ${displayNumber(eligible)} eligible · ${displayNumber(matched)} matched tracts`
+      : "Tract coverage unavailable";
+    decisionLabText(item, "small", coverage);
+  }
+}
+
+function advisorScenarioScore(value) {
+  return Number.isFinite(value) ? value.toLocaleString("en-US", {maximumFractionDigits: 2}) : "Unavailable";
+}
+
+function advisorScenarioRank(result) {
+  if (result?.status !== "ranked" || !Number.isInteger(result.rank_min) || !Number.isInteger(result.rank_max)) return "Rank unavailable";
+  return result.rank_min === result.rank_max ? `Rank ${result.rank_min}` : `Tied ranks ${result.rank_min}–${result.rank_max}`;
+}
+
+function renderAdvisorScenario(parent, scenario) {
+  if (!scenario) return;
+  const section = decisionLabText(parent, "section");
+  section.className = "advisor-chat-scenario";
+  section.setAttribute("aria-label", "Scenario comparison");
+  decisionLabText(section, "h4", "Compared settings");
+  const settings = decisionLabText(section, "dl");
+  for (const [label, value] of [["Comparison baseline", scenario.before_scope || scenario.before_label],
+    ["Preview", scenario.after_scope || scenario.after_label]]) {
+    const item = decisionLabText(settings, "div");
+    decisionLabText(item, "dt", label);
+    decisionLabText(item, "dd", value || "Unavailable");
+  }
+  if (Array.isArray(scenario.groups) && scenario.groups.length) {
+    const groups = decisionLabText(section, "div");
+    groups.className = "advisor-chat-cards";
+    for (const group of scenario.groups) {
+      const card = decisionLabText(groups, "div");
+      card.className = "advisor-chat-card";
+      decisionLabText(card, "h5", group.label);
+      for (const [label, run] of [["Baseline", group.before], ["Preview", group.after]]) {
+        decisionLabText(card, "p", `${label} median ${advisorScenarioScore(run?.median_score)}`);
+        decisionLabText(card, "small", `${Number.isInteger(run?.scored_count) ? displayNumber(run.scored_count) : "Unknown"} scored tracts`);
+      }
+      if (group.coverage_changed) decisionLabText(card, "small", "The set of scored tracts changed between runs.");
+    }
+  }
+}
+
+function renderAdvisorScenarioTarget(parent, target) {
+  if (!target) return;
+  const section = decisionLabText(parent, "div");
+  section.className = "advisor-chat-scenario-target";
+  const stats = decisionLabText(section, "dl");
+  for (const [label, run] of [["Baseline", target.before], ["Preview", target.after]]) {
+    const item = decisionLabText(stats, "div");
+    decisionLabText(item, "dt", label);
+    decisionLabText(item, "dd", `${advisorScenarioScore(run?.score)} · ${advisorScenarioRank(run)}`);
+  }
+  if (Number.isFinite(target.score_delta)) {
+    decisionLabText(section, "p", `Score change ${target.score_delta > 0 ? "+" : ""}${advisorScenarioScore(target.score_delta)}`);
+  }
+  if (Array.isArray(target.factors) && target.factors.length) {
+    const details = decisionLabText(section, "details");
+    decisionLabText(details, "summary", "Screening factors that changed");
+    const list = decisionLabText(details, "ul");
+    for (const factor of target.factors) {
+      decisionLabText(list, "li", `${factor.label}: ${advisorScenarioScore(factor.before)} → ${advisorScenarioScore(factor.after)}${factor.coverage_changed ? " (evidence coverage changed)" : ""}`);
+    }
+    decisionLabText(details, "small", "These are component scores; their changes do not add directly to the total score change.");
   }
 }
 
@@ -2543,18 +2667,24 @@ function renderAdvisorChatReply(result, turn) {
   const answer = decisionLabText(reply, "p", result.answer);
   answer.className = "advisor-chat-answer";
   if (result.scope) {
-    const scope = decisionLabText(reply, "p", `Conversation scope · ${result.scope}`);
+    const scopeLabel = result.temporary_calculation ? "Temporary rent calculation" : result.preview ? "Scenario preview" : "Conversation scope";
+    const scope = decisionLabText(reply, "p", `${scopeLabel} · ${result.scope}`);
     scope.className = "advisor-chat-scope";
   }
+  renderAdvisorAreaComparison(reply, result.area_comparison);
+  renderAdvisorScenario(reply, result.scenario);
   if (result.cards?.length) {
     const cards = decisionLabText(reply, "div");
     cards.className = "advisor-chat-cards";
     for (const card of result.cards) {
       const item = decisionLabText(cards, "article");
       item.className = "advisor-chat-card";
-      if (card.label) decisionLabText(item, "small", card.label);
+      if (card.context_label) decisionLabText(item, "small", card.context_label);
       decisionLabText(item, "h4", card.name);
+      if (card.label) decisionLabText(item, "small", card.label);
       if (card.score != null) decisionLabText(item, "p", `Score ${card.score}`);
+      renderAdvisorScenarioTarget(item, result.scenario?.targets?.find(target => target.id === card.id));
+      renderAdvisorChatActions(item, card.actions, `Follow-up questions about ${card.name}`);
       const dossier = card.dossier?.sites?.[0] || card.dossier;
       if (dossier?.evidence?.length) {
         const details = decisionLabText(item, "details");
@@ -2574,18 +2704,7 @@ function renderAdvisorChatReply(result, turn) {
       if (source.vintage) decisionLabText(item, "small", source.vintage);
     }
   }
-  if (result.actions?.length) {
-    const actions = decisionLabText(reply, "div");
-    actions.className = "advisor-chat-prompts advisor-chat-actions";
-    actions.setAttribute("aria-label", "Suggested follow-up questions");
-    for (const {label, prompt} of result.actions) {
-      if (!label || !prompt) continue;
-      const button = decisionLabText(actions, "button", label);
-      button.type = "button";
-      button.className = "quiet-action";
-      button.dataset.advisorChatPrompt = prompt;
-    }
-  }
+  renderAdvisorChatActions(reply, result.actions, "Suggested follow-up questions");
   turn.append(reply);
 }
 
@@ -2599,7 +2718,7 @@ async function sendAdvisorChat(rawMessage) {
   }
   syncAdvisorChatScope();
   const query = conceptParams().toString();
-  advisorChat.query = query;
+  advisorChat.query = advisorSearchKey();
   const controller = new AbortController();
   advisorChat.controller = controller;
   const {signal} = controller;
@@ -2668,14 +2787,31 @@ document.querySelector("#advisorChatReset").addEventListener("click", () => {
 
 function resetAdvisorResults() {
   advisorRevision++;
-  advisorEvidenceVersion = null;
   resetDecisionLab();
   syncAdvisorChatScope();
-  document.querySelector("#polishSiteBrief").hidden = true;
   document.querySelector("#siteScenarioResult").hidden = true;
   document.querySelector("#siteScenarioStatus").textContent = "";
+  resetAdvisorBrief();
+  advisorResearchKey = advisorEvidenceKey();
+  advisorBriefKey = conceptParams().toString();
+}
+
+function resetAdvisorBrief() {
+  advisorEvidenceVersion = null;
+  document.querySelector("#polishSiteBrief").hidden = true;
   document.querySelector("#siteBriefResult").hidden = true;
   document.querySelector("#siteBriefStatus").hidden = true;
+}
+
+function syncAdvisorResults() {
+  syncAdvisorChatScope();
+  if (advisorResearchKey !== advisorEvidenceKey()) {
+    resetAdvisorResults();
+  } else if (advisorBriefKey !== conceptParams().toString()) {
+    advisorRevision++;
+    advisorBriefKey = conceptParams().toString();
+    resetAdvisorBrief();
+  }
 }
 
 function renderCompare() {
@@ -3200,7 +3336,7 @@ function renderAll() {
   renderMarketProfile();
   renderCustomerAccess();
   renderCompare();
-  resetAdvisorResults();
+  syncAdvisorResults();
   renderLease();
   renderWhitespace();
   renderFinance();
@@ -3593,12 +3729,15 @@ setTheme(dashboardThemeChoice, false);
 updateConceptImage(state.cuisine);
 loadConceptImages();
 if (advisorPreview) selectView("advisor");
-if (advisorPreview !== "sample") {
-  initializeWorkspace({showBrief: advisorPreview !== "live"});
+function initializeDashboardModules({showBrief = true} = {}) {
+  if (dashboardModulesInitialized) return;
+  dashboardModulesInitialized = true;
+  initializeWorkspace({showBrief});
   initializePlanningControls();
   initializeMenuLab();
   initializeBusinessWorkspace();
 }
+if (advisorPreview !== "sample") initializeDashboardModules({showBrief: advisorPreview !== "live"});
 setActiveLayer(activeLayer);
 
 document.querySelector("#recommendationLimit").addEventListener("change", event => {

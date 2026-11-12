@@ -35,5 +35,6 @@ jobs:
       - run: >-
           pytest -q demo/test_auth.py demo/test_scoring.py demo/test_financials.py
           demo/test_dashboard_summaries.py demo/test_menu_catalog.py
+          demo/test_advisor_chat.py demo/test_site_advisor.py demo/test_decision_lab.py
         env:
           PYTHONPATH: demo

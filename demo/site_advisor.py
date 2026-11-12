@@ -221,7 +221,7 @@ def _numeric(value):
     return _number(value) is not None
 
 
-def _component_changes(before, after):
+def screening_factor_changes(before, after):
     old = {row["key"]: row for row in before.get("score_components") or []}
     changes = []
     for current in after.get("score_components") or []:
@@ -248,7 +248,7 @@ def _ranking_explanations(before, after, first, second, key, mode):
         new_rank, current = new.get(site["id"], (None, {}))
         a, b = previous.get(key), current.get(key)
         delta = round(b - a, 2) if _numeric(a) and _numeric(b) else None
-        factors = _component_changes(previous, current) if key == "opportunity" and mode == "screening" else []
+        factors = screening_factor_changes(previous, current) if key == "opportunity" and mode == "screening" else []
         if old_rank == new_rank and not delta and not factors:
             continue
         if not previous or not current:

@@ -233,7 +233,274 @@ def test_advisor_chat_keeps_conversation_scope_and_checks_signed_context(monkeyp
         assert client.post(url + '?borough=Brooklyn', json={'message': 'Why?', 'context': second['context']}).status_code == 409
         assert client.post(url, json={'message': 'Why?', 'context': 'invalid.signature'}).status_code == 409
         assert client.post(url, json={'message': 'x' * 501}).status_code == 400
+        saved = client.post(url + '?saved_id=' + geoid, json={'message': 'Why the first one?', 'context': second['context']})
+        assert saved.status_code == 200 and saved.get_json()['cards'][0]['id'] == geoid
+        clarification = client.post(url, json={'message': 'Where should I look for an Italian or Thai dinner spot in Queens?'}).get_json()
+        resolved = client.post(url, json={'message': 'Italian', 'context': clarification['context']}).get_json()
+        assert resolved['scope'].startswith('Queens · Italian')
+        assert '$35 per guest, evening' in resolved['scope']
+        clarification = client.post(url, json={'message': 'Where should I look for an Italian restaurant in Queens with $90?'}).get_json()
+        resolved = client.post(url, json={'message': '$45 per guest', 'context': clarification['context']}).get_json()
+        assert resolved['scope'].startswith('Queens · Italian') and '$45 per guest' in resolved['scope']
         inference.assert_not_called()
+
+
+def test_sample_is_packaged_with_the_dashboard_without_research_exports(tmp_path, monkeypatch):
+    from pathlib import Path
+    import app as module
+
+    target = tmp_path / 'demo/examples/site_advisor_sample.csv'
+    target.parent.mkdir(parents=True)
+    target.write_bytes((Path(module.__file__).parent / 'examples/site_advisor_sample.csv').read_bytes())
+    monkeypatch.setattr(module, 'PROJECT_ROOT', tmp_path)
+    with module.app.test_client() as client, patch('site_advisor._request') as inference:
+        assert client.post('/api/site-brief/sample', json={}).status_code == 200
+        for amount in [18, 65]:
+            response = client.post('/api/site-brief/sample/scenario', json={'average_check': amount})
+            assert response.status_code == 200
+            assert len(response.get_json()['after']) == 3
+        inference.assert_not_called()
+
+
+@pytest.fixture
+def neighborhood_chat(monkeypatch):
+    import app as module
+
+    tracts = [
+        ('36081000001', 'Astoria (Central)', 75, 60),
+        ('36081000002', 'Astoria (North)', 55, 40),
+        ('36081000003', 'Long Island City-Hunters Point', 70, None),
+        ('36081000004', 'Long Island City-Hunters Point', 50, None),
+        ('36081000005', 'Elmhurst', 99, 90),
+    ]
+    package = {'data_release': 'Fixture', 'release_id': 'v1', 'tracts': [
+        {'geoid': identity, 'borough': 'Queens', 'nta_name': name, 'tract_label': index}
+        for index, (identity, name, _, _) in enumerate(tracts, 1)
+    ]}
+
+    def rank(inputs, package, **kwargs):
+        rows = [{'id': identity, 'name': f'{name} Tract {index}', 'opportunity': score, 'inverse_walkability': access}
+                for index, (identity, name, score, access) in enumerate(tracts, 1)]
+        rows.sort(key=lambda row: row[inputs.sort_by] if row[inputs.sort_by] is not None else -1, reverse=True)
+        return rows, {'ranking_mode': 'screening'}, {'status': 'available'}
+
+    def dossier(inputs, package, rows, survival, access, **kwargs):
+        return {'sites': [{**row, 'evidence': []} for row in rows]}
+
+    monkeypatch.setattr(module, 'integrated_package', lambda: package)
+    monkeypatch.setattr(module, 'rank_locations', rank)
+    monkeypatch.setattr(module, 'decision_lab_dossier', dossier)
+    with module.app.test_client() as client, patch('site_advisor._request') as inference:
+        def ask(message, context=None, *, sort='opportunity'):
+            response = client.post(f'/api/site-brief/chat?borough=Queens&sort_by={sort}',
+                                   json={'message': message, 'context': context})
+            assert response.status_code == 200
+            return response.get_json()
+
+        yield ask
+        inference.assert_not_called()
+
+
+def test_neighborhood_comparison_remembers_its_shortlist(neighborhood_chat):
+    compare = neighborhood_chat('Compare Astoria and Long Island City.')
+    groups = compare['area_comparison']['groups']
+    assert [(group['scored_count'], group['median_score']) for group in groups] == [(2, 65), (2, 60)]
+    assert [card['id'] for card in compare['cards']] == ['36081000001', '36081000003']
+    first = neighborhood_chat('Why the first one?', compare['context'])
+    second = neighborhood_chat('Why the second one?', first['context'])
+    assert second['cards'][0]['id'] == compare['cards'][1]['id']
+    assert '36081000003' in second['cards'][0]['actions'][0]['prompt']
+
+
+def test_neighborhood_what_if_retains_scope_and_comparison_preserves_missing_scores(neighborhood_chat):
+    first = neighborhood_chat('Where should I look in Astoria?')
+    revised = neighborhood_chat('What if I switch to lunch?', first['context'])
+    assert revised['scope'].startswith('Astoria · Queens')
+    assert [card['id'] for card in revised['cards']] == ['36081000001', '36081000002']
+    broadened = neighborhood_chat('Where should I look in Queens?', revised['context'])
+    assert broadened['cards'][0]['id'] == '36081000005'
+    access = neighborhood_chat('Compare Astoria and Long Island City.', sort='inverse_walkability')
+    assert access['area_comparison']['groups'][1]['scored_count'] == 0
+    assert access['area_comparison']['groups'][1]['median_score'] is None
+    assert len(access['cards']) == 1
+    assert 'Long Island City had no scored tracts' in access['answer']
+
+
+def test_neighborhood_scenario_keeps_both_groups_and_undo_restores_them(neighborhood_chat):
+    comparison = neighborhood_chat('Compare Astoria and Long Island City.')
+    preview = neighborhood_chat('What if I charge $50 per guest?', comparison['context'])
+    assert preview['preview'] is True
+    groups = preview['scenario']['groups']
+    assert [group['label'] for group in groups] == ['Astoria', 'Long Island City']
+    assert [(group['before']['median_score'], group['after']['median_score']) for group in groups] == [(65, 65), (60, 60)]
+    assert [card['id'] for card in preview['cards']] == [card['id'] for card in comparison['cards']]
+    assert 'Astoria: median score 65 → 65' in preview['answer']
+    discarded = neighborhood_chat('Discard this preview.', preview['context'])
+    assert not discarded['preview'] and '$35 per guest' in discarded['scope']
+    assert discarded['scope'].startswith('Astoria + Long Island City')
+    assert [card['id'] for card in discarded['cards']] == [card['id'] for card in comparison['cards']]
+
+
+@pytest.fixture
+def scenario_chat(monkeypatch):
+    import app as module
+
+    ids = [f'3608100000{index}' for index in range(1, 5)]
+    package = {'data_release': 'Fixture', 'release_id': 'v1', 'tracts': [
+        {'geoid': identity, 'borough': 'Queens', 'nta_name': 'Elmhurst', 'tract_label': index}
+        for index, identity in enumerate(ids, 1)
+    ]}
+    calls = []
+
+    def rank(inputs, package, **kwargs):
+        check = inputs.concept.average_check
+        calls.append((check, inputs.concept.daypart, inputs.borough, inputs.rent_cap))
+        scores = [90, 80, 70, 60] if check == 35 else [90, 80, 70, 75] if check < 60 else [90, 80, 80, 80]
+        rows = [{'id': identity, 'name': f'Elmhurst Tract {index}', 'opportunity': score,
+                 'inverse_walkability': 90 - index if index <= 2 else None,
+                 'score_components': [{'key': 'fit', 'label': 'Customer fit', 'score': check, 'coverage': 100},
+                                      {'key': 'rent', 'label': 'Rent', 'score': check, 'coverage': 0}]}
+                for index, (identity, score) in enumerate(zip(ids, scores), 1)]
+        rows.sort(key=lambda row: row[inputs.sort_by] if row[inputs.sort_by] is not None else -1, reverse=True)
+        return rows, {'ranking_mode': 'screening'}, {'status': 'available'}
+
+    monkeypatch.setattr(module, 'integrated_package', lambda: package)
+    monkeypatch.setattr(module, 'rank_locations', rank)
+    monkeypatch.setattr(module, 'decision_lab_dossier', lambda inputs, package, rows, *args, **kwargs:
+                        {'sites': [{**row, 'evidence': []} for row in rows]})
+    with module.app.test_client() as client, patch('site_advisor._request') as inference:
+        def ask(message, context=None, *, query=''):
+            response = client.post('/api/site-brief/chat' + query, json={'message': message, 'context': context})
+            assert response.status_code == 200, response.get_json()
+            return response.get_json()
+        yield ask, calls, package
+        inference.assert_not_called()
+
+
+def test_exact_tract_scenario_reports_own_score_rank_and_supported_factors(scenario_chat):
+    ask, _, _ = scenario_chat
+    preview = ask('What if I charge $50 per guest for tract 36081000004?')
+    assert len(preview['cards']) == 1
+    target, = preview['scenario']['targets']
+    assert target['id'] == '36081000004' and target['score_delta'] == 15
+    assert (target['before']['rank_min'], target['after']['rank_min']) == (4, 3)
+    assert target['factors'] == [{'key': 'fit', 'label': 'Customer fit', 'before': 35, 'after': 50,
+                                  'delta': 15, 'coverage_changed': False}]
+    assert 'Elmhurst Tract 4: score 60 → 75; rank 4 → rank 3.' in preview['answer']
+    assert 'joins the set' not in preview['answer']
+    followup = ask('Why the first one?', preview['context'])
+    assert followup['preview'] and '$50 per guest' in followup['scope']
+    tied = ask('What if I charge $60 per guest there?', followup['context'])
+    target, = tied['scenario']['targets']
+    assert (target['after']['rank_min'], target['after']['rank_max']) == (2, 4)
+    assert tied['scenario']['before_label'] == '$35 per guest, all day'
+    assert 'tied ranks 2–4' in tied['answer']
+
+
+def test_preview_apply_and_undo_are_separate_from_followup_questions(scenario_chat):
+    ask, calls, _ = scenario_chat
+    baseline = ask('Where should I look in Queens?')
+    preview = ask('What if I charge $50 per guest?', baseline['context'])
+    assert [action['label'] for action in preview['actions'][:2]] == ['Apply scenario', 'Discard preview']
+    applied = ask('Apply this scenario.', preview['context'])
+    assert not applied['preview'] and '$50 per guest' in applied['scope']
+    assert applied['answer'].startswith('Scenario applied')
+    assert applied['actions'][0]['label'] == 'Undo applied scenario'
+    explained = ask('Why the first one?', applied['context'])
+    assert calls[-1][:2] == (50, 'all_day')
+    undone = ask('Undo the applied scenario.', explained['context'])
+    assert not undone['preview'] and '$35 per guest' in undone['scope']
+    assert [card['id'] for card in undone['cards']] == [card['id'] for card in baseline['cards']]
+    assert calls[-1][:2] == (35, 'all_day')
+    count = len(calls)
+    repeated = ask('Undo', undone['context'])
+    assert 'no applied scenario' in repeated['answer'] and len(calls) == count
+
+
+def test_repeated_preview_discard_clarification_and_new_search_use_applied_baseline(scenario_chat):
+    ask, calls, _ = scenario_chat
+    first = ask('Where should I look for an Italian restaurant in Queens?')
+    preview = ask('What if I charge $50 per guest?', first['context'])
+    clarified = ask('Where should I look for Italian or Thai?', preview['context'])
+    assert clarified['preview'] and clarified['actions'][0]['label'] == 'Apply scenario'
+    lunch = ask('What if I switch to lunch?', clarified['context'])
+    assert '$50 per guest, lunch' in lunch['scope']
+    assert lunch['scenario']['before_label'] == '$35 per guest, all day'
+    discarded = ask('Undo', lunch['context'])
+    assert not discarded['preview'] and '$35 per guest, all day' in discarded['scope']
+    assert discarded['scope'].startswith('Queens · Italian')
+    preview = ask('What if I charge $60 per guest?', discarded['context'])
+    new_search = ask('Where should I look in Brooklyn?', preview['context'])
+    assert not new_search['preview'] and '$35 per guest' in new_search['scope']
+    assert calls[-1][:3] == (35, 'all_day', 'Brooklyn')
+
+
+def test_rent_hypothetical_does_not_persist_paired_guest_spend(scenario_chat):
+    ask, calls, _ = scenario_chat
+    first = ask('Where should I look in Queens?')
+    rent = ask('What if rent is $9,000 and I charge $50 per guest?', first['context'])
+    assert 'only to this rent calculation' in rent['answer']
+    assert '$50 per guest' in rent['scope']
+    followup = ask('Why the first one?', rent['context'])
+    assert '$35 per guest' in followup['scope'] and not followup['preview']
+    assert calls[-1][0] == 35
+
+
+def test_discarding_second_preview_preserves_undo_and_original_shortlist_positions(scenario_chat):
+    ask, _, _ = scenario_chat
+    baseline = ask('Where should I look in Queens?')
+    why = ask('Why the first one?', baseline['context'])
+    preview = ask('What if I charge $50 per guest?', why['context'])
+    discarded = ask('Discard preview', preview['context'])
+    second = ask('Why the second one?', discarded['context'])
+    assert second['cards'][0]['id'] == baseline['cards'][1]['id']
+    preview = ask('What if I charge $50 per guest?', baseline['context'])
+    applied = ask('Apply scenario', preview['context'])
+    next_preview = ask('What if I charge $60 per guest?', applied['context'])
+    assert next_preview['scenario']['before_label'] == '$50 per guest, all day'
+    discarded = ask('Discard preview', next_preview['context'])
+    assert '$50 per guest' in discarded['scope']
+    assert discarded['actions'][0]['label'] == 'Undo applied scenario'
+    undone = ask('Undo applied scenario', discarded['context'])
+    assert '$35 per guest' in undone['scope']
+
+
+def test_temporary_rent_calculation_cannot_apply_an_earlier_unrelated_preview(scenario_chat):
+    ask, _, _ = scenario_chat
+    preview = ask('What if I charge $45 per guest?')
+    rent = ask('What if rent is $9,000 and I charge $60 per guest?', preview['context'])
+    assert rent['temporary_calculation'] and not rent['preview']
+    assert not any(action['label'] == 'Apply scenario' for action in rent['actions'])
+    blocked = ask('Apply this scenario.', rent['context'])
+    assert 'temporary calculations' in blocked['answer']
+    followup = ask('Why the first one?', blocked['context'])
+    assert followup['preview'] and '$45 per guest' in followup['scope']
+    applied = ask('Apply this scenario.', followup['context'])
+    assert not applied['preview'] and '$45 per guest' in applied['scope']
+
+
+def test_missing_target_scores_are_not_invented_and_stale_preview_cannot_apply(scenario_chat):
+    ask, _, package = scenario_chat
+    missing = ask('What if I charge $50 per guest for tract 36081000004?', query='?sort_by=inverse_walkability')
+    target, = missing['scenario']['targets']
+    assert target['before']['status'] == target['after']['status'] == 'missing_score'
+    assert target['score_delta'] is None and not target['factors']
+    assert 'lacks a comparable score' in missing['answer']
+    import app as module
+    package['release_id'] = 'v2'
+    with module.app.test_client() as client:
+        stale = client.post('/api/site-brief/chat?sort_by=inverse_walkability',
+                            json={'message': 'Apply this scenario.', 'context': missing['context']})
+        assert stale.status_code == 409
+
+
+def test_unavailable_scenario_controls_do_not_change_settings_or_rank(scenario_chat):
+    ask, calls, _ = scenario_chat
+    for question in ['Apply this scenario.', 'Discard this preview.', 'Undo']:
+        response = ask(question)
+        assert not response['preview'] and not response['cards']
+        assert 'There is no' in response['answer']
+    assert calls == []
 
 
 def test_explains_entrant_from_beyond_dashboard_display_cutoff(dashboard):

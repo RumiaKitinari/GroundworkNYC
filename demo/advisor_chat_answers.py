@@ -175,17 +175,39 @@ def _scenario_text(scenario):
         return "Give me a guest spend or trading period to compare against the current assumptions."
     before, after = scenario.get("before_label"), scenario.get("after_label")
     if before and before == after:
-        return "That repeats the current assumptions. Give me a different spend or trading period to test."
+        return "The guest spend and trading period match the comparison baseline. Choose a different spend or period to test."
     context = f"Comparing {before} with {after}. " if before and after else ""
     if scenario.get("comparison_unavailable"):
         return f"{context}Comparable rankings are unavailable for these scenarios with the selected method."
     if scenario.get("inert"):
         return f"{context}The selected ranking method is insensitive to this input. Use a ranking method that incorporates it to assess the change."
+    details = []
+    if scenario.get("targeted"):
+        for target in scenario.get("targets", []):
+            left, right = target["before"], target["after"]
+            if left["status"] != "ranked" or right["status"] != "ranked":
+                details.append(f"{target['name']} lacks a comparable score in one of these runs.")
+                continue
+            def rank_label(result):
+                low, high = result["rank_min"], result["rank_max"]
+                return f"rank {low}" if low == high else f"tied ranks {low}–{high}"
+            details.append(f"{target['name']}: score {_number(left['score'])} → {_number(right['score'])}; "
+                           f"{rank_label(left)} → {rank_label(right)}.")
+        if details:
+            details.append("Ranks are within this conversation’s scored tracts and can change when other tracts’ scores change.")
+    elif scenario.get("groups"):
+        for group in scenario["groups"]:
+            left, right = group["before"], group["after"]
+            if left["median_score"] is None or right["median_score"] is None:
+                details.append(f"{group['label']} lacks a comparable median in one of these runs.")
+            else:
+                details.append(f"{group['label']}: median score {_number(left['median_score'])} → {_number(right['median_score'])} "
+                               f"across {left['scored_count']} → {right['scored_count']} scored tracts.")
     entrants, departures = scenario.get("entrants") or [], scenario.get("departures") or []
-    changes = []
-    if entrants:
+    changes = list(details)
+    if entrants and not details:
         changes.append(f"{_names(entrants)} {'joins' if len(entrants) == 1 else 'join'} the set that can make the top three by score.")
-    if departures:
+    if departures and not details:
         changes.append(f"{_names(departures)} {'leaves' if len(departures) == 1 else 'leave'} that top-three set.")
     if not changes:
         changes.append("The comparison found no top-three membership change among tracts scored in both scenarios.")
@@ -194,9 +216,26 @@ def _scenario_text(scenario):
             changes.append("The displayed order changed.")
     if scenario.get("tied_cutoff"):
         changes.append("At least one scenario has a tie spanning third place.")
+    if scenario.get("coverage_changed"):
+        changes.append("The set of scored tracts changed; differences also reflect that coverage change.")
     if scenario.get("matched") is False and before and after:
         changes.append("Guest spend and trading period changed together. Test one at a time to isolate each effect.")
     return f"{context}{' '.join(changes)}"
+
+
+def compose_area_answer(groups, cards, *, topic, ranking_basis):
+    """Describe coverage and medians on the shared score basis."""
+    left, right = groups
+    if not all(group["scored_count"] for group in groups):
+        unavailable = _names(group["label"] for group in groups if not group["scored_count"])
+        return f"I can’t compare {ranking_basis} medians because {unavailable} had no scored tracts in this search."
+    if topic in _TOPIC_FACTS and topic != "general":
+        return "Here is the evidence for the leading scored tract in each area. " + _evidence_text(cards, topic, ranking_basis)
+    left_score = _number(left["median_score"])
+    right_score = _number(right["median_score"])
+    return (f"Among scored tracts, the median {ranking_basis} is {left_score} in {left['label']} "
+            f"and {right_score} in {right['label']}. The cards show the leading scored tract in each area. "
+            "Use the coverage and score ranges to see what each median represents.")
 
 
 def compose_answer(intent, topic, cards, *, ranking_basis, finance=None, scenario=None):
